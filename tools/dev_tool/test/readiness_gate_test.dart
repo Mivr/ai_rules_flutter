@@ -67,7 +67,7 @@ void main() {
           return {'message': 'Hot reload successful'};
         }
 
-        final pending = handler();
+        final Future<Map<String, dynamic>> pending = handler();
         var settled = false;
         unawaited(pending.then((_) => settled = true));
 
@@ -90,7 +90,7 @@ void main() {
         return {'message': 'Hot reload successful'};
       }
 
-      final pending = handler();
+      final Future<Map<String, dynamic>> pending = handler();
       gate.signalUnavailable('No frontend server available');
       expect(await pending, {'error': 'No frontend server available'});
     });

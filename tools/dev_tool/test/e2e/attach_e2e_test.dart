@@ -11,6 +11,8 @@ import 'dev_tool_e2e_harness.dart';
 import 'editable_workspace.dart';
 import '../zip_fixture.dart';
 
+typedef _AttachedApp = ({Process process, String vmServiceUri});
+
 /// `flutter_bazel attach` against an app this test launches itself.
 ///
 /// The app has to be started outside the dev tool — attaching to a process it
@@ -30,7 +32,7 @@ void main() {
       EditableWorkspace ws, {
       List<String> buildArgs = const [],
     }) async {
-      final build = await Process.run('bazel', [
+      final ProcessResult build = await Process.run('bazel', [
         'build',
         ':app',
         '-c',
@@ -39,7 +41,9 @@ void main() {
       ], workingDirectory: ws.root);
       expect(build.exitCode, 0, reason: 'bazel build failed: ${build.stderr}');
 
-      final tmpDir = await Directory.systemTemp.createTemp('attach_e2e_');
+      final Directory tmpDir = await Directory.systemTemp.createTemp(
+        'attach_e2e_',
+      );
       addTearDown(() async {
         if (tmpDir.existsSync()) await tmpDir.delete(recursive: true);
       });
@@ -47,16 +51,18 @@ void main() {
         zipPath: '${ws.root}/bazel-bin/app.zip',
         destDir: tmpDir,
       );
-      final apps = tmpDir.listSync().where((e) => e.path.endsWith('.app'));
+      final Iterable<FileSystemEntity> apps = tmpDir.listSync().where(
+        (e) => e.path.endsWith('.app'),
+      );
       expect(apps, isNotEmpty, reason: 'No .app found in app.zip');
 
-      final appPath = apps.first.path;
-      final bundleName = appPath.split('/').last.replaceAll('.app', '');
+      final String appPath = apps.first.path;
+      final String bundleName = appPath.split('/').last.replaceAll('.app', '');
       // Bound rather than followed by an `addTearDown`: the bazel build above
       // takes minutes, and a timeout during it leaves this frame running with
       // the test's teardowns already done — the app would launch onto the
       // screen with nothing left to close it.
-      final process = await spawnBoundToTest(
+      final Process process = await spawnBoundToTest(
         spawn: () => Process.start(
           '$appPath/Contents/MacOS/$bundleName',
           [],
@@ -76,7 +82,7 @@ void main() {
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .listen((line) {
-            final match = uriPattern.firstMatch(line);
+            final RegExpMatch? match = uriPattern.firstMatch(line);
             if (match != null && !announced.isCompleted) {
               announced.complete(match.group(1)!);
             }
@@ -93,10 +99,10 @@ void main() {
     test(
       'attaches to a running app and reports its VM service',
       () async {
-        final ws = await editableWorkspace('macos_example');
-        final app = await launchAppDirectly(ws);
+        final EditableWorkspace ws = await editableWorkspace('macos_example');
+        final _AttachedApp app = await launchAppDirectly(ws);
 
-        final dt = await attachDevTool(
+        final DevToolProcess dt = await attachDevTool(
           workspace: ws.root,
           target: ':app',
           debugUrl: app.vmServiceUri,
@@ -104,7 +110,7 @@ void main() {
 
         // `app.debugPort` is the event that can only be emitted after
         // `vmClient.connect` returned, so it — not a log line — is the proof.
-        final debugPort = await dt.waitForEvent(
+        final Map<String, dynamic> debugPort = await dt.waitForEvent(
           'app.debugPort',
           timeout: const Duration(minutes: 4),
         );
@@ -130,36 +136,36 @@ void main() {
     test(
       'drives a hot reload that keeps the app’s own dart defines',
       () async {
-        final ws = await editableWorkspace('macos_example');
-        final appMain = ws.file('lib/main.dart');
-        final appMainOrig = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('macos_example');
+        final File appMain = ws.file('lib/main.dart');
+        final String appMainOrig = appMain.readAsStringSync();
         expect(
           appMainOrig,
           contains(" v1'"),
           reason: 'fixture marker present in macos_example main.dart',
         );
 
-        final app = await launchAppDirectly(
+        final _AttachedApp app = await launchAppDirectly(
           ws,
           buildArgs: const [
             '--@rules_flutter//flutter:extra_dart_defines=E2E_MESSAGE=defines,live',
           ],
         );
-        final dt = await attachDevTool(
+        final DevToolProcess dt = await attachDevTool(
           workspace: ws.root,
           target: ':app',
           debugUrl: app.vmServiceUri,
         );
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(minutes: 4),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 90));
 
         // Also the only place the agent surface is exercised over attach: an
         // attached app has to be readable at all.
-        var label = await dt.httpCommand('app.getText', {
+        Map<String, dynamic> label = await dt.httpCommand('app.getText', {
           'appId': appId,
           'key': 'e2e_define_label',
         });
@@ -172,7 +178,7 @@ void main() {
         );
 
         appMain.writeAsStringSync(appMainOrig.replaceFirst(" v1'", " v2'"));
-        final reload = await dt.sendCommand(
+        final Map<String, dynamic> reload = await dt.sendCommand(
           1,
           'app.hotReload',
           params: {'appId': appId},
@@ -212,32 +218,35 @@ void main() {
     test(
       'drives a hot restart that re-runs main()',
       () async {
-        final ws = await editableWorkspace('macos_example');
-        final appMain = ws.file('lib/main.dart');
-        final appMainOrig = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('macos_example');
+        final File appMain = ws.file('lib/main.dart');
+        final String appMainOrig = appMain.readAsStringSync();
         expect(
           appMainOrig,
           contains('add(3, 4)'),
           reason: 'fixture marker present in macos_example main.dart',
         );
 
-        final app = await launchAppDirectly(ws);
-        final dt = await attachDevTool(
+        final _AttachedApp app = await launchAppDirectly(ws);
+        final DevToolProcess dt = await attachDevTool(
           workspace: ws.root,
           target: ':app',
           debugUrl: app.vmServiceUri,
         );
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(minutes: 4),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 90));
 
-        final before = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'text': '3 + 4 = 7',
-        });
+        final Map<String, dynamic> before = await dt.httpCommand(
+          'app.waitFor',
+          {
+            'appId': appId,
+            'text': '3 + 4 = 7',
+          },
+        );
         expect(
           before['error'],
           isNull,
@@ -247,7 +256,7 @@ void main() {
         appMain.writeAsStringSync(
           appMainOrig.replaceFirst('add(3, 4)', 'add(30, 4)'),
         );
-        final restart = await dt.sendCommand(
+        final Map<String, dynamic> restart = await dt.sendCommand(
           1,
           'app.restart',
           params: {'appId': appId},
@@ -269,7 +278,7 @@ void main() {
         // call also proves the agent surface came back with the fresh isolate —
         // the engine's pre-main registrant hook runs against the dill attach's
         // own frontend server produced.
-        final after = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> after = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'text': '3 + 4 = 34',
         });
@@ -295,10 +304,10 @@ void main() {
     test(
       'exits when the app it attached to goes away',
       () async {
-        final ws = await editableWorkspace('macos_example');
-        final app = await launchAppDirectly(ws);
+        final EditableWorkspace ws = await editableWorkspace('macos_example');
+        final _AttachedApp app = await launchAppDirectly(ws);
 
-        final dt = await attachDevTool(
+        final DevToolProcess dt = await attachDevTool(
           workspace: ws.root,
           target: ':app',
           debugUrl: app.vmServiceUri,
@@ -317,7 +326,7 @@ void main() {
         app.process.kill();
         await app.process.exitCode;
 
-        final code = await dt.exitCodeWithin(
+        final int code = await dt.exitCodeWithin(
           const Duration(seconds: 60),
           stillRunning:
               'the app attach was connected to exited, and attach did not. '
@@ -351,10 +360,10 @@ void main() {
     test(
       'exits the same way when the app goes away mid-assembly',
       () async {
-        final ws = await editableWorkspace('macos_example');
-        final app = await launchAppDirectly(ws);
+        final EditableWorkspace ws = await editableWorkspace('macos_example');
+        final _AttachedApp app = await launchAppDirectly(ws);
 
-        final dt = await attachDevTool(
+        final DevToolProcess dt = await attachDevTool(
           workspace: ws.root,
           target: ':app',
           debugUrl: app.vmServiceUri,
@@ -369,7 +378,7 @@ void main() {
         app.process.kill();
         await app.process.exitCode;
 
-        final code = await dt.exitCodeWithin(
+        final int code = await dt.exitCodeWithin(
           const Duration(seconds: 120),
           stillRunning: 'the app died during assembly and attach did not exit',
         );
@@ -381,7 +390,7 @@ void main() {
               'failing — whichever side of assembly it lands on',
         );
 
-        final stderr = dt.stderrLines.join('\n');
+        final String stderr = dt.stderrLines.join('\n');
         expect(
           stderr,
           contains('attached_app_gone'),
@@ -411,10 +420,10 @@ void main() {
     test(
       'daemon.shutdown ends the process, not just the session',
       () async {
-        final ws = await editableWorkspace('macos_example');
-        final app = await launchAppDirectly(ws);
+        final EditableWorkspace ws = await editableWorkspace('macos_example');
+        final _AttachedApp app = await launchAppDirectly(ws);
 
-        final dt = await attachDevTool(
+        final DevToolProcess dt = await attachDevTool(
           workspace: ws.root,
           target: ':app',
           debugUrl: app.vmServiceUri,
@@ -424,10 +433,13 @@ void main() {
           'app.started',
           timeout: const Duration(minutes: 4),
         );
-        final response = await dt.sendCommand(1, 'daemon.shutdown');
+        final Map<String, dynamic> response = await dt.sendCommand(
+          1,
+          'daemon.shutdown',
+        );
         expect(response['result']?['message'], 'shutdown');
 
-        final code = await dt.exitCodeWithin(
+        final int code = await dt.exitCodeWithin(
           const Duration(seconds: 30),
           stillRunning:
               'daemon.shutdown was answered but the attach process did not '
@@ -664,7 +676,7 @@ Future<String> _launchSimulatorAppDirectly(EditableWorkspace ws) async {
 
 /// Whether [process] is still running, decided without waiting on it.
 Future<bool> _isAlive(Process process) async {
-  final exited = await process.exitCode.timeout(
+  final int exited = await process.exitCode.timeout(
     const Duration(milliseconds: 200),
     onTimeout: () => -999,
   );

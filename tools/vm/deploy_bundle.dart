@@ -34,10 +34,10 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
-  final vmName = args[0];
-  final bundlePath = args[1];
-  final isWindows = args.contains('--windows');
-  final titleFlag = args.indexOf('--title');
+  final String vmName = args[0];
+  final String bundlePath = args[1];
+  final bool isWindows = args.contains('--windows');
+  final int titleFlag = args.indexOf('--title');
   if (titleFlag >= 0 && titleFlag + 1 >= args.length) {
     stderr.writeln('--title needs a value');
     exit(1);
@@ -48,8 +48,8 @@ Future<void> main(List<String> args) async {
     exit(1);
   }
 
-  final appName = Uri.parse(bundlePath).pathSegments.last;
-  final title = titleFlag >= 0 ? args[titleFlag + 1] : appName;
+  final String appName = Uri.parse(bundlePath).pathSegments.last;
+  final String title = titleFlag >= 0 ? args[titleFlag + 1] : appName;
 
   print('Deploying $appName to $vmName ...');
 
@@ -67,14 +67,14 @@ Future<void> _deployLinux(
   String title,
 ) async {
   // Determine project root (for verification scripts).
-  final scriptDir = Platform.script.resolve('.').toFilePath();
-  final projectRoot = Directory(
+  final String scriptDir = Platform.script.resolve('.').toFilePath();
+  final String projectRoot = Directory(
     scriptDir,
   ).parent.parent.path; // tools/vm/ -> project root
 
   // Copy bundle to a temp dir (Bazel tree artifacts are read-only).
   print('Preparing bundle for upload ...');
-  final tmpDir = Directory.systemTemp.createTempSync('deploy_');
+  final Directory tmpDir = Directory.systemTemp.createTempSync('deploy_');
   final tmpBundle = '${tmpDir.path}/$appName';
   await Process.run('cp', ['-RL', bundlePath, tmpBundle]);
   await Process.run('chmod', ['-R', 'u+rwX', tmpBundle]);
@@ -92,7 +92,9 @@ Future<void> _deployLinux(
   print('Uploading verification scripts ...');
   await sshRun(vmName, 'rm -rf ~/verify_scripts; mkdir -p ~/verify_scripts');
   // SCP individual files to avoid nested directory issues.
-  for (final file in Directory('$projectRoot/e2e/_linux_test').listSync()) {
+  for (final FileSystemEntity file in Directory(
+    '$projectRoot/e2e/_linux_test',
+  ).listSync()) {
     if (file is File) {
       await scpToVm(vmName, file.path, '~/verify_scripts/');
     }
@@ -102,16 +104,17 @@ Future<void> _deployLinux(
   print('');
   print('Running visual verification ...');
   try {
-    final output = await sshRun(
+    final String output = await sshRun(
       vmName,
       'bash -c \'export PATH="/opt/dart-sdk/bin:/usr/local/bin:\$PATH" && dart run ~/verify_scripts/verify_linux_app.dart ~/$appName ${_quoteForBashC(title)}\'',
     );
     print(output);
 
     // Download screenshot if available.
-    final screenshotMatch = RegExp(r'Screenshot: (/\S+)').firstMatch(output);
+    final RegExpMatch? screenshotMatch = RegExp(r'Screenshot: (/\S+)')
+        .firstMatch(output);
     if (screenshotMatch != null) {
-      final remotePath = screenshotMatch.group(1)!;
+      final String remotePath = screenshotMatch.group(1)!;
       final localPath = '/tmp/${appName}_screenshot.png';
       try {
         await scpFromVm(vmName, remotePath, localPath);
@@ -132,16 +135,16 @@ Future<void> _deployWindows(
   String bundlePath,
   String appName,
 ) async {
-  final scriptDir = Platform.script.resolve('.').toFilePath();
-  final projectRoot = Directory(scriptDir).parent.parent.path;
+  final String scriptDir = Platform.script.resolve('.').toFilePath();
+  final String projectRoot = Directory(scriptDir).parent.parent.path;
 
   await _ensureWindowsReady(vmName);
-  final sessionId = await _discoverWindowsSession(vmName);
+  final String sessionId = await _discoverWindowsSession(vmName);
   print('VM ready. Interactive session $sessionId confirmed.');
 
   // Copy bundle to a temp dir (Bazel tree artifacts are symlinks / read-only).
   print('Preparing bundle for upload ...');
-  final tmpDir = Directory.systemTemp.createTempSync('deploy_');
+  final Directory tmpDir = Directory.systemTemp.createTempSync('deploy_');
   final tmpBundle = '${tmpDir.path}/$appName';
   await Process.run('cp', ['-RL', bundlePath, tmpBundle]);
 
@@ -151,8 +154,8 @@ Future<void> _deployWindows(
     tmpDir.deleteSync(recursive: true);
   }
 
-  final pythonPath = await _discoverWindowsPython(vmName);
-  final exeName = await _discoverWindowsExe(vmName, appName);
+  final String pythonPath = await _discoverWindowsPython(vmName);
+  final String exeName = await _discoverWindowsExe(vmName, appName);
   await _captureWindowsScreenshot(
     vmName,
     sessionId,
@@ -167,7 +170,7 @@ Future<void> _ensureWindowsReady(String vmName) async {
   // Check that the startup script has finished installing tools.
   print('Checking VM readiness ...');
   try {
-    final status = await sshRun(vmName, 'type C:\\startup_complete.txt');
+    final String status = await sshRun(vmName, 'type C:\\startup_complete.txt');
     if (!status.contains('STARTUP_COMPLETE')) {
       throw Exception('unexpected content');
     }
@@ -185,8 +188,8 @@ Future<void> _ensureWindowsReady(String vmName) async {
 Future<String> _discoverWindowsSession(String vmName) async {
   // Verify the auto-logon interactive session and get the session ID.
   // query user returns exit code 1 even on success — force exit 0.
-  final sessions = await sshRun(vmName, 'query user & exit /b 0');
-  final sessionId = parseWindowsSessionId(sessions);
+  final String sessions = await sshRun(vmName, 'query user & exit /b 0');
+  final String? sessionId = parseWindowsSessionId(sessions);
   if (sessionId == null) {
     stderr.writeln('ERROR: No active interactive session for testuser.');
     stderr.writeln('Session output:\n$sessions');
@@ -231,7 +234,7 @@ Future<void> _uploadWindowsBundle(
 /// Returns the VM's Python install directory, failing out when absent.
 Future<String> _discoverWindowsPython(String vmName) async {
   // Discover Python path.
-  final pythonPath = (await sshRun(
+  final String pythonPath = (await sshRun(
     vmName,
     'powershell -Command "(Get-ChildItem C:\\Python* -Directory | Select-Object -First 1).FullName"',
   )).trim();
@@ -246,11 +249,11 @@ Future<String> _discoverWindowsPython(String vmName) async {
 /// Returns the app executable name inside the uploaded bundle.
 Future<String> _discoverWindowsExe(String vmName, String appName) async {
   // Find the app executable inside the bundle.
-  final exeList = await sshRun(
+  final String exeList = await sshRun(
     vmName,
     'powershell -Command "Get-ChildItem C:\\temp\\$appName\\*.exe | Select-Object -ExpandProperty Name"',
   );
-  final exeName = parseWindowsExeName(exeList);
+  final String exeName = parseWindowsExeName(exeList);
   if (exeName.isEmpty || !exeName.endsWith('.exe')) {
     stderr.writeln('ERROR: No .exe found in C:\\temp\\$appName\\');
     exit(1);
@@ -302,7 +305,7 @@ Future<void> _captureWindowsScreenshot(
 
   // Read the captured output.
   try {
-    final output = await sshRun(vmName, 'type $outputRemotePath');
+    final String output = await sshRun(vmName, 'type $outputRemotePath');
     print(output);
 
     if (output.contains('PASS')) {
@@ -332,7 +335,7 @@ Future<void> _captureWindowsScreenshot(
 /// Double quotes keep the inner shell from splitting or expanding it; a
 /// single quote closes and reopens the outer quoting.
 String _quoteForBashC(String value) {
-  final inner = value.replaceAllMapped(
+  final String inner = value.replaceAllMapped(
     RegExp(r'[\\"$`]'),
     (m) => '\\${m[0]}',
   );

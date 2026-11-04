@@ -25,14 +25,14 @@ void main() {
     test(
       'keeps the control channel, and the relaunched app answers on it',
       () async {
-        final ws = await editableWorkspace('ffi_example');
+        final EditableWorkspace ws = await editableWorkspace('ffi_example');
         // `mul` is bundled as a loose dylib (the `native_deps` contract), so a
         // change here is what makes the rebuilt bundle's fingerprint differ.
-        final mulSource = ws.file('native/mul.c');
-        final original = mulSource.readAsStringSync();
+        final File mulSource = ws.file('native/mul.c');
+        final String original = mulSource.readAsStringSync();
         expect(original, contains('return a * b;'), reason: 'fixture marker');
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':ffi_macos',
           device: 'macos',
@@ -59,16 +59,19 @@ void main() {
             '${dt.nonProtocolStdoutLines.join('\n')}',
           );
         }
-        final appId = dt.appId!;
+        final String appId = dt.appId!;
         await dt.waitForHttpControl();
-        final before = await dt.httpLogs(appId);
+        final Map<String, dynamic> before = await dt.httpLogs(appId);
         expect(before['launch'], 1);
 
         mulSource.writeAsStringSync(
           original.replaceFirst('return a * b;', 'return a * b + 1;'),
         );
 
-        final restart = await dt.httpCommand('app.restart', {'appId': appId});
+        final Map<String, dynamic> restart = await dt.httpCommand(
+          'app.restart',
+          {'appId': appId},
+        );
         final result = restart['result'] as Map<String, dynamic>?;
         expect(result, isNotNull, reason: 'app.restart: ${restart['error']}');
         expect(
@@ -105,9 +108,12 @@ void main() {
 
         // The whole point: the same channel, on the same port, still answers —
         // and answers about the process that replaced the one it just killed.
-        final tree = await dt.httpCommand('app.dumpWidgetTree', {
-          'appId': appId,
-        });
+        final Map<String, dynamic> tree = await dt.httpCommand(
+          'app.dumpWidgetTree',
+          {
+            'appId': appId,
+          },
+        );
         expect(
           tree['error'],
           isNull,
@@ -115,11 +121,14 @@ void main() {
         );
 
         // The app rebuilt against the edited C: 3 * 4 is now reported as 13.
-        final rendered = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'text': '3 + 4 = 7\n3 × 4 = 13\nsqlite3 ${_sqliteVersion(tree)}',
-          'timeoutMs': '15000',
-        });
+        final Map<String, dynamic> rendered = await dt.httpCommand(
+          'app.waitFor',
+          {
+            'appId': appId,
+            'text': '3 + 4 = 7\n3 × 4 = 13\nsqlite3 ${_sqliteVersion(tree)}',
+            'timeoutMs': '15000',
+          },
+        );
         expect(
           rendered['error'],
           isNull,
@@ -129,7 +138,7 @@ void main() {
         );
 
         // Cursors do not survive the swap; `launch` is how a poller finds out.
-        final after = await dt.httpLogs(
+        final Map<String, dynamic> after = await dt.httpLogs(
           appId,
           since: before['nextCursor'] as int,
         );
@@ -143,7 +152,7 @@ void main() {
 /// The sqlite3 version the app rendered, read out of the widget-tree dump so
 /// the expected label can be matched exactly without pinning a version.
 String _sqliteVersion(Map<String, dynamic> tree) {
-  final match = RegExp(
+  final RegExpMatch? match = RegExp(
     r'sqlite3 ([0-9.]+)',
   ).firstMatch(tree['result'].toString());
   expect(match, isNotNull, reason: 'widget tree should show the sqlite label');

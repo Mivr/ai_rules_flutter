@@ -111,8 +111,8 @@ splitWorkerArgv(List<String> argvWithMarker) {
       'incr_fkc_worker: missing required --declared-inputs <manifest>.',
     );
   }
-  final manifestPath = argv[i + 1];
-  final j = argv.indexOf('--');
+  final String manifestPath = argv[i + 1];
+  final int j = argv.indexOf('--');
   if (j < 0 || j + 1 >= argv.length || j < i) {
     throw const FormatException(
       'Usage: incr_fkc_worker --declared-inputs <manifest> -- <executable> <arguments>',
@@ -149,18 +149,18 @@ List<String> expandWorkerFlagfiles(
   List<String> argv, {
   FlagfileReader? readFile,
 }) {
-  final read = readFile ?? readFlagfileLines;
+  final List<String> Function(String path) read = readFile ?? readFlagfileLines;
   final out = <String>[];
   for (final a in argv) {
     if (!a.startsWith('@')) {
       out.add(a);
       continue;
     }
-    final outerPath = a.substring(1);
-    final lines = _readOuterParamFile(outerPath, read);
+    final String outerPath = a.substring(1);
+    final List<String> lines = _readOuterParamFile(outerPath, read);
     for (final line in lines) {
       if (line.isEmpty) continue;
-      final arg = _unquoteParamLine(line);
+      final String arg = _unquoteParamLine(line);
       if (arg.startsWith('@')) {
         out.addAll(
           expandDefineFlagfile(
@@ -202,7 +202,7 @@ String _unquoteParamLine(String line) {
 /// Normalizes an exec-root-relative path for prefix comparison: `/`
 /// separators, no trailing slashes, no leading `./` segments.
 String normalizeWorkerPath(String path) {
-  var slash = path.replaceAll(r'\', '/');
+  String slash = path.replaceAll(r'\', '/');
   slash = slash.replaceFirst(RegExp(r'/+$'), '');
   return slash.replaceFirst(RegExp(r'^(?:\./)+'), '');
 }
@@ -212,7 +212,7 @@ String normalizeWorkerPath(String path) {
 /// have a delta URI.
 bool mountsExecRoot(List<String> roots) {
   for (final rawRoot in roots) {
-    final r = normalizeWorkerPath(rawRoot);
+    final String r = normalizeWorkerPath(rawRoot);
     if (r.isEmpty || r == '.') return true;
   }
   return false;
@@ -223,7 +223,7 @@ bool mountsExecRoot(List<String> roots) {
 /// prefix strips to the workspace-relative path it is staged at — the same
 /// key its staged twin maps to, so the two spellings dedupe to one URI.
 String inPlaceSourceKey(String path) {
-  final bin = RegExp('^bazel-out/[^/]+/bin/').firstMatch(path);
+  final RegExpMatch? bin = RegExp('^bazel-out/[^/]+/bin/').firstMatch(path);
   if (bin != null) return path.substring(bin[0]!.length);
   return path;
 }
@@ -249,9 +249,9 @@ bool isInPlacePath(String path) {
 /// as themselves and read in place, so a changed source carries its own URI
 /// with no staged twin.
 String? uriOfStaged(String path, List<String> roots) {
-  final p = normalizeWorkerPath(path);
+  final String p = normalizeWorkerPath(path);
   for (final rawRoot in roots) {
-    final r = normalizeWorkerPath(rawRoot);
+    final String r = normalizeWorkerPath(rawRoot);
     if (r.isEmpty || r == '.') continue;
     if (p.startsWith('$r/')) {
       return incrAppSchemeRoot + p.substring(r.length + 1);
@@ -292,7 +292,7 @@ ChangedInputs classifyChanged(
   final seenUris = <String>{};
   for (final p in changed) {
     if (p.endsWith('.dart')) {
-      final uri = uriOfStaged(p, roots);
+      final String? uri = uriOfStaged(p, roots);
       if (uri != null) {
         if (seenUris.add(uri)) uris.add(uri);
         continue;
@@ -354,9 +354,9 @@ class FrontendServerSession implements CompilerSession {
     required String cwd,
     bool devIncremental = false,
   }) async {
-    final flags = [...fs.sublist(0, fs.length - 1)];
-    final entry = fs.last;
-    final outI = flags.indexOf('--output-dill');
+    final List<String> flags = [...fs.sublist(0, fs.length - 1)];
+    final String entry = fs.last;
+    final int outI = flags.indexOf('--output-dill');
     if (outI < 0 || outI + 1 >= flags.length) {
       throw const FormatException(
         'incr_fkc_worker: compiler argv has no --output-dill.',
@@ -379,12 +379,12 @@ class FrontendServerSession implements CompilerSession {
     for (var k = 0; k < flags.length - 1; k++) {
       if (flags[k] == '--filesystem-root') roots.add(flags[k + 1]);
     }
-    final process = await Process.start(
+    final Process process = await Process.start(
       flags[0],
       spawnArgs,
       workingDirectory: cwd,
     );
-    final lines = StreamIterator(
+    final StreamIterator<String> lines = StreamIterator(
       process.stdout.transform(utf8.decoder).transform(const LineSplitter()),
     );
     return FrontendServerSession._(process, lines, roots, entry);
@@ -401,21 +401,21 @@ class FrontendServerSession implements CompilerSession {
         'incr_fkc_worker: frontend_server exited before its result line.',
       );
     }
-    final first = _lines.current;
+    final String first = _lines.current;
     if (!first.startsWith('result ')) {
       throw FormatException(
         'incr_fkc_worker: expected a result line, got "$first".',
       );
     }
-    final key = first.split(' ')[1];
+    final String key = first.split(' ')[1];
     final diagnostics = <String>[];
     final deps = <String>[];
     while (await _lines.moveNext()) {
-      final s = _lines.current;
+      final String s = _lines.current;
       if (s == key) continue;
       if (s.startsWith('$key ')) {
-        final parts = s.split(' ');
-        final errors = parts.length > 2 ? int.parse(parts.last) : 1;
+        final List<String> parts = s.split(' ');
+        final int errors = parts.length > 2 ? int.parse(parts.last) : 1;
         return (errors: errors, diagnostics: diagnostics, depLines: deps);
       }
       if ((s.startsWith('+') || s.startsWith('-')) && s.contains('://')) {
@@ -442,7 +442,7 @@ class FrontendServerSession implements CompilerSession {
     bool resetFirst = false,
   }) async {
     if (resetFirst) await _send('reset');
-    final urisBlock = uris.map((u) => '$u\n').join();
+    final String urisBlock = uris.map((u) => '$u\n').join();
     await _send('recompile $entry kk\n${urisBlock}kk');
     return _readResult();
   }
@@ -529,9 +529,9 @@ class FrontendServerSession implements CompilerSession {
 /// the frontend_server snapshot when one is named, else after the first
 /// non-flag argument past the executable (a script path in tests).
 int incrementalFlagIndex(List<String> flags) {
-  final snap = flags.indexWhere((a) => a.endsWith('.snapshot'));
+  final int snap = flags.indexWhere((a) => a.endsWith('.snapshot'));
   if (snap >= 0) return snap;
-  final script = flags.indexWhere(
+  final int script = flags.indexWhere(
     (a) => !a.startsWith('-'),
     1,
   );
@@ -542,7 +542,7 @@ int incrementalFlagIndex(List<String> flags) {
 /// pointed at the private [fullDill].
 List<String> redirectOutputDill(List<String> fs, String fullDill) {
   final flags = [...fs];
-  final outI = flags.indexOf('--output-dill');
+  final int outI = flags.indexOf('--output-dill');
   if (outI < 0 || outI + 1 >= flags.length) {
     throw const FormatException(
       'incr_fkc_worker: compiler argv has no --output-dill.',
@@ -556,6 +556,6 @@ List<String> redirectOutputDill(List<String> fs, String fullDill) {
 /// path, so requests that differ only in where the dill lands share a warm
 /// server.
 String configurationKey(List<String> fs, String Function(List<int>) hash) {
-  final flags = redirectOutputDill(fs, '<out>');
+  final List<String> flags = redirectOutputDill(fs, '<out>');
   return hash(utf8.encode(flags.join('\x00'))).substring(0, 16);
 }

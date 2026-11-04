@@ -32,33 +32,36 @@ void main() {
     Duration buildTimeout = const Duration(seconds: 300),
     Duration launchTimeout = const Duration(seconds: 120),
   }) async {
-    final ws = await editableWorkspace(workspace);
-    final app = ws.file('test_driver/app.dart');
-    final banner = ws.file('test_driver/banner.dart');
+    final EditableWorkspace ws = await editableWorkspace(workspace);
+    final File app = ws.file('test_driver/app.dart');
+    final File banner = ws.file('test_driver/banner.dart');
 
     /// Replace [from] with [to] in [file], and prove the file changed: an
     /// anchor that matches nothing would leave every assertion below holding
     /// against a tree nobody edited.
     void rewrite(File file, String from, String to) {
-      final before = file.readAsStringSync();
-      final after = before.replaceFirst(from, to);
+      final String before = file.readAsStringSync();
+      final String after = before.replaceFirst(from, to);
       if (after == before) {
         fail('the edit anchor "$from" matched nothing in ${file.path}');
       }
       file.writeAsStringSync(after);
     }
 
-    final dt = await startDevTool(
+    final DevToolProcess dt = await startDevTool(
       workspace: ws.root,
       target: target,
       device: device,
     );
-    final start = await dt.waitForEvent('app.start', timeout: buildTimeout);
-    final appId = start['params']?['appId'] as String? ?? dt.appId!;
+    final Map<String, dynamic> start = await dt.waitForEvent(
+      'app.start',
+      timeout: buildTimeout,
+    );
+    final String appId = start['params']?['appId'] as String? ?? dt.appId!;
     await dt.waitForHttpControl(timeout: launchTimeout);
 
     Future<void> shows(String text, {required String after}) async {
-      final found = await dt.httpCommand('app.waitFor', {
+      final Map<String, dynamic> found = await dt.httpCommand('app.waitFor', {
         'appId': appId,
         'text': text,
         'timeoutMs': '60000',
@@ -70,7 +73,7 @@ void main() {
     await shows('driver banner v1', after: 'launch');
 
     Future<void> reload(String what) async {
-      final reply = await dt.sendCommand(
+      final Map<String, dynamic> reply = await dt.sendCommand(
         1,
         'app.hotReload',
         params: {'appId': appId},
@@ -94,7 +97,7 @@ void main() {
     await shows('driver banner v2', after: 'reloading an edited sibling');
 
     rewrite(app, 'driver entrypoint v2', 'driver entrypoint v3');
-    final restart = await dt.sendCommand(
+    final Map<String, dynamic> restart = await dt.sendCommand(
       2,
       'app.restart',
       params: {'appId': appId},

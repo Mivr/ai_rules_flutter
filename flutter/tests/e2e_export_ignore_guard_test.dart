@@ -31,15 +31,15 @@ bool _looksLikeRoot(String root) =>
 /// resolves, so the test fails loudly instead of scanning the wrong tree
 /// or silently passing.
 String? _workspaceRoot() {
-  final fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
+  final String? fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
   if (fromEnv != null && fromEnv.isNotEmpty && _looksLikeRoot(fromEnv)) {
     return fromEnv;
   }
-  final anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
-  final srcdir = Platform.environment['TEST_SRCDIR'];
+  final String? anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
+  final String? srcdir = Platform.environment['TEST_SRCDIR'];
   if (anchor != null && anchor.isNotEmpty && srcdir != null) {
     try {
-      var dir = File(
+      Directory dir = File(
         File('$srcdir/$anchor').resolveSymbolicLinksSync(),
       ).parent;
       for (var i = 0; i < 8; i++) {
@@ -100,13 +100,13 @@ List<String> _findWorkspaces(String root) {
 /// Directories named by `/path/ export-ignore` lines in `.gitattributes`.
 Set<String> _ignoredDirs(String root) {
   final ignored = <String>{};
-  for (final line in File('$root/.gitattributes').readAsLinesSync()) {
-    final trimmed = line.trim();
+  for (final String line in File('$root/.gitattributes').readAsLinesSync()) {
+    final String trimmed = line.trim();
     if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
-    final parts = trimmed.split(RegExp(r'\s+'));
+    final List<String> parts = trimmed.split(RegExp(r'\s+'));
     if (parts.length != 2) continue;
     if (parts[1] != 'export-ignore') continue;
-    var pattern = parts[0];
+    String pattern = parts[0];
     if (!pattern.startsWith('/')) continue;
     pattern = pattern.substring(1);
     if (pattern.endsWith('/')) {
@@ -126,7 +126,7 @@ bool _isIgnored(String dir, Set<String> ignored) {
   var current = dir;
   while (current.isNotEmpty) {
     if (ignored.contains(current)) return true;
-    final slash = current.lastIndexOf('/');
+    final int slash = current.lastIndexOf('/');
     if (slash < 0) break;
     current = current.substring(0, slash);
   }
@@ -134,7 +134,7 @@ bool _isIgnored(String dir, Set<String> ignored) {
 }
 
 void main() {
-  final root = _workspaceRoot();
+  final String? root = _workspaceRoot();
   if (root == null) {
     test('export-ignore guard discovers the workspace', () {
       fail(
@@ -147,13 +147,13 @@ void main() {
   }
 
   test('every e2e workspace except e2e/smoke is export-ignored', () {
-    final workspaces = _findWorkspaces(root);
+    final List<String> workspaces = _findWorkspaces(root);
     expect(
       workspaces,
       contains('e2e/smoke'),
       reason: 'the walk under e2e/ missed e2e/smoke itself',
     );
-    final ignored = _ignoredDirs(root);
+    final Set<String> ignored = _ignoredDirs(root);
     final problems = <String>[];
     for (final workspace in workspaces) {
       if (workspace == 'e2e/smoke') continue;
@@ -217,7 +217,7 @@ void main() {
   });
 
   test('e2e/smoke still ships in the release archive', () {
-    final ignored = _ignoredDirs(root);
+    final Set<String> ignored = _ignoredDirs(root);
     expect(
       _isIgnored('e2e/smoke', ignored),
       isFalse,

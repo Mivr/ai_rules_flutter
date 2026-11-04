@@ -40,7 +40,7 @@ class FrontendServerExpressionCompiler implements ExpressionCompiler {
     String moduleName,
     String expression,
   ) async {
-    final result = await _server.compileExpressionToJs(
+    final CompileResult result = await _server.compileExpressionToJs(
       (
         libraryUri: libraryUri,
         scriptUri: scriptUri,

@@ -26,12 +26,12 @@ void main() {
     test(
       'gives a copy that builds on its own',
       () async {
-        final ws = await editableWorkspace('web_example');
+        final EditableWorkspace ws = await editableWorkspace('web_example');
 
         // Invariant 1: the source's `bazel-*` links point into an output base
         // keyed by the SOURCE path. Copying them would let the new workspace
         // read another build's tree.
-        final copied = Directory(
+        final List<String> copied = Directory(
           ws.root,
         ).listSync().map((e) => p.basename(e.path)).toList();
         expect(
@@ -43,7 +43,7 @@ void main() {
 
         // Invariant 2, and the one that fails first and least legibly without
         // the rewrite: the source resolves rules_flutter by `path = "../.."`.
-        final config = ws.file('.bazelrc.user').readAsStringSync();
+        final String config = ws.file('.bazelrc.user').readAsStringSync();
         expect(config, contains('--override_module=ai_rules_flutter='));
         expect(
           config,
@@ -54,7 +54,7 @@ void main() {
         // A target that actually compiles Dart. `:app_lib` gathers sources
         // without type-checking them, so a broken file builds clean through
         // it — useless as proof that the copy's sources are what got built.
-        final built = await build(ws, ':app_js');
+        final ProcessResult built = await build(ws, ':app_js');
         expect(
           built.exitCode,
           0,
@@ -68,11 +68,11 @@ void main() {
     test(
       'builds the copy\'s sources, and leaves the source alone',
       () async {
-        final ws = await editableWorkspace('web_example');
+        final EditableWorkspace ws = await editableWorkspace('web_example');
         final source = File(
           p.join(e2eWorkspace('web_example'), 'lib/main.dart'),
         );
-        final sourceBefore = source.readAsStringSync();
+        final String sourceBefore = source.readAsStringSync();
 
         expect((await build(ws, ':app_js')).exitCode, 0);
 
@@ -85,7 +85,7 @@ void main() {
               'int COPY_ONLY_MARKER = "not an int";\n',
             );
 
-        final broken = await build(ws, ':app_js');
+        final ProcessResult broken = await build(ws, ':app_js');
         expect(
           broken.exitCode,
           isNot(0),
@@ -133,7 +133,7 @@ void main() {
           );
         });
 
-        final ws = await editableWorkspace('web_example');
+        final EditableWorkspace ws = await editableWorkspace('web_example');
 
         // Built, not merely configured. Bazel leaves build outputs in
         // read-only directories, and a recursive delete gives up on those
@@ -141,12 +141,12 @@ void main() {
         // built in it would pass this test with the fix removed.
         expect((await build(ws, ':app_js')).exitCode, 0);
 
-        final info = await Process.run('bazel', [
+        final ProcessResult info = await Process.run('bazel', [
           'info',
           'output_base',
         ], workingDirectory: ws.root).timeout(const Duration(minutes: 2));
         expect(info.exitCode, 0, reason: 'no output base to assert on');
-        final made = (info.stdout as String).trim();
+        final String made = (info.stdout as String).trim();
         outputBase = made;
         expect(
           Directory(made).existsSync(),

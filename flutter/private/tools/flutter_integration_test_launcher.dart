@@ -70,7 +70,7 @@ String? harnessTokenOf(Uri uri) =>
 Map<String, String> decodeDeclaredEnv(String? raw) {
   if (raw == null || raw.trim().isEmpty) return const <String, String>{};
   try {
-    final decoded = json.decode(raw);
+    final dynamic decoded = json.decode(raw);
     if (decoded is Map) {
       return decoded.map(
         (key, value) => MapEntry(key.toString(), value.toString()),
@@ -90,7 +90,8 @@ Map<String, String> decodeDeclaredEnv(String? raw) {
 /// stays identical everywhere.
 ({Map<String, String> declared, String timeZone, String? fontconfigFile})
 resolveForwarding(EnvForwarding forwarding) {
-  final declared = forwarding.env ?? const <String, String>{};
+  final Map<String, String> declared =
+      forwarding.env ?? const <String, String>{};
   return (
     declared: declared,
     timeZone: declared['TZ'] ?? forwarding.tz ?? 'UTC',

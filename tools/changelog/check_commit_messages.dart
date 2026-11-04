@@ -38,28 +38,28 @@ Future<void> main(List<String> args) async {
 }
 
 Future<int> _checkFile(String path) async {
-  final base = Platform.environment['BUILD_WORKING_DIRECTORY'] ?? _repo;
+  final String base = Platform.environment['BUILD_WORKING_DIRECTORY'] ?? _repo;
   final file = File(path).isAbsolute ? File(path) : File('$base/$path');
-  final message = await _git([
+  final String message = await _git([
     'stripspace',
     '--strip-comments',
   ], stdin: file.readAsStringSync());
-  final problems = await check(message);
+  final List<String> problems = await check(message);
   problems.forEach(stderr.writeln);
   return problems.isEmpty ? 0 : 1;
 }
 
 Future<int> _checkRange(String range) async {
   // A push that creates the branch reports an all-zeros `before`.
-  final allZerosBefore = RegExp(r'^0+\.\.(.+)$').firstMatch(range);
+  final RegExpMatch? allZerosBefore = RegExp(r'^0+\.\.(.+)$').firstMatch(range);
   if (allZerosBefore != null) range = '${allZerosBefore[1]}^!';
   var status = 0;
-  final shas = (await _git(['rev-list', '--no-merges', range]))
+  final Iterable<String> shas = (await _git(['rev-list', '--no-merges', range]))
       .split('\n')
       .where((s) => s.isNotEmpty);
   for (final sha in shas) {
-    final message = await _git(['log', '-1', '--format=%B', sha]);
-    final problems = await check(message);
+    final String message = await _git(['log', '-1', '--format=%B', sha]);
+    final List<String> problems = await check(message);
     if (problems.isEmpty) continue;
     status = 1;
     stdout.writeln('${sha.substring(0, 12)} ${message.split('\n').first}');
@@ -72,11 +72,11 @@ Future<int> _checkRange(String range) async {
 
 /// Returns the policy violations in [message]; empty when it is valid.
 Future<List<String>> check(String message) async {
-  final subject = message.split('\n').first;
+  final String subject = message.split('\n').first;
   if (_exempt.hasMatch(subject)) return const [];
 
   final problems = <String>[];
-  final conventional = _conventional.firstMatch(subject);
+  final RegExpMatch? conventional = _conventional.firstMatch(subject);
   if (conventional == null) {
     problems.add(
       'subject is not a conventional commit: '
@@ -85,17 +85,17 @@ Future<List<String>> check(String message) async {
     );
   }
 
-  final trailers = await _git([
+  final String trailers = await _git([
     'interpret-trailers',
     '--parse',
   ], stdin: message);
-  final entries = [
+  final List<String> entries = [
     for (final line in trailers.split('\n'))
       if (line.startsWith('Changelog:')) line.substring(10).trim(),
   ];
 
   if (entries.isEmpty) {
-    final userVisible =
+    final bool userVisible =
         conventional?.group(3) != null || _userVisibleType.hasMatch(subject);
     if (_anyChangelogLine.hasMatch(message)) {
       problems.add(
@@ -130,9 +130,13 @@ Future<List<String>> check(String message) async {
 /// Runs git in the repo; [stdin] is piped in for the subcommands that read the
 /// message from standard input (`stripspace`, `interpret-trailers`).
 Future<String> _git(List<String> args, {String? stdin}) async {
-  final process = await Process.start('git', args, workingDirectory: _repo);
-  final out = process.stdout.transform(utf8.decoder).join();
-  final err = process.stderr.transform(utf8.decoder).join();
+  final Process process = await Process.start(
+    'git',
+    args,
+    workingDirectory: _repo,
+  );
+  final Future<String> out = process.stdout.transform(utf8.decoder).join();
+  final Future<String> err = process.stderr.transform(utf8.decoder).join();
   if (stdin != null) process.stdin.write(stdin);
   await process.stdin.close();
   if (await process.exitCode != 0) {

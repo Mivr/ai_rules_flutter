@@ -95,14 +95,14 @@ typedef _RunSpec = ({String mode, int editCount, _Fixture fixture});
 
 /// Parse and validate the command-line arguments.
 _RunSpec _parseRunSpec(List<String> args) {
-  final mode = args.isEmpty ? 'pair' : args.first;
+  final String mode = args.isEmpty ? 'pair' : args.first;
   if (mode != 'solo' && mode != 'pair') {
     stderr.writeln('usage: concurrent_sessions.dart [solo|pair] [edits]');
     exit(2);
   }
-  final editCount = args.length > 1 ? int.parse(args[1]) : 3;
-  final fixtureName = args.length > 2 ? args[2] : 'codegen';
-  final fixture = _fixtures[fixtureName];
+  final int editCount = args.length > 1 ? int.parse(args[1]) : 3;
+  final String fixtureName = args.length > 2 ? args[2] : 'codegen';
+  final _Fixture? fixture = _fixtures[fixtureName];
   if (fixture == null) {
     stderr.writeln(
       'unknown workspace "$fixtureName"; '
@@ -123,7 +123,7 @@ _Probe _readProbe(String workspace, _Fixture fixture) {
     stderr.writeln('probe source not found: ${probe.path}');
     exit(2);
   }
-  final original = probe.readAsStringSync();
+  final String original = probe.readAsStringSync();
   if (!original.contains(fixture.marker)) {
     stderr.writeln('probe marker "${fixture.marker}" not in ${probe.path}');
     exit(2);
@@ -138,7 +138,7 @@ _Probe _readProbe(String workspace, _Fixture fixture) {
 /// never built this workspace there is nothing to watch yet — and a cold build
 /// inside the measurement would dominate it anyway.
 Future<void> _warmWorkspace(String workspace, String target) async {
-  final warm = await Process.run('bazel', [
+  final ProcessResult warm = await Process.run('bazel', [
     'build',
     target,
   ], workingDirectory: workspace);
@@ -167,8 +167,8 @@ Future<int> _driveEdits(
   var failures = 0;
   for (var i = 0; i < editCount; i++) {
     final tag = 'PROBE$i';
-    final aFrom = a.events.length;
-    final bFrom = b?.events.length ?? 0;
+    final int aFrom = a.events.length;
+    final int bFrom = b?.events.length ?? 0;
     _log('edit -> $tag');
     probe.file.writeAsStringSync(
       probe.original.replaceFirst(
@@ -183,42 +183,44 @@ Future<int> _driveEdits(
 }
 
 Future<void> main(List<String> args) async {
-  final spec = _parseRunSpec(args);
-  final mode = spec.mode;
-  final editCount = spec.editCount;
-  final fixture = spec.fixture;
-  final fixtureName = args.length > 2 ? args[2] : 'codegen';
+  final _RunSpec spec = _parseRunSpec(args);
+  final String mode = spec.mode;
+  final int editCount = spec.editCount;
+  final _Fixture fixture = spec.fixture;
+  final String fixtureName = args.length > 2 ? args[2] : 'codegen';
 
-  final repoRoot = await _repoRoot();
+  final String repoRoot = await _repoRoot();
   final workspace = '$repoRoot/e2e/${fixture.workspace}';
-  final probe = _readProbe(workspace, fixture);
+  final _Probe probe = _readProbe(workspace, fixture);
 
-  final devTool = await _buildDevTool(repoRoot);
+  final String devTool = await _buildDevTool(repoRoot);
   await _warmWorkspace(workspace, fixture.target);
-  final sampler = await _ForestSampler.create(workspace);
+  final _ForestSampler sampler = await _ForestSampler.create(workspace);
 
   final sessions = <_Session>[];
   // Restore on interrupt too: a half-edited fixture leaves every later run
   // staring at a red exception screen.
-  final sigint = ProcessSignal.sigint.watch().listen((_) async {
-    probe.file.writeAsStringSync(probe.original);
-    for (final s in sessions) {
-      await s.dispose();
-    }
-    exit(130);
-  });
+  final StreamSubscription<ProcessSignal> sigint = ProcessSignal.sigint
+      .watch()
+      .listen((_) async {
+        probe.file.writeAsStringSync(probe.original);
+        for (final s in sessions) {
+          await s.dispose();
+        }
+        exit(130);
+      });
 
   var failures = 0;
   try {
     sampler.start();
-    final a = await _startSession(
+    final _Session a = await _startSession(
       'A',
       devTool,
       workspace,
       fixture.target,
       sessions,
     );
-    final b = mode == 'pair'
+    final _Session? b = mode == 'pair'
         ? await _startSession('B', devTool, workspace, fixture.target, sessions)
         : null;
 
@@ -250,15 +252,15 @@ int _verdict(_Session session, String tag, Map<String, dynamic> result) {
   // source and a missing generated `.g.dart` are different defects that read
   // identically at this level.
   if (!ok) {
-    final why = session.compileDiagnostics;
+    final String? why = session.compileDiagnostics;
     if (why != null) _log('    compiler said: ${_firstLines(why, 4)}');
   }
   return ok ? 0 : 1;
 }
 
 String _firstLines(String text, int count) {
-  final lines = const LineSplitter().convert(text);
-  final head = lines.take(count).join('\n                   ');
+  final List<String> lines = const LineSplitter().convert(text);
+  final String head = lines.take(count).join('\n                   ');
   return lines.length > count ? '$head\n                   …' : head;
 }
 
@@ -268,7 +270,10 @@ void _log(String message) =>
 /// The repository root, from Bazel rather than by walking up from
 /// `Directory.current` — the script may be invoked from anywhere.
 Future<String> _repoRoot() async {
-  final result = await Process.run('bazel', ['info', 'workspace']);
+  final ProcessResult result = await Process.run('bazel', [
+    'info',
+    'workspace',
+  ]);
   if (result.exitCode != 0) {
     throw StateError('bazel info workspace failed: ${result.stderr}');
   }
@@ -281,7 +286,7 @@ Future<String> _repoRoot() async {
 /// different binary than the one shipped is worse than no run.
 Future<String> _buildDevTool(String repoRoot) async {
   const label = '//tools/dev_tool:flutter_bazel';
-  final result = await Process.run('bazel', [
+  final ProcessResult result = await Process.run('bazel', [
     'build',
     label,
   ], workingDirectory: repoRoot);
@@ -312,19 +317,19 @@ class _ForestSampler {
   new _(this._leaf);
 
   static Future<_ForestSampler> create(String workspace) async {
-    final info = await Process.run('bazel', [
+    final ProcessResult info = await Process.run('bazel', [
       'info',
       'output_base',
     ], workingDirectory: workspace);
     if (info.exitCode != 0) {
       throw StateError('bazel info output_base failed: ${info.stderr}');
     }
-    final outputBase = (info.stdout as String).trim();
+    final String outputBase = (info.stdout as String).trim();
     final external = Directory('$outputBase/execroot/_main/external');
     // Found rather than named: the canonical repository name carries the
     // module-extension mangling (`ai_rules_flutter++flutter+deps__flutter`), which
     // is not a string this script should pretend to know.
-    final matches = external.existsSync()
+    final List<String> matches = external.existsSync()
         ? external
               .listSync()
               .map((e) => e.path)
@@ -344,9 +349,9 @@ class _ForestSampler {
     _timer = Timer.periodic(const Duration(milliseconds: 5), (_) {
       _samples++;
       if (File(_leaf).existsSync()) {
-        final started = _gapStart;
+        final DateTime? started = _gapStart;
         if (started != null) {
-          final held = DateTime.now().difference(started);
+          final Duration held = DateTime.now().difference(started);
           if (held > _longest) _longest = held;
           _gapStart = null;
         }
@@ -398,7 +403,7 @@ class _Session {
 
   void _onStdout(String line) {
     // Machine protocol wraps each message in [...].
-    final start = line.indexOf('[{');
+    final int start = line.indexOf('[{');
     if (start < 0 || !line.endsWith('}]')) return;
     final decoded = json.decode(line.substring(start)) as List;
     for (final item in decoded) {
@@ -412,11 +417,11 @@ class _Session {
   ///
   /// Null when it never reported a compile failure.
   String? get compileDiagnostics {
-    for (final line in stderrLines.reversed) {
+    for (final String line in stderrLines.reversed) {
       if (!line.contains('initial_compile_failed')) continue;
-      final decoded = json.decode(line);
+      final dynamic decoded = json.decode(line);
       if (decoded is Map<String, dynamic>) {
-        final diagnostics = decoded['diagnostics'];
+        final dynamic diagnostics = decoded['diagnostics'];
         if (diagnostics is String && diagnostics.isNotEmpty) return diagnostics;
       }
     }
@@ -437,7 +442,9 @@ class _Session {
       if (events[i]['event'] == event) return events[i];
     }
     final done = Completer<Map<String, dynamic>>();
-    final sub = _events.stream.listen((m) {
+    final StreamSubscription<Map<String, dynamic>> sub = _events.stream.listen((
+      m,
+    ) {
       if (m['event'] == event && !done.isCompleted) done.complete(m);
     });
     unawaited(
@@ -488,7 +495,7 @@ class _Session {
   }
 
   Future<Map<String, dynamic>> awaitReload(int fromIndex) async {
-    final event = await waitFor(
+    final Map<String, dynamic> event = await waitFor(
       'app.reloadResult',
       timeout: const Duration(seconds: 180),
       fromIndex: fromIndex,
@@ -518,7 +525,7 @@ Future<_Session> _startSession(
   List<_Session> sessions,
 ) async {
   _log('$name: starting');
-  final process = await Process.start(
+  final Process process = await Process.start(
     devTool,
     [
       'run',

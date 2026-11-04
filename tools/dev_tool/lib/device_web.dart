@@ -8,6 +8,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_bazel_dev_tool/app_log.dart';
 import 'package:flutter_bazel_dev_tool/cdp_console.dart';
@@ -23,6 +24,8 @@ import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:flutter_bazel_dev_tool/web_options.dart';
+
+typedef _Page = CdpPageConnection;
 
 final _logger = Logger('dev_tool.device');
 
@@ -167,13 +170,13 @@ class ChromeSession {
       pollInterval: Duration(milliseconds: 50),
     ),
   }) async {
-    final exe = chromePath ?? findChrome();
+    final String? exe = chromePath ?? findChrome();
     if (exe == null) {
       throw StateError(
         'Chrome not found. Install Chrome or use -d macos for desktop.',
       );
     }
-    final userDataDir = await createTempDir('flutter_chrome_');
+    final Directory userDataDir = await createTempDir('flutter_chrome_');
     // How long a healthy browser takes to announce is the number the port
     // timeout has to clear, so every launch reports it: the next slow start
     // then arrives with measurements instead of a bare "within Ns".
@@ -199,7 +202,7 @@ class ChromeSession {
     diagnostics.closeWhen([pumpProcessLines(chrome, diagnostics).done]);
 
     try {
-      final cdpPort = await _discoverCdpPort(
+      final int cdpPort = await _discoverCdpPort(
         diagnostics,
         timeout: waits.portTimeout,
         requestedPort: options.debugPort,
@@ -227,7 +230,7 @@ class ChromeSession {
       }
       // The same wait [resolveAppPage] does, done before the session exists
       // so the page it found can be part of it.
-      final page = await resolveCdpPageTarget(
+      final String page = await resolveCdpPageTarget(
         cdpPort,
         appUrl: url,
         timeout: waits.pageTimeout,
@@ -240,7 +243,7 @@ class ChromeSession {
         appUrl: url,
         pageWebSocketDebuggerUrl: page,
       );
-      final viewport = options.viewport;
+      final WebViewport? viewport = options.viewport;
       if (viewport != null) await session.applyViewport(viewport);
       return session;
     } catch (_) {
@@ -404,7 +407,7 @@ class WebDevice extends Device {
     // in run_command; the native roots/scheme args are not used here. The
     // registrant URI is ignored too — the web synthetic main calls
     // registerPlugins() directly and re-runs on page-reload restart.
-    final webToolchain = inputs?.webToolchain;
+    final WebToolchainPaths? webToolchain = inputs?.webToolchain;
     if (webToolchain == null) return null;
     return WebCompilerConfig(
       webToolchain: webToolchain,
@@ -440,9 +443,7 @@ class WebDevice extends Device {
 
   @override
   Future<AppInstance> launch(String appPath, {AppLogListener? onLog}) async {
-    if (_moduleServer != null) {
-      return _launchWithModuleServer(onLog);
-    }
+    if (_moduleServer != null) return _launchWithModuleServer(onLog);
     return _launchStaticServer(appPath, onLog);
   }
 
@@ -453,7 +454,7 @@ class WebDevice extends Device {
   /// with none of the flags the user typed, which is the exact silence these
   /// options exist to prevent.
   WebOptions get _webOptions {
-    final options = webOptions;
+    final WebOptions? options = webOptions;
     if (options == null) {
       throw StateError(
         'This WebDevice was never told how to serve or how to launch a '
@@ -466,14 +467,14 @@ class WebDevice extends Device {
 
   /// Launch using DDC module server (dev mode with hot restart).
   Future<AppInstance> _launchWithModuleServer(AppLogListener? onLog) async {
-    final options = _webOptions;
+    final WebOptions options = _webOptions;
     // `--web-launch-url` if given, the server's own URL otherwise — and
     // checked against the server that actually bound, which is the first
     // moment its port is known.
     final url = options.launchUrlFor(_moduleServer!.uri!).toString();
     _appUrl = url;
 
-    final session = await ChromeSession.launch(
+    final ChromeSession session = await ChromeSession.launch(
       url: url,
       startProcess: _startProcess,
       options: options.browser,
@@ -499,12 +500,12 @@ class WebDevice extends Device {
     String appPath,
     AppLogListener? onLog,
   ) async {
-    final options = _webOptions;
+    final WebOptions options = _webOptions;
     final staticServer = StaticWebServer(
       rootPath: appPath,
       options: options.server,
     );
-    final serverBase = await staticServer.start();
+    final Uri serverBase = await staticServer.start();
 
     final String url;
     final ChromeSession session;
@@ -524,7 +525,7 @@ class WebDevice extends Device {
     _cdpPort = session.cdpPort;
     _holdViewport(session.viewportHold);
     _pageWebSocketDebuggerUrl = session.pageWebSocketDebuggerUrl;
-    final logs = newAppLogs(onLog);
+    final AppLogStream logs = newAppLogs(onLog);
 
     // No DWDS on this path (WASM / production JS), so CDP is the only source
     // of the app's console output.
@@ -577,10 +578,10 @@ class WebDevice extends Device {
     await _consoleClient?.close();
     _consoleClient = null;
     // Taken off first, so closing it is not reported as the viewport lost.
-    final viewportHold = _viewportHold;
+    final CdpPageConnection? viewportHold = _viewportHold;
     _viewportHold = null;
     await viewportHold?.close();
-    final moduleServer = _moduleServer;
+    final WebModuleServer? moduleServer = _moduleServer;
     if (moduleServer != null) {
       // dwds is third-party and its `stop()` reaches peer-dependent awaits —
       // `DebugService.close()` waits on a DDS shutdown, `DwdsVmClient.close()`
@@ -623,8 +624,8 @@ class WebDevice extends Device {
     KeyChord chord, {
     required bool macCommands,
   }) async {
-    final port = _cdpPort;
-    final url = _appUrl;
+    final int? port = _cdpPort;
+    final String? url = _appUrl;
     if (port == null || url == null) {
       throw StateError(
         'This web run has no browser to press keys in yet: its DevTools '
@@ -645,8 +646,8 @@ class WebDevice extends Device {
   /// page that is already up, so a caller sweeping form factors does not have
   /// to relaunch between them.
   Future<void> setViewport(WebViewport viewport) async {
-    final port = _cdpPort;
-    final url = _appUrl;
+    final int? port = _cdpPort;
+    final String? url = _appUrl;
     if (port == null || url == null) {
       throw StateError(
         'This web run has no browser to resize yet: its CDP port has not been '
@@ -722,10 +723,10 @@ Future<int> _discoverCdpPort(
     }
   });
 
-  final sub = browserDiagnostics.lines.listen(
+  final StreamSubscription<AppLogLine> sub = browserDiagnostics.lines.listen(
     (line) {
       if (completer.isCompleted) return;
-      final match = cdpPortPattern.firstMatch(line.text);
+      final RegExpMatch? match = cdpPortPattern.firstMatch(line.text);
       if (match != null) completer.complete(int.parse(match.group(1)!));
     },
     onDone: () {
@@ -779,7 +780,7 @@ String _browserLastWords(
   int lines = 20,
   bool ended = true,
 }) {
-  final tail = browserDiagnostics.read(-lines).lines;
+  final List<AppLogLine> tail = browserDiagnostics.read(-lines).lines;
   if (tail.isEmpty) {
     return ended
         ? 'It printed nothing at all on the way out, so its own output does '
@@ -834,8 +835,8 @@ Future<CdpPageConnection> applyViewportOverCdp({
   Duration settleTimeout = const Duration(seconds: 15),
   Duration pollInterval = const Duration(milliseconds: 200),
 }) async {
-  final reuse = hold != null && !hold.isClosed;
-  final connection = reuse
+  final bool reuse = hold != null && !hold.isClosed;
+  final _Page connection = reuse
       ? hold
       : await CdpPageConnection.open(page.cdpPort, appUrl: page.appUrl);
   try {
@@ -858,7 +859,7 @@ Future<CdpPageConnection> applyViewportOverCdp({
     Object? height;
     Object? ratio;
     while (true) {
-      final got = await _sendCdpToPage(
+      final Map<String, dynamic> got = await _sendCdpToPage(
         page.cdpPort,
         page.appUrl,
         'Runtime.evaluate',
@@ -869,7 +870,7 @@ Future<CdpPageConnection> applyViewportOverCdp({
           'returnByValue': true,
         },
       );
-      final value = got['result']?['result']?['value'];
+      final dynamic value = got['result']?['result']?['value'];
       width = value is Map ? value['w'] : null;
       height = value is Map ? value['h'] : null;
       ratio = value is Map ? value['r'] : '?';
@@ -904,7 +905,7 @@ Future<Map<String, dynamic>> _sendCdpToPage(
   String method,
   Map<String, dynamic> params,
 ) async {
-  final page = await CdpPageConnection.open(cdpPort, appUrl: appUrl);
+  final _Page page = await CdpPageConnection.open(cdpPort, appUrl: appUrl);
   try {
     return await page.send(method, params);
   } finally {
@@ -935,7 +936,7 @@ class CdpPageConnection {
     _ws.listen(
       (data) {
         final msg = json.decode(data as String) as Map<String, dynamic>;
-        final id = msg['id'];
+        final dynamic id = msg['id'];
         if (id is int) _pending.remove(id)?.complete(msg);
       },
       // A page that navigates away or a browser that exits closes the socket;
@@ -948,7 +949,7 @@ class CdpPageConnection {
 
   void _fail(Object error) {
     _closedBy ??= error;
-    for (final c in _pending.values) {
+    for (final Completer<Map<String, dynamic>> c in _pending.values) {
       c.completeError(error);
     }
     _pending.clear();
@@ -976,10 +977,11 @@ class CdpPageConnection {
     Duration timeout = const Duration(seconds: 10),
   }) async {
     if (_closedBy case final error?) throw error;
-    final id = _nextId++;
-    final reply = _pending[id] = Completer<Map<String, dynamic>>();
+    final int id = _nextId++;
+    final Completer<Map<String, dynamic>> reply = _pending[id] =
+        Completer<Map<String, dynamic>>();
     _ws.add(json.encode({'id': id, 'method': method, 'params': params}));
-    final response = await reply.future.timeout(
+    final Map<String, dynamic> response = await reply.future.timeout(
       timeout,
       onTimeout: () {
         _pending.remove(id);
@@ -988,7 +990,7 @@ class CdpPageConnection {
         );
       },
     );
-    final error = response['error'];
+    final dynamic error = response['error'];
     if (error != null) throw StateError('CDP $method failed: $error');
     return response;
   }
@@ -1063,16 +1065,16 @@ Future<BrowserKeyPress> pressKeyOverCdp({
   required KeyChord chord,
   required bool macCommands,
 }) async {
-  final page = await CdpPageConnection.open(cdpPort, appUrl: appUrl);
+  final _Page page = await CdpPageConnection.open(cdpPort, appUrl: appUrl);
   try {
-    final probe = await page.send('Runtime.evaluate', {
+    final Map<String, dynamic> probe = await page.send('Runtime.evaluate', {
       'expression': _focusProbe,
       'returnByValue': true,
     });
-    final state = probe['result']?['result']?['value'];
+    final dynamic state = probe['result']?['result']?['value'];
     final sent = <Map<String, Object>>[];
-    for (final stroke in chord.strokes) {
-      final params = stroke.cdpParams(
+    for (final KeyStroke stroke in chord.strokes) {
+      final Map<String, Object> params = stroke.cdpParams(
         macCommands: macCommands ? macEditingCommandsFor(stroke) : const [],
       );
       await page.send('Input.dispatchKeyEvent', params);
@@ -1100,10 +1102,10 @@ Future<void> _cdpScreenshot(
   String? appUrl,
 }) async {
   // Same target selection every CDP consumer uses — see `cdp_console.dart`.
-  final wsUrl = await resolveCdpPageTarget(cdpPort, appUrl: appUrl);
+  final String wsUrl = await resolveCdpPageTarget(cdpPort, appUrl: appUrl);
 
   // Connect WebSocket and send Page.captureScreenshot.
-  final ws = await WebSocket.connect(wsUrl);
+  final WebSocket ws = await WebSocket.connect(wsUrl);
   try {
     final responseCompleter = Completer<Map<String, dynamic>>();
 
@@ -1122,9 +1124,8 @@ Future<void> _cdpScreenshot(
       }),
     );
 
-    final response = await responseCompleter.future.timeout(
-      const Duration(seconds: 10),
-    );
+    final Map<String, dynamic> response = await responseCompleter.future
+        .timeout(const Duration(seconds: 10));
 
     final result = response['result'] as Map<String, dynamic>?;
     if (result == null || result['data'] == null) {
@@ -1132,7 +1133,7 @@ Future<void> _cdpScreenshot(
     }
 
     // Decode base64 PNG and write to file.
-    final bytes = base64.decode(result['data'] as String);
+    final Uint8List bytes = base64.decode(result['data'] as String);
     await File(outputPath).writeAsBytes(bytes);
   } finally {
     await ws.close();

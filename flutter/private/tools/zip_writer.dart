@@ -57,8 +57,8 @@ void setUint64LE(ByteData bd, int offset, int value) {
 
 /// Reads an unsigned 64-bit little-endian integer at [offset] of [bd].
 int getUint64LE(ByteData bd, int offset) {
-  final lo = bd.getUint32(offset, Endian.little);
-  final hi = bd.getUint32(offset + 4, Endian.little);
+  final int lo = bd.getUint32(offset, Endian.little);
+  final int hi = bd.getUint32(offset + 4, Endian.little);
   return ((hi & 0x7FFFFFFF) * 0x100000000) + lo;
 }
 
@@ -127,17 +127,18 @@ Uint8List createDeterministicZipFromDirectory(
 /// incrementally so files larger than [streamingFileThreshold] never sit
 /// fully inflated in memory.
 ZipEntry _streamingZipEntry(File entity, String relPath, bool isExec) {
-  final fileSize = entity.lengthSync();
-  final raf = entity.openSync(mode: FileMode.read);
+  final int fileSize = entity.lengthSync();
+  final RandomAccessFile raf = entity.openSync(mode: FileMode.read);
   try {
     final bytesSink = _BytesSink();
-    final deflateSink = ZLibEncoder(raw: true).startChunkedConversion(
-      bytesSink,
-    );
+    final ByteConversionSink deflateSink = ZLibEncoder(raw: true)
+        .startChunkedConversion(
+          bytesSink,
+        );
     final chunkBuf = Uint8List(1024 * 1024);
     var runningCrc = 0xFFFFFFFF;
     while (true) {
-      final n = raf.readIntoSync(chunkBuf);
+      final int n = raf.readIntoSync(chunkBuf);
       if (n <= 0) break;
       runningCrc = crc32lib.crc32Update(runningCrc, chunkBuf, n);
       deflateSink.add(Uint8List.sublistView(chunkBuf, 0, n));
@@ -162,13 +163,13 @@ void _collectZipEntries(
   String relPrefix,
   Set<String> executablePaths,
 ) {
-  final children = dir.listSync(followLinks: false)
+  final List<FileSystemEntity> children = dir.listSync(followLinks: false)
     ..sort((a, b) => a.path.compareTo(b.path));
   for (final entity in children) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     final relPath = relPrefix.isEmpty ? name : '$relPrefix/$name';
     if (entity is Link) {
-      final target = entity.targetSync();
+      final String target = entity.targetSync();
       entries.add(
         ZipEntry(
           path: relPath,
@@ -184,7 +185,7 @@ void _collectZipEntries(
     } else if (entity is File) {
       // File modes are determined strictly from the entry role via
       // executablePaths, never from host filesystem stat.mode bits.
-      final isExec = executablePaths.contains(relPath);
+      final bool isExec = executablePaths.contains(relPath);
       if (entity.lengthSync() > streamingFileThreshold) {
         entries.add(_streamingZipEntry(entity, relPath, isExec));
       } else {
@@ -235,10 +236,10 @@ class _DeterministicZipEncoder {
   static const versionNeededZip64 = 45;
 
   void writeEntry(ZipEntry entry) {
-    final nameBytes = utf8.encode(entry.path);
-    final record = _chooseZipPayload(entry);
-    final externalAttrs = _zipExternalAttrs(entry);
-    final localExtra = _localZip64Extra(
+    final Uint8List nameBytes = utf8.encode(entry.path);
+    final _ZipPayload record = _chooseZipPayload(entry);
+    final int externalAttrs = _zipExternalAttrs(entry);
+    final Uint8List localExtra = _localZip64Extra(
       record.uncompressedLen,
       record.payload.length,
     );
@@ -248,9 +249,9 @@ class _DeterministicZipEncoder {
   }
 
   _ZipPayload _chooseZipPayload(ZipEntry entry) {
-    final uncompressed = entry.data;
-    final uncompressedLen = entry.uncompressedSize;
-    final crc = entry.isDirectory
+    final Uint8List uncompressed = entry.data;
+    final int uncompressedLen = entry.uncompressedSize;
+    final int crc = entry.isDirectory
         ? 0
         : (entry.crc32Override ?? crc32(uncompressed));
     if (entry.storeOnly && entry.compressedData != null) {
@@ -318,8 +319,8 @@ class _DeterministicZipEncoder {
     _ZipPayload record,
     Uint8List localExtra,
   ) {
-    final localNeedZip64 = localExtra.isNotEmpty;
-    final localVersionNeeded = localNeedZip64
+    final bool localNeedZip64 = localExtra.isNotEmpty;
+    final int localVersionNeeded = localNeedZip64
         ? versionNeededZip64
         : versionNeededStandard;
     // Local file header (30 bytes + filename + extra + payload).
@@ -364,14 +365,14 @@ class _DeterministicZipEncoder {
     int compressedLen,
     int entryOffset,
   ) {
-    final needUncompressed64 = uncompressedLen >= zip64Limit32;
-    final needCompressed64 = compressedLen >= zip64Limit32;
-    final needOffset64 = entryOffset >= zip64Limit32;
+    final bool needUncompressed64 = uncompressedLen >= zip64Limit32;
+    final bool needCompressed64 = compressedLen >= zip64Limit32;
+    final bool needOffset64 = entryOffset >= zip64Limit32;
     if (!needUncompressed64 && !needCompressed64 && !needOffset64) {
       return Uint8List(0);
     }
     anyEntryZip64 = true;
-    final fieldCount =
+    final int fieldCount =
         (needUncompressed64 ? 1 : 0) +
         (needCompressed64 ? 1 : 0) +
         (needOffset64 ? 1 : 0);
@@ -401,16 +402,16 @@ class _DeterministicZipEncoder {
     Uint8List localExtra,
     int externalAttrs,
   ) {
-    final cdExtra = _centralZip64Extra(
+    final Uint8List cdExtra = _centralZip64Extra(
       record.uncompressedLen,
       record.payload.length,
       offset,
     );
-    final cdNeedZip64 = cdExtra.isNotEmpty || localExtra.isNotEmpty;
-    final cdVersionMadeBy = cdNeedZip64
+    final bool cdNeedZip64 = cdExtra.isNotEmpty || localExtra.isNotEmpty;
+    final int cdVersionMadeBy = cdNeedZip64
         ? versionMadeByZip64
         : versionMadeByStandard;
-    final cdVersionNeeded = cdNeedZip64
+    final int cdVersionNeeded = cdNeedZip64
         ? versionNeededZip64
         : versionNeededStandard;
     // Central directory header (46 bytes + filename + extra).
@@ -464,11 +465,11 @@ class _DeterministicZipEncoder {
   }
 
   Uint8List finish(int entryCount) {
-    final centralBytes = centralParts.takeBytes();
-    final cdSize = centralBytes.length;
-    final cdOffset = offset;
+    final Uint8List centralBytes = centralParts.takeBytes();
+    final int cdSize = centralBytes.length;
+    final int cdOffset = offset;
     localParts.add(centralBytes);
-    final needZip64Eocd =
+    final bool needZip64Eocd =
         anyEntryZip64 ||
         entryCount >= zip64Limit16 ||
         cdSize >= zip64Limit32 ||
@@ -481,7 +482,7 @@ class _DeterministicZipEncoder {
   }
 
   void _writeZip64Eocd(int cdOffset, int cdSize, int entryCount) {
-    final zip64EocdOffset = cdOffset + cdSize;
+    final int zip64EocdOffset = cdOffset + cdSize;
     // ZIP64 End of Central Directory Record (56 bytes).
     final zip64Eocd = ByteData(56);
     zip64Eocd.setUint32(0, 0x06064b50, Endian.little);

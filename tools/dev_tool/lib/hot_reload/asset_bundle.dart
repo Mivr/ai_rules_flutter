@@ -86,7 +86,10 @@ class AssetBundle {
     final dir = Directory(directory);
     if (!dir.existsSync()) return const {};
     final digests = <String, int>{};
-    for (final entity in dir.listSync(recursive: true, followLinks: true)) {
+    for (final FileSystemEntity entity in dir.listSync(
+      recursive: true,
+      followLinks: true,
+    )) {
       if (entity is! File) continue;
       digests[archivePathOf(entity.path)] = _digest(entity.readAsBytesSync());
     }
@@ -100,7 +103,7 @@ class AssetBundle {
   /// The workspace file that feeds [archivePath], or null when nothing in the
   /// source tree does.
   String? sourceOf(String archivePath) {
-    final candidate = p.join(
+    final String candidate = p.join(
       workspaceRoot,
       p.joinAll(p.url.split(archivePath)),
     );
@@ -110,9 +113,9 @@ class AssetBundle {
   /// Every workspace file that feeds [archivePath]: the file at its own path,
   /// and for a shader, the files the build says it is compiled from.
   Iterable<String> sourcesOf(String archivePath) sync* {
-    final own = sourceOf(archivePath);
+    final String? own = sourceOf(archivePath);
     if (own != null) yield own;
-    for (final source in shaders[archivePath] ?? const <String>[]) {
+    for (final String source in shaders[archivePath] ?? const <String>[]) {
       yield p.join(workspaceRoot, p.joinAll(p.url.split(source)));
     }
   }
@@ -194,12 +197,12 @@ class AssetTracker {
   /// app whose assets are untouched never pays for a `bazel build` on a Dart
   /// edit.
   bool get sourcesAreStale {
-    final now = _scanDirs(_sourceState.keys);
+    final Map<String, Map<String, int>> now = _scanDirs(_sourceState.keys);
     if (now.length != _sourceState.length) return true;
-    for (final entry in now.entries) {
-      final before = _sourceState[entry.key];
+    for (final MapEntry<String, Map<String, int>> entry in now.entries) {
+      final Map<String, int>? before = _sourceState[entry.key];
       if (before == null || before.length != entry.value.length) return true;
-      for (final file in entry.value.entries) {
+      for (final MapEntry<String, int> file in entry.value.entries) {
         if (before[file.key] != file.value) return true;
       }
     }
@@ -230,7 +233,7 @@ class AssetTracker {
   /// anything the caller sees afterwards. A caller that means "everything on
   /// disk is delivered" says so with an instant later than the tree.
   Set<String> takeBundleChanges({required DateTime rebuiltBefore}) {
-    final now = bundle.scan();
+    final Map<String, int> now = bundle.scan();
     final changed = <String>{
       for (final entry in now.entries)
         if (_bundleState[entry.key] != entry.value) entry.key,
@@ -248,8 +251,8 @@ class AssetTracker {
     DateTime? builtBefore,
   }) {
     final dirs = <String>{};
-    for (final archivePath in bundleState.keys) {
-      for (final source in bundle.sourcesOf(archivePath)) {
+    for (final String archivePath in bundleState.keys) {
+      for (final String source in bundle.sourcesOf(archivePath)) {
         dirs.add(p.dirname(source));
       }
     }
@@ -297,7 +300,7 @@ class AssetTracker {
     Iterable<String> dirs, {
     DateTime? builtBefore,
   }) {
-    final cutoff = builtBefore == null
+    final DateTime? cutoff = builtBefore == null
         ? null
         : _floorToMillisecond(builtBefore);
     final out = <String, Map<String, int>>{};
@@ -305,9 +308,9 @@ class AssetTracker {
       final dir = Directory(path);
       if (!dir.existsSync()) continue;
       final files = <String, int>{};
-      for (final entity in dir.listSync()) {
+      for (final FileSystemEntity entity in dir.listSync()) {
         if (entity is! File) continue;
-        final name = p.basename(entity.path);
+        final String name = p.basename(entity.path);
         if (name.startsWith('.')) continue;
         if (cutoff != null && !entity.statSync().modified.isBefore(cutoff)) {
           continue;
@@ -340,7 +343,7 @@ class AssetTracker {
   /// truncates toward zero, which rounds a pre-epoch instant the wrong way,
   /// while Dart's `%` is Euclidean and so floors on both sides of 1970.
   static DateTime _floorToMillisecond(DateTime when) {
-    final us = when.microsecondsSinceEpoch;
+    final int us = when.microsecondsSinceEpoch;
     return DateTime.fromMicrosecondsSinceEpoch(
       us - us % 1000,
       isUtc: when.isUtc,

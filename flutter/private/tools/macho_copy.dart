@@ -37,13 +37,13 @@ void copySnapshotBlobs(
 void copyDirDereferencingSync(Directory src, Directory dst) {
   dst.createSync(recursive: true);
   if (!src.existsSync()) return;
-  final children = src.listSync(followLinks: false)
+  final List<FileSystemEntity> children = src.listSync(followLinks: false)
     ..sort((a, b) => a.path.compareTo(b.path));
   for (final entity in children) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     final destPath = '${dst.path}/$name';
     if (entity is Link) {
-      final resolved = entity.resolveSymbolicLinksSync();
+      final String resolved = entity.resolveSymbolicLinksSync();
       if (FileSystemEntity.isDirectorySync(resolved)) {
         copyDirDereferencingSync(Directory(resolved), Directory(destPath));
       } else {
@@ -83,7 +83,7 @@ _CopyAssetsArgs _parseCopyAssetsArgs(List<String> args) {
   String? isolateSnapshotPath;
   final flags = FlagCursor(args);
   while (flags.moveNext()) {
-    final arg = flags.current;
+    final String arg = flags.current;
     switch (arg) {
       case '--src':
         srcPath = flags.take('--src');
@@ -110,9 +110,9 @@ _CopyAssetsArgs _parseCopyAssetsArgs(List<String> args) {
 
 /// Runs the `copy-assets` subcommand: parses [args] and stages framework assets.
 void runCopyAssets(List<String> args) {
-  final parsed = _parseCopyAssetsArgs(args);
-  final srcPath = parsed.srcPath;
-  final dstPath = parsed.dstPath;
+  final _CopyAssetsArgs parsed = _parseCopyAssetsArgs(args);
+  final String? srcPath = parsed.srcPath;
+  final String? dstPath = parsed.dstPath;
   if (srcPath == null || dstPath == null) {
     usageError('copy-assets requires --src and --dst');
   }
@@ -134,7 +134,10 @@ void runCopyAssets(List<String> args) {
 /// outside the staging tree. A file or link that sits where the directory
 /// belongs is deleted too, so the caller always starts from an absent path.
 void removeDirectoryTreeSync(Directory directory) {
-  final type = FileSystemEntity.typeSync(directory.path, followLinks: false);
+  final FileSystemEntityType type = FileSystemEntity.typeSync(
+    directory.path,
+    followLinks: false,
+  );
   if (type == FileSystemEntityType.notFound) {
     return;
   }
@@ -194,7 +197,7 @@ _AssembleArgs _parseAssembleArgs(List<String> args) {
   String? isolateSnapshotPath;
   final flags = FlagCursor(args);
   while (flags.moveNext()) {
-    final arg = flags.current;
+    final String arg = flags.current;
     switch (arg) {
       case '--binary':
         binaryPath = flags.take('--binary');
@@ -230,11 +233,11 @@ _AssembleArgs _parseAssembleArgs(List<String> args) {
 
 /// Runs the `assemble-macos-framework` subcommand: parses [args] and assembles the `.framework` directory.
 void runAssembleMacosFramework(List<String> args) {
-  final parsed = _parseAssembleArgs(args);
-  final binaryPath = parsed.binaryPath;
-  final infoPlistPath = parsed.infoPlistPath;
-  final assetsPath = parsed.assetsPath;
-  final outputDirPath = parsed.outputDirPath;
+  final _AssembleArgs parsed = _parseAssembleArgs(args);
+  final String? binaryPath = parsed.binaryPath;
+  final String? infoPlistPath = parsed.infoPlistPath;
+  final String? assetsPath = parsed.assetsPath;
+  final String? outputDirPath = parsed.outputDirPath;
   if (binaryPath == null ||
       infoPlistPath == null ||
       assetsPath == null ||
@@ -253,8 +256,13 @@ void runAssembleMacosFramework(List<String> args) {
   // and standalone spawn strategies reuse it between runs. Clear the
   // framework tree first so the zip can only ever hold this run's inputs.
   removeDirectoryTreeSync(fwDir);
-  final fwDirName = fwDir.uri.pathSegments.where((s) => s.isNotEmpty).last;
-  final fwName = fwDirName.substring(0, fwDirName.length - '.framework'.length);
+  final String fwDirName = fwDir.uri.pathSegments
+      .where((s) => s.isNotEmpty)
+      .last;
+  final String fwName = fwDirName.substring(
+    0,
+    fwDirName.length - '.framework'.length,
+  );
   final versionADir = Directory('${fwDir.path}/Versions/A');
   final resourcesDir = Directory('${versionADir.path}/Resources');
   final assetsDestDir = Directory('${resourcesDir.path}/flutter_assets');
@@ -280,9 +288,9 @@ void runAssembleMacosFramework(List<String> args) {
     'Versions/Current/Resources',
   );
 
-  final outputZipPath = parsed.outputZipPath;
+  final String? outputZipPath = parsed.outputZipPath;
   if (outputZipPath != null && outputZipPath.isNotEmpty) {
-    final zipBytes = createFrameworkZipBytes(
+    final Uint8List zipBytes = createFrameworkZipBytes(
       fwDir,
       archiveRootName: fwDirName,
       executableRelPaths: {'$fwDirName/Versions/A/$fwName'},
@@ -325,7 +333,7 @@ _CopyFilesArgs _parseCopyFilesArgs(List<String> args) {
   final positional = <String>[];
   final flags = FlagCursor(args);
   while (flags.moveNext()) {
-    final arg = flags.current;
+    final String arg = flags.current;
     if (arg.startsWith('--allow-non-macho=')) {
       addCommaParts(
         allowNonMacho,
@@ -342,7 +350,7 @@ _CopyFilesArgs _parseCopyFilesArgs(List<String> args) {
     } else if (arg == '--arch') {
       arch = flags.take('--arch');
     } else if (arg == '--allow-non-macho') {
-      final next = flags.peek();
+      final String? next = flags.peek();
       if (next == null || next.startsWith('--')) {
         usageError(
           '--allow-non-macho requires an explicit binary or framework name',
@@ -373,12 +381,13 @@ _CopyFilesArgs _parseCopyFilesArgs(List<String> args) {
 
 /// Runs the `copy-files` subcommand: parses [args] and stages signed files.
 void runCopyFiles(List<String> args) {
-  final parsed = _parseCopyFilesArgs(args);
-  final versions = parsePlatformVersions(
-    parsed.platformName,
-    parsed.minOsStr,
-    parsed.sdkVersionStr,
-  );
+  final _CopyFilesArgs parsed = _parseCopyFilesArgs(args);
+  final ({int? minOs, int? platform, int? sdkVersion}) versions =
+      parsePlatformVersions(
+        parsed.platformName,
+        parsed.minOsStr,
+        parsed.sdkVersionStr,
+      );
 
   Directory(parsed.outputDirPath).createSync(recursive: true);
   _stageCopyFilesEntries(
@@ -413,7 +422,7 @@ void _stageCopyFilesEntries(
 ) {
   var i = 0;
   while (i < positional.length) {
-    final srcPath = positional[i];
+    final String srcPath = positional[i];
     final String destName;
     if (i + 1 < positional.length &&
         !positional[i + 1].contains('/') &&
@@ -438,14 +447,14 @@ void _stageCopyFilesEntry(
   _CopyFilesStaging staging,
 ) {
   final destPath = '${staging.outDirPath}/$destName';
-  final platform = staging.platform;
-  final minOs = staging.minOs;
+  final int? platform = staging.platform;
+  final int? minOs = staging.minOs;
   if (platform == null || minOs == null) {
     File(srcPath).copySync(destPath);
     return;
   }
-  final inputBytes = File(srcPath).readAsBytesSync();
-  final isAllowed = isAllowedNonMacho(
+  final Uint8List inputBytes = File(srcPath).readAsBytesSync();
+  final bool isAllowed = isAllowedNonMacho(
     staging.allowNonMacho,
     inputPath: srcPath,
     outputPath: destName,
@@ -469,7 +478,7 @@ void _stageCopyFilesEntry(
     );
   }
   try {
-    final patched = patchMachO(
+    final Uint8List patched = patchMachO(
       inputBytes,
       PatchOptions(
         platform: platform,
@@ -492,7 +501,7 @@ void runFat(List<String> args) {
   final slicePaths = <String>[];
 
   for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+    final String arg = args[i];
     if (arg == '--output') {
       if (++i >= args.length) usageError('--output requires a value');
       outputPath = args[i];
@@ -511,7 +520,7 @@ void runFat(List<String> args) {
     for (final p in slicePaths) _fatSliceFromFile(p),
   ];
 
-  final out = buildFatMachO(slices);
+  final Uint8List out = buildFatMachO(slices);
   final outFile = File(outputPath);
   outFile.parent.createSync(recursive: true);
   outFile.writeAsBytesSync(out);

@@ -24,7 +24,7 @@ import 'package:test/test.dart';
 const _helperKey = 'rules_flutter/tools/dev_tool/process_group_exec';
 
 String _helper() {
-  final path = resolveRunfile(_helperKey);
+  final String? path = resolveRunfile(_helperKey);
   if (path == null) {
     throw StateError(
       'Could not resolve $_helperKey from runfiles. Run this with '
@@ -38,8 +38,8 @@ String _helper() {
 typedef _Finished = ({int exitCode, String stdout, String stderr});
 
 Future<_Finished> _finish(Process process) async {
-  final out = process.stdout.transform(utf8.decoder).join();
-  final err = process.stderr.transform(utf8.decoder).join();
+  final Future<String> out = process.stdout.transform(utf8.decoder).join();
+  final Future<String> err = process.stderr.transform(utf8.decoder).join();
   return (
     exitCode: await process.exitCode,
     stdout: await out,
@@ -96,7 +96,12 @@ class _Lines {
 }
 
 Future<String> _pgidOf(int pid) async {
-  final ps = await Process.run('ps', ['-o', 'pgid=', '-p', '$pid']);
+  final ProcessResult ps = await Process.run('ps', [
+    '-o',
+    'pgid=',
+    '-p',
+    '$pid',
+  ]);
   return (ps.stdout as String).trim();
 }
 
@@ -104,7 +109,7 @@ void main() {
   test(
     'runs the program as the leader of a process group of its own',
     () async {
-      final process = await Process.start(_helper(), [
+      final Process process = await Process.start(_helper(), [
         '/bin/sh',
         '-c',
         // Blocks on stdin, so the group can be read while the program is alive.
@@ -112,10 +117,10 @@ void main() {
       ]);
       final stdout = _Lines(process.stdout);
       addTearDown(stdout.cancel);
-      final reportedPid = await stdout.next();
+      final String reportedPid = await stdout.next();
 
-      final groupOfProgram = await _pgidOf(process.pid);
-      final groupOfTest = await _pgidOf(pid);
+      final String groupOfProgram = await _pgidOf(process.pid);
+      final String groupOfTest = await _pgidOf(pid);
       await process.stdin.close();
       await process.exitCode;
 
@@ -143,7 +148,9 @@ void main() {
   // trap runs before the next one starts.
   test('one signal to the group reaches a child its parent does not '
       'forward to', () async {
-    final dir = await Directory.systemTemp.createTemp('process_group_exec');
+    final Directory dir = await Directory.systemTemp.createTemp(
+      'process_group_exec',
+    );
     addTearDown(() => dir.delete(recursive: true));
     final parent = File('${dir.path}/parent.sh')
       ..writeAsStringSync(r'''
@@ -153,7 +160,10 @@ child=$!
 # A caught signal interrupts `wait`, so wait again while the child lives.
 while kill -0 "$child" 2>/dev/null; do wait "$child"; done
 ''');
-    final process = await Process.start(_helper(), ['/bin/sh', parent.path]);
+    final Process process = await Process.start(_helper(), [
+      '/bin/sh',
+      parent.path,
+    ]);
     final stdout = _Lines(process.stdout);
     addTearDown(stdout.cancel);
     unawaited(process.stderr.drain<void>());
@@ -184,19 +194,23 @@ while kill -0 "$child" 2>/dev/null; do wait "$child"; done
   });
 
   test("the program's exit status is the caller's", () async {
-    final process = await Process.start(_helper(), ['/bin/sh', '-c', 'exit 7']);
+    final Process process = await Process.start(_helper(), [
+      '/bin/sh',
+      '-c',
+      'exit 7',
+    ]);
 
     expect((await _finish(process)).exitCode, 7);
   });
 
   test("the program's output reaches the caller's pipes", () async {
-    final process = await Process.start(_helper(), [
+    final Process process = await Process.start(_helper(), [
       '/bin/sh',
       '-c',
       'echo to-stdout; echo to-stderr >&2',
     ]);
 
-    final finished = await _finish(process);
+    final _Finished finished = await _finish(process);
     expect(finished.stdout, 'to-stdout\n');
     expect(finished.stderr, 'to-stderr\n');
   });
@@ -205,18 +219,20 @@ while kill -0 "$child" 2>/dev/null; do wait "$child"; done
   // ProcessException into an exit status, so the status and the words have to
   // say so on their own.
   test('a program that cannot be started is named, with the reason', () async {
-    final process = await Process.start(_helper(), ['/nonexistent/bazel']);
+    final Process process = await Process.start(_helper(), [
+      '/nonexistent/bazel',
+    ]);
 
-    final finished = await _finish(process);
+    final _Finished finished = await _finish(process);
     expect(finished.exitCode, 127, reason: "the shell's `not found` status");
     expect(finished.stderr, contains('/nonexistent/bazel'));
     expect(finished.stderr, contains('No such file or directory'));
   });
 
   test('refuses to run with no program', () async {
-    final process = await Process.start(_helper(), []);
+    final Process process = await Process.start(_helper(), []);
 
-    final finished = await _finish(process);
+    final _Finished finished = await _finish(process);
     expect(finished.exitCode, 64);
     expect(finished.stderr, contains('usage'));
   });

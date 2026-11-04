@@ -26,15 +26,15 @@ bool _looksLikeRoot(String root) =>
 
 /// Resolves the rules_flutter workspace root directory.
 String? _workspaceRoot() {
-  final fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
+  final String? fromEnv = Platform.environment['BUILD_WORKSPACE_DIRECTORY'];
   if (fromEnv != null && fromEnv.isNotEmpty && _looksLikeRoot(fromEnv)) {
     return fromEnv;
   }
-  final anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
-  final srcdir = Platform.environment['TEST_SRCDIR'];
+  final String? anchor = Platform.environment['GUARD_ROOT_ANCHOR'];
+  final String? srcdir = Platform.environment['TEST_SRCDIR'];
   if (anchor != null && anchor.isNotEmpty && srcdir != null) {
     try {
-      var dir = File(
+      Directory dir = File(
         File('$srcdir/$anchor').resolveSymbolicLinksSync(),
       ).parent;
       for (var i = 0; i < 8; i++) {
@@ -45,7 +45,7 @@ String? _workspaceRoot() {
       // Fall through to fallback check when anchor fails to resolve.
     }
   }
-  var dir = Directory.current;
+  Directory dir = Directory.current;
   for (var i = 0; i < 8; i++) {
     if (_looksLikeRoot(dir.path)) return dir.path;
     dir = dir.parent;
@@ -70,10 +70,10 @@ class _RcFlag {
 
 /// Strips inline and line comments from [text].
 String _stripComments(String text) {
-  final lines = text.split('\n');
+  final List<String> lines = text.split('\n');
   final result = <String>[];
   for (final line in lines) {
-    final idx = line.indexOf('#');
+    final int idx = line.indexOf('#');
     result.add(idx >= 0 ? line.substring(0, idx) : line);
   }
   return result.join('\n');
@@ -84,7 +84,7 @@ String _stripComments(String text) {
 int _findMatchingParen(String text, int openParenIdx) {
   var depth = 0;
   for (var i = openParenIdx; i < text.length; i++) {
-    final ch = text[i];
+    final String ch = text[i];
     if (ch == '(') depth++;
     if (ch == ')') {
       depth--;
@@ -97,18 +97,22 @@ int _findMatchingParen(String text, int openParenIdx) {
 /// Parses all non-comment `--flaky_test_attempts` occurrences in [content].
 List<_RcFlag> _parseFlakyFlags(String content) {
   final flags = <_RcFlag>[];
-  final lines = content.split('\n');
+  final List<String> lines = content.split('\n');
   final pattern = RegExp(r'--flaky_test_attempts(?:=|\s+)(\S+)');
   var offset = 0;
   for (var i = 0; i < lines.length; i++) {
-    final raw = lines[i];
-    final commentIdx = raw.indexOf('#');
-    final code = (commentIdx >= 0 ? raw.substring(0, commentIdx) : raw).trim();
+    final String raw = lines[i];
+    final int commentIdx = raw.indexOf('#');
+    final String code = (commentIdx >= 0 ? raw.substring(0, commentIdx) : raw)
+        .trim();
     if (code.isNotEmpty && code.contains('--flaky_test_attempts')) {
-      final match = pattern.firstMatch(code);
+      final RegExpMatch? match = pattern.firstMatch(code);
       int? attempts;
       if (match != null) {
-        final val = match.group(1)!.replaceAll('"', '').replaceAll("'", '');
+        final String val = match
+            .group(1)!
+            .replaceAll('"', '')
+            .replaceAll("'", '');
         attempts = int.tryParse(val);
       }
       flags.add(
@@ -129,13 +133,13 @@ List<_RcFlag> _parseFlakyFlags(String content) {
 /// does not set attempts to 2 or more (or anything other than 1).
 List<String> _validateRootBazelrc(String text) {
   final errors = <String>[];
-  final flags = _parseFlakyFlags(text);
+  final List<_RcFlag> flags = _parseFlakyFlags(text);
 
   if (flags.isEmpty) {
     errors.add('Root .bazelrc must pin test --flaky_test_attempts=1');
   }
 
-  final presetMatch = RegExp(
+  final RegExpMatch? presetMatch = RegExp(
     r'^[ \t]*import\s+%workspace%/tools/preset\.bazelrc',
     multiLine: true,
   ).firstMatch(text);
@@ -143,13 +147,13 @@ List<String> _validateRootBazelrc(String text) {
     errors.add('Root .bazelrc missing import %workspace%/tools/preset.bazelrc');
   }
 
-  final userMatch = RegExp(
+  final RegExpMatch? userMatch = RegExp(
     r'^[ \t]*try-import\s+%workspace%/\.bazelrc\.user',
     multiLine: true,
   ).firstMatch(text);
 
-  final presetIdx = presetMatch?.start ?? -1;
-  final userIdx = userMatch?.start ?? -1;
+  final int presetIdx = presetMatch?.start ?? -1;
+  final int userIdx = userMatch?.start ?? -1;
 
   var foundValidPin = false;
   for (final flag in flags) {
@@ -172,8 +176,8 @@ List<String> _validateRootBazelrc(String text) {
       );
     }
 
-    final commentIdx = flag.rawLine.indexOf('#');
-    final code =
+    final int commentIdx = flag.rawLine.indexOf('#');
+    final String code =
         (commentIdx >= 0 ? flag.rawLine.substring(0, commentIdx) : flag.rawLine)
             .trim();
     if (RegExp(r'^[ \t]*test\s+(?:.*?\s+)?--flaky_test_attempts(?:=|\s+)1\b')
@@ -200,7 +204,7 @@ List<String> _validateRootBazelrc(String text) {
 /// 2 or more.
 List<String> _validatePresetBazelrc(String text) {
   final errors = <String>[];
-  final flags = _parseFlakyFlags(text);
+  final List<_RcFlag> flags = _parseFlakyFlags(text);
   for (final flag in flags) {
     if (flag.attempts == null || flag.attempts! >= 2) {
       errors.add(
@@ -216,16 +220,16 @@ List<String> _validatePresetBazelrc(String text) {
 /// Validates that `tools/BUILD.bazel` passes the suppression to bazelrc_preset.
 List<String> _validateToolsBuild(String text) {
   final errors = <String>[];
-  final stripped = _stripComments(text);
-  final callIdx = stripped.indexOf('bazelrc_preset(');
+  final String stripped = _stripComments(text);
+  final int callIdx = stripped.indexOf('bazelrc_preset(');
   if (callIdx == -1) {
     errors.add('tools/BUILD.bazel missing bazelrc_preset invocation');
     return errors;
   }
 
-  final openParenIdx = stripped.indexOf('(', callIdx);
-  final closeParenIdx = _findMatchingParen(stripped, openParenIdx);
-  final callBody = closeParenIdx != -1
+  final int openParenIdx = stripped.indexOf('(', callIdx);
+  final int closeParenIdx = _findMatchingParen(stripped, openParenIdx);
+  final String callBody = closeParenIdx != -1
       ? stripped.substring(openParenIdx + 1, closeParenIdx)
       : stripped.substring(openParenIdx + 1);
 
@@ -244,7 +248,7 @@ List<String> _validateToolsBuild(String text) {
 }
 
 void main() {
-  final root = _workspaceRoot();
+  final String? root = _workspaceRoot();
   if (root == null) {
     test('workspace root discovery', () {
       fail(
@@ -281,22 +285,22 @@ void main() {
   });
 
   test('root .bazelrc pins flaky_test_attempts=1 without retries', () {
-    final text = bazelrcFile.readAsStringSync();
-    final errors = _validateRootBazelrc(text);
+    final String text = bazelrcFile.readAsStringSync();
+    final List<String> errors = _validateRootBazelrc(text);
     expect(errors, isEmpty, reason: errors.join('\n'));
   });
 
   test('tools/preset.bazelrc has no flaky_test_attempts >= 2', () {
-    final text = presetFile.readAsStringSync();
-    final errors = _validatePresetBazelrc(text);
+    final String text = presetFile.readAsStringSync();
+    final List<String> errors = _validatePresetBazelrc(text);
     expect(errors, isEmpty, reason: errors.join('\n'));
   });
 
   test(
     'tools/BUILD.bazel suppresses flaky_test_attempts in bazelrc_preset',
     () {
-      final text = toolsBuildFile.readAsStringSync();
-      final errors = _validateToolsBuild(text);
+      final String text = toolsBuildFile.readAsStringSync();
+      final List<String> errors = _validateToolsBuild(text);
       expect(errors, isEmpty, reason: errors.join('\n'));
     },
   );

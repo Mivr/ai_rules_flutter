@@ -102,14 +102,17 @@ void _holdOpen(FakeVmService fake) {
 }
 
 Future<void> _waitsForTheFirstFrame() async {
-  final host = _newHost('test.native_assembly_gate.frame');
-  final fake = _newFake();
-  final session = _sessionOn(MacOSDevice(), await _connected(fake));
+  final SessionHost host = _newHost('test.native_assembly_gate.frame');
+  final FakeVmService fake = _newFake();
+  final DeviceSession session = _sessionOn(
+    MacOSDevice(),
+    await _connected(fake),
+  );
   _holdOpen(fake);
   host.firstFrameWaits.add(session.waitUntilDrivable(host.protocol));
 
   var assembled = false;
-  final assembling = assembleNativeAfterFirstFrame(
+  final Future<void> assembling = assembleNativeAfterFirstFrame(
     host: host,
     startPaused: false,
     assemble: () async {
@@ -132,8 +135,11 @@ Future<void> _waitsForTheFirstFrame() async {
 }
 
 Future<void> _startsAfterTimeout() async {
-  final host = _newHost('test.native_assembly_gate.timeout');
-  final session = _sessionOn(_ImpatientDevice(), await _connected(_newFake()));
+  final SessionHost host = _newHost('test.native_assembly_gate.timeout');
+  final DeviceSession session = _sessionOn(
+    _ImpatientDevice(),
+    await _connected(_newFake()),
+  );
   host.firstFrameWaits.add(session.waitUntilDrivable(host.protocol));
 
   expect(await _assemble(host, startPaused: false), isTrue);
@@ -143,14 +149,17 @@ Future<void> _startsAfterTimeout() async {
 }
 
 Future<void> _startsAfterFailure() async {
-  final host = _newHost('test.native_assembly_gate.failure');
-  final fake = _newFake();
+  final SessionHost host = _newHost('test.native_assembly_gate.failure');
+  final FakeVmService fake = _newFake();
   // A fault that is not -32601: the poll keeps it as the wait's failure
   // instead of asking again.
   fake.extensionErrors['ext.flutter.didSendFirstFrameEvent'] = StateError(
     'connection reset',
   );
-  final session = _sessionOn(_ImpatientDevice(), await _connected(fake));
+  final DeviceSession session = _sessionOn(
+    _ImpatientDevice(),
+    await _connected(fake),
+  );
   host.firstFrameWaits.add(session.waitUntilDrivable(host.protocol));
 
   expect(await _assemble(host, startPaused: false), isTrue);
@@ -160,14 +169,17 @@ Future<void> _startsAfterFailure() async {
 }
 
 Future<void> _startsAfterRunEnds() async {
-  final host = _newHost('test.native_assembly_gate.run_ended');
-  final fake = _newFake();
-  final session = _sessionOn(MacOSDevice(), await _connected(fake));
+  final SessionHost host = _newHost('test.native_assembly_gate.run_ended');
+  final FakeVmService fake = _newFake();
+  final DeviceSession session = _sessionOn(
+    MacOSDevice(),
+    await _connected(fake),
+  );
   _holdOpen(fake);
   host.firstFrameWaits.add(session.waitUntilDrivable(host.protocol));
 
   var assembled = false;
-  final assembling = assembleNativeAfterFirstFrame(
+  final Future<void> assembling = assembleNativeAfterFirstFrame(
     host: host,
     startPaused: false,
     assemble: () async {
@@ -192,15 +204,15 @@ Future<void> _startsAfterRunEnds() async {
 }
 
 Future<void> _waitsForEverySession() async {
-  final host = _newHost('test.native_assembly_gate.every_session');
-  final firstFake = _newFake();
-  final secondFake = _newFake();
-  final first = _sessionOn(
+  final SessionHost host = _newHost('test.native_assembly_gate.every_session');
+  final FakeVmService firstFake = _newFake();
+  final FakeVmService secondFake = _newFake();
+  final DeviceSession first = _sessionOn(
     MacOSDevice(),
     await _connected(firstFake),
     appId: 'app_1',
   );
-  final second = _sessionOn(
+  final DeviceSession second = _sessionOn(
     MacOSDevice(),
     await _connected(secondFake),
     appId: 'app_2',
@@ -211,7 +223,7 @@ Future<void> _waitsForEverySession() async {
   host.firstFrameWaits.add(second.waitUntilDrivable(host.protocol));
 
   var assembled = false;
-  final assembling = assembleNativeAfterFirstFrame(
+  final Future<void> assembling = assembleNativeAfterFirstFrame(
     host: host,
     startPaused: false,
     assemble: () async {
@@ -240,11 +252,14 @@ Future<void> _waitsForEverySession() async {
 }
 
 Future<void> _startsAtOnceWhenStartPaused() async {
-  final host = _newHost('test.native_assembly_gate.start_paused');
-  final fake = _newFake();
-  final session = _sessionOn(MacOSDevice(), await _connected(fake));
+  final SessionHost host = _newHost('test.native_assembly_gate.start_paused');
+  final FakeVmService fake = _newFake();
+  final DeviceSession session = _sessionOn(
+    MacOSDevice(),
+    await _connected(fake),
+  );
   _holdOpen(fake);
-  final firstFrame = session.waitUntilDrivable(host.protocol);
+  final Future<void> firstFrame = session.waitUntilDrivable(host.protocol);
   host.firstFrameWaits.add(firstFrame);
 
   // A paused app renders nothing until a debugger resumes it, so there is no
@@ -257,8 +272,8 @@ Future<void> _startsAtOnceWhenStartPaused() async {
 }
 
 Future<void> _noClientDoesNotBlock() async {
-  final host = _newHost('test.native_assembly_gate.no_client');
-  final session = _sessionOn(MacOSDevice(), null);
+  final SessionHost host = _newHost('test.native_assembly_gate.no_client');
+  final DeviceSession session = _sessionOn(MacOSDevice(), null);
   host.firstFrameWaits.add(session.waitUntilDrivable(host.protocol));
 
   expect(await _assemble(host, startPaused: false), isTrue);
@@ -273,7 +288,7 @@ Future<void> _noClientDoesNotBlock() async {
 
 Future<void> _launchKeepsTheWait() async {
   final device = _CannedDevice(AppInstance(process: FakeProcess()));
-  final host = _newHost('test.native_assembly_gate.launcher');
+  final SessionHost host = _newHost('test.native_assembly_gate.launcher');
   final plan = RunPlan.forTest(
     target: '//app:app',
     devices: [device],
@@ -281,7 +296,7 @@ Future<void> _launchKeepsTheWait() async {
     allowNoVmService: true,
   );
 
-  final session = await DeviceLauncher(
+  final DeviceSession session = await DeviceLauncher(
     plan: plan,
     host: host,
     appFile: 'app',

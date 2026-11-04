@@ -59,10 +59,10 @@ void main() {
   test('hands DWDS the compiled JavaScript the compiler wrote', () async {
     // The compiler answers with a path, not a value — the JS is on disk, and
     // reading it is this adapter's job.
-    final pending = evaluate();
+    final Future<ExpressionCompilationResult> pending = evaluate();
     await answerWith('a + b');
 
-    final result = await pending;
+    final ExpressionCompilationResult result = await pending;
     expect(result.isError, isFalse);
     expect(result.result, 'a + b');
   });
@@ -73,9 +73,11 @@ void main() {
       // Nine positional arguments, three of them ints and two of them maps: a
       // transposition here compiles fine and evaluates the wrong expression in
       // the wrong scope.
-      final pending = evaluate(expression: 'widget.title');
+      final Future<ExpressionCompilationResult> pending = evaluate(
+        expression: 'widget.title',
+      );
       await pumpEventQueue();
-      final line = fakeProcess.stdinBuffer
+      final String line = fakeProcess.stdinBuffer
           .toString()
           .split('\n')
           .firstWhere((l) => l.startsWith('{'));
@@ -101,10 +103,12 @@ void main() {
       // The compiler writes the diagnostic into the same output file, and it is
       // what the debugger shows in place of a value. Reporting an empty success
       // instead would put a blank where the reason should be.
-      final pending = evaluate(expression: 'not valid dart');
+      final Future<ExpressionCompilationResult> pending = evaluate(
+        expression: 'not valid dart',
+      );
       await answerWith("Error: Expected ';' after this.", errorCount: 1);
 
-      final result = await pending;
+      final ExpressionCompilationResult result = await pending;
       expect(result.isError, isTrue);
       expect(result.result, contains("Expected ';'"));
     },
@@ -113,22 +117,24 @@ void main() {
   test('an output file that is not there is reported, not thrown', () async {
     // The compiler named a file it did not write. A raw FileSystemException
     // out of a debugger evaluation names nothing a user can act on.
-    final pending = evaluate();
+    final Future<ExpressionCompilationResult> pending = evaluate();
     await pumpEventQueue();
     fakeProcess.emitStdout('result exp1');
     fakeProcess.emitStdout('exp1 ${dir.path}/never-written.js 0');
 
-    final result = await pending;
+    final ExpressionCompilationResult result = await pending;
     expect(result.isError, isTrue);
     expect(result.result, contains('never-written.js'));
   });
 
   test('a compiler that is gone is an error naming the expression', () async {
     // Distinct from "compiled, with errors": there is no file at all.
-    final shuttingDown = server.shutdown();
+    final Future<void> shuttingDown = server.shutdown();
     await pumpEventQueue();
 
-    final result = await evaluate(expression: 'a + b');
+    final ExpressionCompilationResult result = await evaluate(
+      expression: 'a + b',
+    );
     expect(result.isError, isTrue);
     expect(result.result, contains('a + b'));
     expect(result.result, contains('shutting down'));

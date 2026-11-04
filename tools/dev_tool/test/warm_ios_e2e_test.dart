@@ -88,14 +88,14 @@ void main() {
 
   group('resolveWarmDiskCache', () {
     test('reads HOME on POSIX', () {
-      final diskCache = resolveWarmDiskCache({
+      final String diskCache = resolveWarmDiskCache({
         'HOME': '/home/developer',
       }, isWindows: false);
       expect(diskCache, '/home/developer/.cache/rules_flutter_e2e_disk');
     });
 
     test(r'reads USERPROFILE when isWindows: true with \ normalized to /', () {
-      final diskCache = resolveWarmDiskCache({
+      final String diskCache = resolveWarmDiskCache({
         'USERPROFILE': r'C:\Users\developer',
       }, isWindows: true);
       expect(diskCache, 'C:/Users/developer/.cache/rules_flutter_e2e_disk');
@@ -167,7 +167,7 @@ void main() {
 
   group('warmRepoRootFor', () {
     test('is four levels above tools/dev_tool/tool/warm_ios_e2e.dart', () {
-      final script = p.join(
+      final String script = p.join(
         'repo root',
         'tools',
         'dev_tool',
@@ -442,7 +442,7 @@ void main() {
         log: (_) {},
       );
 
-      final expectedMissingPath = p.join(
+      final String expectedMissingPath = p.join(
         tempDir.path,
         'e2e/ios_example',
         'MODULE.bazel',

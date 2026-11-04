@@ -16,6 +16,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 /// A user-facing check failure. Thrown, never swallowed: the entry point
 /// reports the message and exits non-zero.
@@ -39,7 +40,7 @@ void applyEdits({
   required List<EditStep> steps,
   required String stepName,
 }) {
-  var src = File(path).readAsStringSync();
+  String src = File(path).readAsStringSync();
   for (final step in steps) {
     if (src.split(step.oldText).length != 2) {
       throw IdentityFailure(
@@ -63,7 +64,7 @@ List<String> splitTopLevelJsonValues(String text) {
   var escape = false;
   var start = -1;
   for (var i = 0; i < text.length; i++) {
-    final c = text[i];
+    final String c = text[i];
     if (inString) {
       if (escape) {
         escape = false;
@@ -104,7 +105,7 @@ StrategyVerdict checkStrategy({
   required String step,
 }) {
   final found = <Map<String, dynamic>>[];
-  for (final raw in splitTopLevelJsonValues(logText)) {
+  for (final String raw in splitTopLevelJsonValues(logText)) {
     Object? decoded;
     try {
       decoded = jsonDecode(raw);
@@ -129,7 +130,7 @@ StrategyVerdict checkStrategy({
       actions: 0,
     );
   }
-  final bad = [
+  final List<String> bad = [
     for (final entry in found)
       if (entry['runner'] != wantRunner || entry['cacheHit'] != false)
         'runner=${entry['runner']} cacheHit=${entry['cacheHit']}',
@@ -168,7 +169,7 @@ final _destroyedWorkerPattern = RegExp(
 /// was destroyed or killed, or null when the logs hold none.
 String? findDestroyedWorker(Iterable<String> verboseLogs) {
   for (final log in verboseLogs) {
-    for (final line in log.split('\n')) {
+    for (final String line in log.split('\n')) {
       if (_destroyedWorkerPattern.hasMatch(line)) return line.trim();
     }
   }
@@ -185,7 +186,7 @@ bool samePids(WorkerPids candidate, WorkerPids baseline) =>
 
 /// The NUL-separated command line of [pid] under [procRoot], blanks joined.
 String cmdlineOf({required String procRoot, required int pid}) {
-  final bytes = File('$procRoot/$pid/cmdline').readAsBytesSync();
+  final Uint8List bytes = File('$procRoot/$pid/cmdline').readAsBytesSync();
   return utf8
       .decode(bytes, allowMalformed: true)
       .replaceAll('\x00', ' ')
@@ -196,10 +197,13 @@ String cmdlineOf({required String procRoot, required int pid}) {
 /// command name sits in parentheses and may itself hold spaces and
 /// parentheses, so the fields are read after the last `)`: state, then ppid.
 int? readPpid({required String procRoot, required int pid}) {
-  final stat = File('$procRoot/$pid/stat').readAsStringSync();
-  final close = stat.lastIndexOf(')');
+  final String stat = File('$procRoot/$pid/stat').readAsStringSync();
+  final int close = stat.lastIndexOf(')');
   if (close < 0) return null;
-  final rest = stat.substring(close + 1).trim().split(RegExp(r'\s+'));
+  final List<String> rest = stat
+      .substring(close + 1)
+      .trim()
+      .split(RegExp(r'\s+'));
   if (rest.length < 2) return null;
   return int.tryParse(rest[1]);
 }
@@ -218,8 +222,8 @@ WorkerPids? findWorkerPids({
   String procRoot = '/proc',
 }) {
   final workers = <int>[];
-  for (final entry in Directory(procRoot).listSync()) {
-    final pid = int.tryParse(entry.path.split('/').last);
+  for (final FileSystemEntity entry in Directory(procRoot).listSync()) {
+    final int? pid = int.tryParse(entry.path.split('/').last);
     if (pid == null) continue;
     String cmdline;
     try {
@@ -236,8 +240,8 @@ WorkerPids? findWorkerPids({
   }
   if (workers.length != 1) return null;
   final compilers = <int>[];
-  for (final entry in Directory(procRoot).listSync()) {
-    final pid = int.tryParse(entry.path.split('/').last);
+  for (final FileSystemEntity entry in Directory(procRoot).listSync()) {
+    final int? pid = int.tryParse(entry.path.split('/').last);
     if (pid == null) continue;
     int? ppid;
     String cmdline;
@@ -267,7 +271,7 @@ bool bytesEqual(List<int> a, List<int> b) {
 
 /// The sha256 hex digest of the file at [path], via `sha256sum`.
 Future<String> sha256OfFile(String path) async {
-  final result = await Process.run('sha256sum', [path]);
+  final ProcessResult result = await Process.run('sha256sum', [path]);
   if (result.exitCode != 0) {
     throw IdentityFailure('sha256sum $path failed: ${result.stderr}');
   }
@@ -456,26 +460,22 @@ class IdentityRun {
   Future<String> _runBuild(BuildSpec spec) async {
     final stopwatch = Stopwatch()..start();
     final execlog = '${work.path}/${spec.logName}.json';
-    final result = await Process.run(
-      bazel,
-      [
-        '--output_base=${spec.outputBase}',
-        'build',
-        _target,
-        '-c',
-        'dbg',
-        _flag,
-        ...spec.strategyFlags,
-        '--disk_cache=${spec.disk}',
-        '--noremote_accept_cached',
-        '--noremote_upload_local_results',
-        '--execution_log_json_file=$execlog',
-        '--execution_log_sort=false',
-        '--symlink_prefix=${work.path}/${spec.linkPrefix}',
-        if (spec.workerVerbose) '--worker_verbose',
-      ],
-      workingDirectory: _ws,
-    );
+    final ProcessResult result = await Process.run(bazel, [
+      '--output_base=${spec.outputBase}',
+      'build',
+      _target,
+      '-c',
+      'dbg',
+      _flag,
+      ...spec.strategyFlags,
+      '--disk_cache=${spec.disk}',
+      '--noremote_accept_cached',
+      '--noremote_upload_local_results',
+      '--execution_log_json_file=$execlog',
+      '--execution_log_sort=false',
+      '--symlink_prefix=${work.path}/${spec.linkPrefix}',
+      if (spec.workerVerbose) '--worker_verbose',
+    ], workingDirectory: _ws);
     stopwatch.stop();
     final verbose = '${result.stdout}${result.stderr}';
     File('${work.path}/${spec.logName}.log').writeAsStringSync(verbose);
@@ -486,8 +486,8 @@ class IdentityRun {
     if (result.exitCode != 0) {
       // The scratch log is deleted on cleanup, so the failure cause travels
       // in the output like the old shell check's `tail -n 30`.
-      final lines = verbose.split('\n');
-      final tail = lines
+      final List<String> lines = verbose.split('\n');
+      final String tail = lines
           .skip(lines.length > 30 ? lines.length - 30 : 0)
           .join('\n');
       stderr.writeln('identity-check: build ${spec.step} log tail:\n$tail');
@@ -495,7 +495,7 @@ class IdentityRun {
         'build ${spec.step} failed (rc=${result.exitCode})',
       );
     }
-    final verdict = checkStrategy(
+    final StrategyVerdict verdict = checkStrategy(
       logText: File(execlog).readAsStringSync(),
       wantRunner: spec.wantRunner,
       step: spec.step,
@@ -517,7 +517,7 @@ class IdentityRun {
   /// Records the warm worker on the first call; afterwards requires the same
   /// two PIDs, so a second worker or a restarted compiler fails.
   void _checkWarm({required String step}) {
-    final pids = findWorkerPids(outputBase: _wbase);
+    final WorkerPids? pids = findWorkerPids(outputBase: _wbase);
     if (pids == null) {
       throw IdentityFailure('$step: no single warm worker with one compiler');
     }
@@ -525,7 +525,7 @@ class IdentityRun {
       'identity-check: $step warm worker pid=${pids.worker} '
       'compiler pid=${pids.compiler}',
     );
-    final warm = _warm;
+    final WorkerPids? warm = _warm;
     if (warm == null) {
       _warm = pids;
     } else if (!samePids(pids, warm)) {
@@ -544,21 +544,21 @@ class IdentityRun {
     required String workerDill,
     required String oneshotDill,
   }) async {
-    final a = File('${work.path}/$workerDill').readAsBytesSync();
-    final b = File('${work.path}/$oneshotDill').readAsBytesSync();
+    final Uint8List a = File('${work.path}/$workerDill').readAsBytesSync();
+    final Uint8List b = File('${work.path}/$oneshotDill').readAsBytesSync();
     if (!bytesEqual(a, b)) {
       throw IdentityFailure(
         '$step differs: worker sha256=${await sha256OfFile('${work.path}/$workerDill')} '
         'one-shot sha256=${await sha256OfFile('${work.path}/$oneshotDill')}',
       );
     }
-    final digest = await sha256OfFile('${work.path}/$workerDill');
+    final String digest = await sha256OfFile('${work.path}/$workerDill');
     print('identity-check: $step identical (sha256=$digest)');
   }
 
   Future<void> _workerS0() async {
     print('identity-check: worker leg (strategy=worker, one instance)');
-    final verbose = await _runBuild((
+    final String verbose = await _runBuild((
       step: 'worker-s0',
       outputBase: _wbase,
       linkPrefix: 'wlink-',
@@ -743,15 +743,15 @@ class IdentityRun {
     required String other,
     required String edit,
   }) {
-    final a = File('${work.path}/$name').readAsBytesSync();
-    final b = File('${work.path}/$other').readAsBytesSync();
+    final Uint8List a = File('${work.path}/$name').readAsBytesSync();
+    final Uint8List b = File('${work.path}/$other').readAsBytesSync();
     if (bytesEqual(a, b)) throw IdentityFailure('edit $edit changed no bytes');
   }
 
   void _verifyWarmthTotals() {
     print('identity-check: warmth evidence across the worker leg');
     var created = 0;
-    for (final log in _workerLogs) {
+    for (final String log in _workerLogs) {
       created += countCreatedWorkers(log);
     }
     if (created != 1) {
@@ -759,13 +759,13 @@ class IdentityRun {
         'created $created FlutterKernelCompile workers, want 1',
       );
     }
-    final destroyed = findDestroyedWorker(_workerLogs);
+    final String? destroyed = findDestroyedWorker(_workerLogs);
     if (destroyed != null) {
       throw IdentityFailure(
         'a FlutterKernelCompile worker was destroyed mid-leg: $destroyed',
       );
     }
-    final warm = _warm;
+    final WorkerPids? warm = _warm;
     print(
       'identity-check: one worker (pid=${warm?.worker}), '
       'one compiler (pid=${warm?.compiler}), all four builds warm',
@@ -804,8 +804,8 @@ class IdentityRun {
     } on FileSystemException catch (e) {
       stderr.writeln('identity-check: warning: restore failed ($e).');
     }
-    for (final base in [_wbase, _obase]) {
-      final result = await Process.run(
+    for (final String base in [_wbase, _obase]) {
+      final ProcessResult result = await Process.run(
         bazel,
         ['--output_base=$base', 'shutdown'],
         // Same workspace as the builds: under `bazel run` the tool's own

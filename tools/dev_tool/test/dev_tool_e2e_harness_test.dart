@@ -68,7 +68,11 @@ void main() {
 
   group('sendCommand, when the response never comes,', () {
     test('reports that nothing at all came back', () async {
-      final pending = tool.sendCommand(1, 'app.stop', timeout: bound);
+      final Future<Map<String, dynamic>> pending = tool.sendCommand(
+        1,
+        'app.stop',
+        timeout: bound,
+      );
 
       await expectLater(
         pending,
@@ -97,7 +101,7 @@ void main() {
 
     test('names a command that started and never finished, and quotes what '
         'the tool was printing', () async {
-      final pending = tool.sendCommand(
+      final Future<Map<String, dynamic>> pending = tool.sendCommand(
         2,
         'app.hotReload',
         params: {'appId': 'app-1'},
@@ -143,7 +147,7 @@ void main() {
     test(
       'distinguishes a handler that returned from one still running',
       () async {
-        final pending = tool.sendCommand(
+        final Future<Map<String, dynamic>> pending = tool.sendCommand(
           3,
           'app.restart',
           params: {'appId': 'app-1'},
@@ -253,7 +257,7 @@ void main() {
         // was delivered and is still inside the tool.
         server.listen((request) {});
 
-        final pending = tool.httpCommand(
+        final Future<Map<String, dynamic>> pending = tool.httpCommand(
           'app.getText',
           {'appId': 'app-1'},
           timeout: bound,
@@ -507,7 +511,9 @@ void main() {
         asked = [];
         server.listen((request) async {
           asked.add(request.uri.path);
-          final isFlutter = request.uri.path.endsWith('/screenshot/flutter');
+          final bool isFlutter = request.uri.path.endsWith(
+            '/screenshot/flutter',
+          );
           request.response.statusCode = isFlutter
               ? flutterStatus
               : HttpStatus.ok;
@@ -650,7 +656,7 @@ void main() {
       String stderr = '',
       int exitCode = 0,
     }) {
-      final path = p.join(dir.path, 'adb');
+      final String path = p.join(dir.path, 'adb');
       File(path).writeAsStringSync(
         '#!/bin/sh\n'
         "cat <<'STDOUT_EOF'\n$stdout\nSTDOUT_EOF\n"
@@ -667,7 +673,7 @@ void main() {
     }) => AndroidDeviceProbe.detect(environment: env, adbPath: adb);
 
     test('an authorized device is the one the run uses', () {
-      final probe = detect(
+      final AndroidDeviceProbe probe = detect(
         stubAdb(stdout: 'List of devices attached\nemulator-5554\tdevice\n'),
       );
       expect(probe, isA<AndroidDeviceFound>());
@@ -677,7 +683,9 @@ void main() {
 
     // The one legitimate skip: adb worked, and there is nothing plugged in.
     test('an empty bench skips, and the reason says the list was empty', () {
-      final probe = detect(stubAdb(stdout: 'List of devices attached\n'));
+      final AndroidDeviceProbe probe = detect(
+        stubAdb(stdout: 'List of devices attached\n'),
+      );
       expect(probe, isA<NoAndroidDevice>());
       expect(probe.skipReason, contains('no Android device attached'));
     });
@@ -686,8 +694,8 @@ void main() {
     // above: answering the same `null` skips the whole Android group and
     // reports the run green.
     test('an adb that cannot be run fails, naming the path that was tried', () {
-      final missing = p.join(dir.path, 'not-adb');
-      final probe = detect(missing);
+      final String missing = p.join(dir.path, 'not-adb');
+      final AndroidDeviceProbe probe = detect(missing);
       expect(probe, isA<AndroidProbeFailed>());
       expect((probe as AndroidProbeFailed).reason, contains(missing));
       expect(
@@ -700,7 +708,7 @@ void main() {
     });
 
     test('an adb that exits non-zero fails, carrying what it said', () {
-      final probe = detect(
+      final AndroidDeviceProbe probe = detect(
         stubAdb(
           stderr: 'cannot connect to daemon',
           exitCode: 1,
@@ -717,7 +725,7 @@ void main() {
     test(
       'a device present but unauthorized fails, naming it and its state',
       () {
-        final probe = detect(
+        final AndroidDeviceProbe probe = detect(
           stubAdb(
             stdout: 'List of devices attached\n58051JEBF01271\tunauthorized\n',
           ),
@@ -734,7 +742,7 @@ void main() {
     // adb reports states that contain spaces. Reading only the first word
     // would quote this one as `no`, which reads like a state of its own.
     test('a multi-word state is reported whole', () {
-      final probe = detect(
+      final AndroidDeviceProbe probe = detect(
         stubAdb(
           stdout:
               'List of devices attached\n'
@@ -750,7 +758,7 @@ void main() {
     test(
       'an unusable device beside a usable one still yields the usable one',
       () {
-        final probe = detect(
+        final AndroidDeviceProbe probe = detect(
           stubAdb(
             stdout:
                 'List of devices attached\n'
@@ -766,7 +774,7 @@ void main() {
     // line would read `* daemon started successfully` as a device named `*`
     // in state `daemon`, and a bench with nothing on it would report one.
     test('daemon chatter ahead of the header is not read as a device', () {
-      final probe = detect(
+      final AndroidDeviceProbe probe = detect(
         stubAdb(
           stdout:
               '* daemon not running; starting now at tcp:5037\n'
@@ -778,7 +786,9 @@ void main() {
     });
 
     test('output with no header at all fails rather than reading as empty', () {
-      final probe = detect(stubAdb(stdout: 'adb: usage: unknown command'));
+      final AndroidDeviceProbe probe = detect(
+        stubAdb(stdout: 'adb: usage: unknown command'),
+      );
       expect(probe, isA<AndroidProbeFailed>());
       expect(
         (probe as AndroidProbeFailed).reason,
@@ -790,7 +800,7 @@ void main() {
       const env = {'ANDROID_SERIAL': 'emulator-5554'};
 
       test('it is used even though another is listed first', () {
-        final probe = detect(
+        final AndroidDeviceProbe probe = detect(
           stubAdb(
             stdout:
                 'List of devices attached\n'
@@ -805,7 +815,7 @@ void main() {
       // Naming a device is an instruction. Running a different one, or
       // quietly skipping, both ignore it.
       test('its absence fails and lists what was attached instead', () {
-        final probe = detect(
+        final AndroidDeviceProbe probe = detect(
           stubAdb(stdout: 'List of devices attached\n58051JEBF01271\tdevice\n'),
           env: env,
         );
@@ -818,7 +828,7 @@ void main() {
       });
 
       test('its being listed unusable fails, naming the state', () {
-        final probe = detect(
+        final AndroidDeviceProbe probe = detect(
           stubAdb(stdout: 'List of devices attached\nemulator-5554\toffline\n'),
           env: env,
         );

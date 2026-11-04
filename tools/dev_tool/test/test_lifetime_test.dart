@@ -15,7 +15,7 @@ void main() {
     test(
       'hands the resource back and leaves it alone while the test runs',
       () async {
-        final resource = await spawnBoundToTest(
+        final String resource = await spawnBoundToTest(
           spawn: () async => 'live-resource',
           dispose: (r) async => disposedForReal.add(r),
         );
@@ -37,7 +37,7 @@ void main() {
       final spawnGate = Completer<String>();
       late FutureOr<dynamic> Function() teardown;
 
-      final pending = spawnBoundToTest(
+      final Future<String> pending = spawnBoundToTest(
         spawn: () => spawnGate.future,
         dispose: (r) async => disposed.add(r),
         register: (callback) => teardown = callback,
@@ -63,7 +63,7 @@ void main() {
         final spawnGate = Completer<String>();
         late FutureOr<dynamic> Function() teardown;
 
-        final pending = spawnBoundToTest(
+        final Future<String> pending = spawnBoundToTest(
           spawn: () => spawnGate.future,
           dispose: (_) async {},
           register: (callback) => teardown = callback,

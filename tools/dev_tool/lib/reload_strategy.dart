@@ -161,7 +161,7 @@ final class StrategyRejected extends StrategyOutcome {
     List<String> applied,
     List<String> timedOut,
   ) {
-    final total = refused.length + applied.length + timedOut.length;
+    final int total = refused.length + applied.length + timedOut.length;
     return [
       if (refused.isNotEmpty)
         '${refused.length} of $total device(s) refused it',
@@ -251,10 +251,10 @@ class VmServiceReloadStrategy implements ReloadStrategy {
     DeviceSession session,
     Future<ApplyVerdict> Function(VmServiceClient) apply,
   ) async {
-    final client = session.vmClient!;
-    final inner = apply(client);
+    final VmServiceClient client = session.vmClient!;
+    final Future<ApplyVerdict> inner = apply(client);
     try {
-      final verdict = await inner.timeout(rpcTimeout);
+      final ApplyVerdict verdict = await inner.timeout(rpcTimeout);
       return verdict is VerdictApplied
           ? _DeviceResult.applied
           : _DeviceResult.refused;
@@ -289,7 +289,7 @@ class VmServiceReloadStrategy implements ReloadStrategy {
     final applied = <String>[];
     final timedOut = <String>[];
     for (var i = 0; i < reachable.length; i++) {
-      final into = switch (results[i]) {
+      final List<String> into = switch (results[i]) {
         _DeviceResult.applied => applied,
         _DeviceResult.refused => refused,
         _DeviceResult.timedOut => timedOut,
@@ -311,8 +311,8 @@ class VmServiceReloadStrategy implements ReloadStrategy {
     List<DeviceSession> sessions,
     Future<ApplyVerdict> Function(VmServiceClient) apply,
   ) async {
-    final reachable = _reachable(sessions);
-    final results = await Future.wait([
+    final List<DeviceSession> reachable = _reachable(sessions);
+    final List<_DeviceResult> results = await Future.wait([
       for (final s in reachable) _bounded(s, apply),
     ]);
     return _outcome(results, reachable);
@@ -442,11 +442,11 @@ class DwdsReloadStrategy implements ReloadStrategy {
   }
 
   void _onServiceEvent(vm.Event event) {
-    final service = event.service;
+    final String? service = event.service;
     if (service == null) return;
     switch (event.kind) {
       case vm.EventKind.kServiceRegistered:
-        if (event.method case final method?) {
+        if (event.method case final String method?) {
           _registeredServices[service] = method;
         }
       case vm.EventKind.kServiceUnregistered:
@@ -478,7 +478,7 @@ class DwdsReloadStrategy implements ReloadStrategy {
   /// same connection under two names.
   VmServiceClient? _clientFor(List<DeviceSession> sessions) {
     for (final session in sessions) {
-      final client = session.vmClient;
+      final VmServiceClient? client = session.vmClient;
       if (client != null) return client;
     }
     return null;
@@ -487,7 +487,7 @@ class DwdsReloadStrategy implements ReloadStrategy {
   Future<String?> _getIsolateId() async {
     if (_isolateId != null) return _isolateId;
     if (vmService == null) return null;
-    final vmInfo = await vmService!.getVM();
+    final vm.VM vmInfo = await vmService!.getVM();
     if (vmInfo.isolates != null && vmInfo.isolates!.isNotEmpty) {
       _isolateId = vmInfo.isolates!.first.id;
     }
@@ -529,13 +529,13 @@ class DwdsReloadStrategy implements ReloadStrategy {
     }
 
     try {
-      final isolateId = await _getIsolateId();
+      final String? isolateId = await _getIsolateId();
       if (isolateId == null) {
         return const StrategyUnsupported('no isolate found in the browser');
       }
 
       // Trigger DWDS hot reload: reloadSources → $dartReloadModifiedModules.
-      final report = await vmService!.reloadSources(isolateId);
+      final vm.ReloadReport report = await vmService!.reloadSources(isolateId);
       if (report.success != true) {
         return const StrategyRejected('the browser refused the new sources');
       }
@@ -646,7 +646,7 @@ class DwdsReloadStrategy implements ReloadStrategy {
     // and then vanished still reads as connected here and takes this path —
     // that gap is tracked separately, and closing it needs the connection's
     // lifetime, not another null check.
-    final service = _vmService!;
+    final vm.VmService service = _vmService!;
 
     try {
       await service.callMethod(_hotRestartMethod).timeout(restartTimeout);
@@ -718,11 +718,11 @@ class DwdsReloadStrategy implements ReloadStrategy {
     }
 
     try {
-      final isolateId = await _getIsolateId();
+      final String? isolateId = await _getIsolateId();
       if (isolateId == null) {
         return const StrategyUnsupported('no isolate found in the browser');
       }
-      final client = _clientFor(sessions);
+      final VmServiceClient? client = _clientFor(sessions);
       await client?.requireServiceExtension('ext.flutter.evict');
       for (final archivePath in changed) {
         await vmService!.callServiceExtension(
@@ -799,7 +799,7 @@ class WasmReloadStrategy implements ReloadStrategy {
     // dart2wasm has no incremental reload, so this is a rebuild and a page
     // reload. It gets the edit running, but state is lost — reporting it as a
     // hot reload would misdescribe what the user just got.
-    final restarted = await applyRestart(result, sessions);
+    final StrategyOutcome restarted = await applyRestart(result, sessions);
     if (restarted.isSuccess) {
       return const StrategyUnsupported(
         'WASM has no hot reload — rebuilt and reloaded the page instead',
@@ -828,7 +828,7 @@ class WasmReloadStrategy implements ReloadStrategy {
 
   Future<StrategyOutcome> _rebuildAndReload() async {
     try {
-      final buildOk = await rebuild();
+      final bool buildOk = await rebuild();
       if (!buildOk) {
         return const StrategyRejected('the WASM rebuild failed');
       }
@@ -853,7 +853,7 @@ class WasmReloadStrategy implements ReloadStrategy {
 /// same thing to the caller, which reports them identically as a rejected
 /// reload.
 Future<void> cdpPageReload(int cdpPort, {String? appUrl}) async {
-  final ws = await WebSocket.connect(
+  final WebSocket ws = await WebSocket.connect(
     await resolveCdpPageTarget(cdpPort, appUrl: appUrl),
   );
   final responseCompleter = Completer<Map<String, dynamic>>();

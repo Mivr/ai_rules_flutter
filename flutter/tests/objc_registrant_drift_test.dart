@@ -43,7 +43,7 @@ int _lineStart(String text, int tagStart) =>
 
 /// Offset of the newline ending the line holding [afterTag], or [end].
 int _lineEnd(String text, int afterTag, int end) {
-  final newline = text.indexOf('\n', afterTag);
+  final int newline = text.indexOf('\n', afterTag);
   if (newline < 0 || newline >= end) return end;
   return newline;
 }
@@ -54,17 +54,17 @@ int _lineEnd(String text, int afterTag, int end) {
 int _findClose(String text, int from, int end, String key) {
   var i = from;
   while (true) {
-    final next = text.indexOf('{{', i);
+    final int next = text.indexOf('{{', i);
     if (next < 0 || next >= end) {
       throw StateError('no {{/$key}} closing the section');
     }
-    final tagEnd = text.indexOf('}}', next);
+    final int tagEnd = text.indexOf('}}', next);
     if (tagEnd < 0 || tagEnd >= end) {
       throw StateError('unclosed tag at offset $next');
     }
     if (text.substring(next + 2, tagEnd).trim() == '/$key') {
-      final lineStart = _lineStart(text, next);
-      final lineEnd = _lineEnd(text, tagEnd + 2, end);
+      final int lineStart = _lineStart(text, next);
+      final int lineEnd = _lineEnd(text, tagEnd + 2, end);
       if (text.substring(lineStart, next).trim().isNotEmpty ||
           text.substring(tagEnd + 2, lineEnd).trim().isNotEmpty) {
         throw StateError('non-standalone {{/$key}}');
@@ -89,18 +89,18 @@ void _render(
   StringBuffer out,
 ) {
   while (true) {
-    final next = text.indexOf('{{', i);
+    final int next = text.indexOf('{{', i);
     if (next < 0 || next >= end) {
       out.write(text.substring(i, end));
       return;
     }
-    final tagEnd = text.indexOf('}}', next);
+    final int tagEnd = text.indexOf('}}', next);
     if (tagEnd < 0 || tagEnd >= end) {
       throw StateError('unclosed tag at offset $next');
     }
-    final raw = text.substring(next + 2, tagEnd).trim();
+    final String raw = text.substring(next + 2, tagEnd).trim();
     if (raw.isEmpty) throw StateError('empty tag at offset $next');
-    final marker = raw[0];
+    final String marker = raw[0];
     if (marker != '#' && marker != '/' && marker != '!') {
       out.write(text.substring(i, next));
       if (!vars.containsKey(raw)) {
@@ -110,10 +110,10 @@ void _render(
       i = tagEnd + 2;
       continue;
     }
-    final key = raw.substring(1).trim();
-    final lineStart = _lineStart(text, next);
-    final lineEnd = _lineEnd(text, tagEnd + 2, end);
-    final standalone =
+    final String key = raw.substring(1).trim();
+    final int lineStart = _lineStart(text, next);
+    final int lineEnd = _lineEnd(text, tagEnd + 2, end);
+    final bool standalone =
         text.substring(lineStart, next).trim().isEmpty &&
         text.substring(tagEnd + 2, lineEnd).trim().isEmpty;
     if (marker == '!') {
@@ -125,14 +125,14 @@ void _render(
     if (marker == '/') throw StateError('stray {{/$key}}');
     if (!standalone) throw StateError('non-standalone {{#$key}}');
     out.write(text.substring(i, lineStart));
-    final innerStart = lineEnd >= end ? end : lineEnd + 1;
-    final packed = _findClose(text, innerStart, end, key);
-    final innerEnd = packed ~/ 1000000;
-    final afterClose = packed % 1000000;
+    final int innerStart = lineEnd >= end ? end : lineEnd + 1;
+    final int packed = _findClose(text, innerStart, end, key);
+    final int innerEnd = packed ~/ 1000000;
+    final int afterClose = packed % 1000000;
     if (items == null || key != 'methodChannelPlugins') {
       throw StateError('cannot render section {{#$key}}');
     }
-    for (final item in items) {
+    for (final Map<String, String> item in items) {
       _render(
         text,
         innerStart,
@@ -149,12 +149,12 @@ void _render(
 /// The template constant [name] as the tool's Dart parser sees it.
 String _extractTemplate(String source, String name) {
   final marker = "const $name = '''";
-  final open = source.indexOf(marker);
+  final int open = source.indexOf(marker);
   if (open < 0) throw StateError('$name not found in flutter_plugins.dart');
-  final bodyStart = open + marker.length;
-  final close = source.indexOf("'''", bodyStart);
+  final int bodyStart = open + marker.length;
+  final int close = source.indexOf("'''", bodyStart);
   if (close < 0) throw StateError('$name never closes in flutter_plugins.dart');
-  final body = source.substring(bodyStart, close);
+  final String body = source.substring(bodyStart, close);
   if (!body.startsWith('\n')) {
     throw StateError(
       '$name does not start with a newline; extraction is stale',
@@ -165,7 +165,7 @@ String _extractTemplate(String source, String name) {
 
 void main(List<String> args) {
   final runfiles = Runfiles.create();
-  final keys = args
+  final List<String> keys = args
       .expand((arg) => arg.split(RegExp(r'\s+')))
       .where((key) => key.isNotEmpty)
       .toList();
@@ -175,12 +175,13 @@ void main(List<String> args) {
       'registrant), got ${keys.length}',
     );
   }
-  final toolSource = File(runfiles.rlocation(keys[0])).readAsStringSync();
-  final headerTemplate = _extractTemplate(
+  final String toolSource = File(runfiles.rlocation(keys[0]))
+      .readAsStringSync();
+  final String headerTemplate = _extractTemplate(
     toolSource,
     '_objcPluginRegistryHeaderTemplate',
   );
-  final implTemplate = _extractTemplate(
+  final String implTemplate = _extractTemplate(
     toolSource,
     '_objcPluginRegistryImplementationTemplate',
   );
@@ -228,7 +229,7 @@ void main(List<String> args) {
 
   group('flutter_ios_app forwards exclude_plugins', () {
     test('excluded plugin leaves no import and no call', () {
-      final registrant = File(
+      final String registrant = File(
         runfiles.rlocation(keys[4]),
       ).readAsStringSync();
       expect(registrant, contains('class GeneratedPluginRegistrant'));

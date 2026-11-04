@@ -168,7 +168,7 @@ class FrontendServer {
   /// compile; the rest is emitting the whole program's JavaScript, which no
   /// seed avoids.
   Future<void> start() async {
-    final tempDir = _outputDir = await createTempDir('flutter_fs_');
+    final Directory tempDir = _outputDir = await createTempDir('flutter_fs_');
     _outputDillPath = '${tempDir.path}/app.dill';
 
     _process = await _processFactory(_dartaotruntimePath, [
@@ -211,7 +211,7 @@ class FrontendServer {
   /// permit, with every queued reload stalled behind it. The compiler is
   /// already gone; there is nothing left to wait for.
   void _completeWithError(String message) {
-    final completer = _pendingResult;
+    final Completer<CompileResult>? completer = _pendingResult;
     if (completer != null && !completer.isCompleted) {
       completer.complete(
         CompileResult(
@@ -224,7 +224,7 @@ class FrontendServer {
     _pendingResult = null;
     _pendingKind = null;
 
-    final rejecting = _pendingReject;
+    final Completer<void>? rejecting = _pendingReject;
     _pendingReject = null;
     _rejectBoundaryKey = null;
     if (rejecting != null && !rejecting.isCompleted) rejecting.complete();
@@ -397,7 +397,7 @@ class FrontendServer {
   /// A compiler that stops answering would otherwise hold the command pool
   /// forever; answering with a failure keeps the session usable and says why.
   Future<CompileResult> _awaitResponse(String what) {
-    final pending = _pendingResult!;
+    final Completer<CompileResult> pending = _pendingResult!;
     return pending.future.timeout(
       _responseTimeout,
       onTimeout: () {
@@ -457,7 +457,7 @@ class FrontendServer {
     _awaitingVerdict = false;
     if (_closing || _process == null) return;
 
-    final done = _pendingReject = Completer<void>();
+    final Completer<void> done = _pendingReject = Completer<void>();
     _writeln('reject');
     await done.future.timeout(
       _responseTimeout,
@@ -487,12 +487,12 @@ class FrontendServer {
     // delivery, where it is reported to the zone rather than thrown back to the
     // caller, so [_write]'s guards never see it and the run dies with exit 255.
     // The only guard that holds is not writing.
-    final process = _process;
+    final Process? process = _process;
     _process = null;
     _quit(process);
     await process?.exitCode;
     // After the exit, never before: the compiler holds `app.dill` open.
-    final outputDir = _outputDir;
+    final Directory? outputDir = _outputDir;
     _outputDir = null;
     if (outputDir != null) await deleteTempDir(outputDir);
   }
@@ -565,9 +565,9 @@ class FrontendServer {
     _lineBuffer += data;
 
     while (true) {
-      final newlineIndex = _lineBuffer.indexOf('\n');
+      final int newlineIndex = _lineBuffer.indexOf('\n');
       if (newlineIndex < 0) break;
-      final line = _lineBuffer.substring(0, newlineIndex);
+      final String line = _lineBuffer.substring(0, newlineIndex);
       _lineBuffer = _lineBuffer.substring(newlineIndex + 1);
       _handleLine(line);
     }
@@ -612,7 +612,7 @@ class FrontendServer {
     }
     if (line.trim() == _rejectBoundaryKey) {
       _rejectBoundaryKey = null;
-      final done = _pendingReject;
+      final Completer<void>? done = _pendingReject;
       _pendingReject = null;
       if (done != null && !done.isCompleted) done.complete();
     }
@@ -622,7 +622,7 @@ class FrontendServer {
   ///
   /// A bare key echo (no dill path yet) is not complete; keep waiting.
   void _finishCompile(String line) {
-    final rest = line.substring(_resultBoundaryKey!.length).trim();
+    final String rest = line.substring(_resultBoundaryKey!.length).trim();
 
     if (rest.isEmpty) {
       // Key echo line — not yet complete, keep waiting.
@@ -645,9 +645,9 @@ class FrontendServer {
 
   /// Completes [_pendingResult] from `<output_path> <error_count>` text.
   void _completePendingResult(String rest) {
-    final spaceIdx = rest.lastIndexOf(' ');
-    final outputPath = spaceIdx > 0 ? rest.substring(0, spaceIdx) : rest;
-    final errorCount = spaceIdx > 0
+    final int spaceIdx = rest.lastIndexOf(' ');
+    final String outputPath = spaceIdx > 0 ? rest.substring(0, spaceIdx) : rest;
+    final int errorCount = spaceIdx > 0
         ? int.tryParse(rest.substring(spaceIdx + 1)) ?? 0
         : 0;
 

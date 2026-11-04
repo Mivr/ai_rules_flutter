@@ -1,3 +1,4 @@
+import 'package:args/args.dart';
 import 'package:flutter_bazel_dev_tool/attach_command.dart';
 import 'package:flutter_bazel_dev_tool/build_command.dart';
 import 'package:flutter_bazel_dev_tool/cli_args.dart';
@@ -64,7 +65,7 @@ void main() {
       ('attach', AttachCommand.parser),
     ]) {
       test(command, () {
-        final results = parser.parse([
+        final ArgResults results = parser.parse([
           '-t',
           '//:app',
           '--build-arg=--ui_event_filters=-info,-progress',

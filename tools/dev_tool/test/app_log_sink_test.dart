@@ -75,7 +75,7 @@ void main() {
     test('emits an app.log event rather than raw text', () {
       MachineAppLogSink(protocol, 'app1')(line('flutter: hello'));
 
-      final event = decodeSingleEvent(out);
+      final Map<String, dynamic> event = decodeSingleEvent(out);
       expect(event['event'], 'app.log');
       expect(event['params']['appId'], 'app1');
       expect(event['params']['log'], 'flutter: hello');
@@ -89,13 +89,13 @@ void main() {
     });
 
     test('every emitted line is well-formed protocol JSON', () {
-      final sink = MachineAppLogSink(protocol, 'app1');
+      final AppLogSink sink = MachineAppLogSink(protocol, 'app1');
       sink(line('one'));
       sink(line('two'));
 
       // Nothing may reach stdout except `[{...}]` envelopes — an IDE parsing
       // this stream chokes on interleaved raw text.
-      for (final l in out.lines) {
+      for (final String l in out.lines) {
         expect(
           l.startsWith('[{') && l.endsWith('}]'),
           isTrue,
@@ -130,7 +130,7 @@ void main() {
   group('appLogSinkFor', () {
     test('returns a machine sink when the protocol is enabled', () {
       final out = BufferSink();
-      final sink = appLogSinkFor(
+      final AppLogSink sink = appLogSinkFor(
         protocol: MachineProtocol(enabled: true, output: out),
         appId: 'app1',
         deviceName: 'macOS',
@@ -145,7 +145,7 @@ void main() {
 
     test('returns a terminal sink when the protocol is disabled', () {
       final terminalOut = BufferSink();
-      final sink = appLogSinkFor(
+      final AppLogSink sink = appLogSinkFor(
         protocol: MachineProtocol(enabled: false, output: BufferSink()),
         appId: 'app1',
         deviceName: 'macOS',
@@ -160,7 +160,7 @@ void main() {
 
     test('a multi-device terminal run prefixes with the device name', () {
       final terminalOut = BufferSink();
-      final sink = appLogSinkFor(
+      final AppLogSink sink = appLogSinkFor(
         protocol: MachineProtocol(enabled: false, output: BufferSink()),
         appId: 'app1',
         deviceName: 'Chrome',
@@ -175,7 +175,7 @@ void main() {
 
     test('machine mode ignores multiDevice — appId already disambiguates', () {
       final out = BufferSink();
-      final sink = appLogSinkFor(
+      final AppLogSink sink = appLogSinkFor(
         protocol: MachineProtocol(enabled: true, output: out),
         appId: 'app1',
         deviceName: 'Chrome',

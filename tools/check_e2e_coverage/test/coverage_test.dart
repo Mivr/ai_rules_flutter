@@ -12,7 +12,7 @@ import '../coverage.dart';
 /// `MODULE.bazel` (like Bazel's convenience links into the output base), and
 /// one workflow covering `foo` and both `dup`s.
 Directory _makeTree() {
-  final root = Directory.systemTemp.createTempSync('e2e_coverage_');
+  final Directory root = Directory.systemTemp.createTempSync('e2e_coverage_');
   void module(String path) {
     final dir = Directory('${root.path}/$path')..createSync(recursive: true);
     File('${dir.path}/MODULE.bazel').writeAsStringSync('');
@@ -54,7 +54,7 @@ void main() {
 
   group('findE2eModules', () {
     test('ignores symlinks and keeps same-named nested modules distinct', () {
-      final sep = Platform.pathSeparator;
+      final String sep = Platform.pathSeparator;
       expect(
         findE2eModules(Directory('${root.path}/e2e'), root.path),
         {
@@ -102,7 +102,7 @@ void main() {
     });
 
     test('fails on uncovered modules, stale and unknown reasons', () {
-      final errors = checkCoverage(
+      final List<String> errors = checkCoverage(
         modules: {'e2e/foo', 'e2e/bar'},
         covered: {'foo', 'ghost'},
         reasons: {'e2e/foo': 'stale', 'e2e/missing': 'unknown'},

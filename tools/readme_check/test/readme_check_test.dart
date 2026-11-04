@@ -38,7 +38,7 @@ String _readme(String block) => '### MODULE.bazel\n\n```starlark\n$block```\n';
 /// The checked-in README.md, through the runfiles the BUILD wires in.
 String _checkedInReadme() {
   const key = 'README_CHECK_README_RLOCATION';
-  final rlocation = Platform.environment[key];
+  final String? rlocation = Platform.environment[key];
   if (rlocation == null || rlocation.isEmpty) {
     throw StateError(
       '$key is not set; the test needs //:README.md in `data`',
@@ -57,17 +57,20 @@ void main() {
   });
 
   test('a missing archive_override fails', () {
-    final without = _good.replaceFirst('archive_override(', 'overrid(');
+    final String without = _good.replaceFirst('archive_override(', 'overrid(');
     expect(checkInstallBlock(_readme(without)), isNotEmpty);
   });
 
   test('a URL tag that disagrees fails', () {
-    final moved = _good.replaceFirst('download/v0.20.0/', 'download/v0.19.0/');
+    final String moved = _good.replaceFirst(
+      'download/v0.20.0/',
+      'download/v0.19.0/',
+    );
     expect(checkInstallBlock(_readme(moved)), isNotEmpty);
   });
 
   test('a strip_prefix that disagrees fails', () {
-    final moved = _good.replaceFirst(
+    final String moved = _good.replaceFirst(
       'strip_prefix = "rules_flutter-0.20.0"',
       'strip_prefix = "rules_flutter-0.19.0"',
     );
@@ -75,7 +78,7 @@ void main() {
   });
 
   test('a non-SRI integrity fails', () {
-    final hex = _good.replaceFirst(
+    final String hex = _good.replaceFirst(
       'sha256-1AyJQxzuzfL4p4A8wex8VUZerGOXIokNlhPv+2yYNug=',
       'd40c89431ceecdf2f8a7803cc1ec7c55465eac639722890d9613effb6c9836e8',
     );
@@ -83,7 +86,7 @@ void main() {
   });
 
   test('a wrong repo_name fails', () {
-    final renamed = _good.replaceFirst(
+    final String renamed = _good.replaceFirst(
       'repo_name = "rules_flutter"',
       'repo_name = "other"',
     );

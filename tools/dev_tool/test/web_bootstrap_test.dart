@@ -4,7 +4,7 @@ import 'package:test/test.dart';
 void main() {
   group('generateSyntheticMainDart', () {
     test('runs the app entrypoint through bootstrapEngine', () {
-      final source = generateSyntheticMainDart(
+      final String source = generateSyntheticMainDart(
         appEntrypoint: 'package:app/main.dart',
       );
       expect(source, contains("import 'package:app/main.dart' as entrypoint;"));
@@ -13,7 +13,7 @@ void main() {
     });
 
     test('imports and calls the plugin registrant when there is one', () {
-      final source = generateSyntheticMainDart(
+      final String source = generateSyntheticMainDart(
         appEntrypoint: 'package:app/main.dart',
         pluginRegistrantEntrypoint: 'web_plugin_registrant.dart',
       );
@@ -33,7 +33,7 @@ void main() {
     // of this file runs.
     group('agent extensions', () {
       test('are registered before the engine bootstraps', () {
-        final source = generateSyntheticMainDart(
+        final String source = generateSyntheticMainDart(
           appEntrypoint: 'package:app/main.dart',
           agentExtensionsEntrypoint: 'agent_extensions.dart',
         );
@@ -41,23 +41,23 @@ void main() {
           source,
           contains("import 'agent_extensions.dart' as agentExtensions;"),
         );
-        final registerAt = source.indexOf(
+        final int registerAt = source.indexOf(
           'agentExtensions.registerRulesFlutterAgentExtensions()',
         );
-        final bootstrapAt = source.indexOf('ui_web.bootstrapEngine(');
+        final int bootstrapAt = source.indexOf('ui_web.bootstrapEngine(');
         expect(registerAt, greaterThan(-1));
         expect(registerAt, lessThan(bootstrapAt));
       });
 
       test('are absent when the build staged none', () {
-        final source = generateSyntheticMainDart(
+        final String source = generateSyntheticMainDart(
           appEntrypoint: 'package:app/main.dart',
         );
         expect(source, isNot(contains('agentExtensions')));
       });
 
       test('coexist with the plugin registrant', () {
-        final source = generateSyntheticMainDart(
+        final String source = generateSyntheticMainDart(
           appEntrypoint: 'package:app/main.dart',
           pluginRegistrantEntrypoint: 'web_plugin_registrant.dart',
           agentExtensionsEntrypoint: 'agent_extensions.dart',
@@ -91,7 +91,7 @@ void main() {
     });
 
     test('the loader stages the SDK and the main module, in that order', () {
-      final script = generateDDCBootstrapScript(entrypoint: 'main.dart');
+      final String script = generateDDCBootstrapScript(entrypoint: 'main.dart');
       expect(
         script.indexOf('"dart_sdk.js"'),
         lessThan(script.indexOf('"main_module.bootstrap.js"')),
@@ -99,7 +99,9 @@ void main() {
     });
 
     test('the main module hands off to the on-load-end script', () {
-      final script = generateDDCMainModuleScript(entrypoint: 'main.dart');
+      final String script = generateDDCMainModuleScript(
+        entrypoint: 'main.dart',
+      );
       expect(script, contains('on_load_end_bootstrap.js'));
       expect(script, contains(r'window.$onLoadEndCallback'));
       // And that script is nothing but the callback it hands off to.
@@ -107,7 +109,7 @@ void main() {
     });
 
     test('the prerequisite scripts are the ones the server serves', () {
-      final script = generateDDCBootstrapScript(entrypoint: 'main.dart');
+      final String script = generateDDCBootstrapScript(entrypoint: 'main.dart');
       expect(script, contains('"ddc_module_loader.js"'));
       expect(script, contains('"stack_trace_mapper.js"'));
     });
@@ -117,7 +119,9 @@ void main() {
     test(
       'the reload hook fetches the descriptor file the server publishes',
       () {
-        final script = generateDDCBootstrapScript(entrypoint: 'main.dart');
+        final String script = generateDDCBootstrapScript(
+          entrypoint: 'main.dart',
+        );
         expect(script, contains(r'window.$dartReloadModifiedModules'));
         expect(script, contains("'reloaded_sources.json'"));
       },

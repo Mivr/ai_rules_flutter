@@ -61,7 +61,7 @@ Future<T> withTempDir<T>(
   String prefix,
   Future<T> Function(Directory dir) body,
 ) async {
-  final dir = await createTempDir(prefix);
+  final Directory dir = await createTempDir(prefix);
   try {
     return await body(dir);
   } finally {

@@ -116,7 +116,7 @@ class AttachCommand {
     // the source it was built from, which is a property of attaching to a
     // process rather than launching one. See [AppliedVersions.seedFromBuild],
     // and [fileClockNow] for why the filesystem's clock.
-    final builtBefore = await fileClockNow();
+    final DateTime builtBefore = await fileClockNow();
 
     final logger = Logger('dev_tool.attach');
 
@@ -152,7 +152,7 @@ class AttachCommand {
     try {
       // Resolve workspace once. Used both for inner `bazel` spawns
       // (workingDirectory) and for the interactive session below.
-      final workspace = await host.bazel.findWorkspaceRoot();
+      final String workspace = await host.bazel.findWorkspaceRoot();
 
       if (RunPlan.watchEnabledFor(_results, isMachine: isMachine)) {
         sourceWatcher = await startAttachWatcher(
@@ -316,10 +316,10 @@ Future<void> attachApp(
   String debugUrl, {
   required AttachAppInputs inputs,
 }) async {
-  final protocol = host.protocol;
-  final teardown = host.teardown;
-  final logger = inputs.logger;
-  final uri = Uri.parse(debugUrl);
+  final MachineProtocol protocol = host.protocol;
+  final Teardown teardown = host.teardown;
+  final Logger logger = inputs.logger;
+  final Uri uri = Uri.parse(debugUrl);
   final appId = 'attach_${inputs.index}';
   final deviceName = 'attached:${uri.host}:${uri.port}';
 
@@ -454,7 +454,7 @@ Future<void> forwardAttachedLogs(
   required List<VmServiceLogForwarder> logForwarders,
   required Logger logger,
 }) async {
-  final service = vmClient.service;
+  final VmService? service = vmClient.service;
   if (service == null) return;
   try {
     logForwarders.add(
@@ -492,7 +492,7 @@ Future<ToolchainPaths> assembleAttachedPipeline(
   ReloadPipeline pipeline, {
   required AttachServeInputs inputs,
 }) async {
-  final toolchain = await resolveToolchainPaths(
+  final ToolchainPaths toolchain = await resolveToolchainPaths(
     inputs.target,
     workspace: inputs.workspace,
     runBazel: host.bazel.run,
@@ -536,8 +536,8 @@ Future<void> serveAttachedSession(
   required ToolchainPaths toolchain,
   required AttachServeInputs inputs,
 }) async {
-  final protocol = host.protocol;
-  final teardown = host.teardown;
+  final MachineProtocol protocol = host.protocol;
+  final Teardown teardown = host.teardown;
 
   // After assembly, for the reason `run` starts it there: a driver reads
   // this channel appearing as "the run is ready", and an edit that lands

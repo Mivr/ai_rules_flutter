@@ -19,6 +19,8 @@ import 'dev_tool_e2e_log_recorder.dart';
 // and the harness is the one import every e2e file already has.
 export '../test_lifetime.dart' show spawnBoundToTest;
 
+typedef _Result = ProcessResult;
+
 /// Parsed HTTP control channel info from machine protocol output.
 class HttpControlInfo {
   final Uri uri;
@@ -64,14 +66,12 @@ class _ControlReply {
 /// Resolves the absolute path to the dev tool entrypoint.
 ///
 /// Assumes tests are run from the `tools/dev_tool/` directory.
-String get devToolBin {
-  return p.join(Directory.current.path, 'bin', 'flutter_bazel.dart');
-}
+String get devToolBin =>
+    p.join(Directory.current.path, 'bin', 'flutter_bazel.dart');
 
 /// Resolves the absolute path to an e2e workspace.
-String e2eWorkspace(String name) {
-  return p.normalize(p.join(Directory.current.path, '..', '..', 'e2e', name));
-}
+String e2eWorkspace(String name) =>
+    p.normalize(p.join(Directory.current.path, '..', '..', 'e2e', name));
 
 /// How long a cold build may take on a cold CI runner, and therefore how long
 /// every wait that includes one gets.
@@ -103,7 +103,7 @@ String get bazelBuiltDevTool {
   // "not found ... Run: bazel build" on Windows immediately *after* a
   // successful build, which reads as a build failure and is not one.
   final name = Platform.isWindows ? 'flutter_bazel.exe' : 'flutter_bazel';
-  final path = p.join(_repoRoot, 'bazel-bin', 'tools', 'dev_tool', name);
+  final String path = p.join(_repoRoot, 'bazel-bin', 'tools', 'dev_tool', name);
   if (!File(path).existsSync()) {
     throw StateError(
       'Bazel-built dev_tool not found at $path. '
@@ -135,11 +135,10 @@ Future<String> ensureBuiltDevTool() => _devToolBuild ??= _buildDevTool();
 
 Future<String> _buildDevTool() async {
   const label = '//tools/dev_tool:flutter_bazel';
-  final result = await Process.run(
-    'bazel',
-    ['build', label],
-    workingDirectory: _repoRoot,
-  );
+  final _Result result = await Process.run('bazel', [
+    'build',
+    label,
+  ], workingDirectory: _repoRoot);
   if (result.exitCode != 0) {
     throw StateError(
       'Failed to build the shipped dev tool.\n'
@@ -192,53 +191,46 @@ class DevToolProcess {
     _stdoutSub = process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
-        .listen(
-          (line) {
-            // Machine protocol wraps each message in [...].
-            //
-            // Anything on this stream that isn't an envelope is corruption an IDE
-            // would choke on, so it is recorded rather than silently skipped.
-            //
-            // A prefix is tolerated but still recorded. When the tool is launched
-            // via `dart run` (rather than the compiled binary), the Dart SDK can
-            // print "Running build hooks..." with no trailing newline, so the first
-            // envelope arrives glued to it. Discarding the whole line loses
-            // `daemon.connected` — the event every machine-protocol test waits for
-            // first — which reads as an unexplained timeout.
-            final start = line.indexOf('[{');
-            if (start >= 0 && line.endsWith('}]')) {
-              if (start > 0)
-                nonProtocolStdoutLines.add(line.substring(0, start));
-              try {
-                final list = json.decode(line.substring(start)) as List;
-                for (final item in list) {
-                  final msg = item as Map<String, dynamic>;
-                  events.add(msg);
-                  _eventController.add(msg);
-                }
-              } catch (_) {
-                nonProtocolStdoutLines.add(line);
+        .listen((line) {
+          // Machine protocol wraps each message in [...].
+          //
+          // Anything on this stream that isn't an envelope is corruption an IDE
+          // would choke on, so it is recorded rather than silently skipped.
+          //
+          // A prefix is tolerated but still recorded. When the tool is launched
+          // via `dart run` (rather than the compiled binary), the Dart SDK can
+          // print "Running build hooks..." with no trailing newline, so the first
+          // envelope arrives glued to it. Discarding the whole line loses
+          // `daemon.connected` — the event every machine-protocol test waits for
+          // first — which reads as an unexplained timeout.
+          final int start = line.indexOf('[{');
+          if (start >= 0 && line.endsWith('}]')) {
+            if (start > 0) nonProtocolStdoutLines.add(line.substring(0, start));
+            try {
+              final list = json.decode(line.substring(start)) as List;
+              for (final item in list) {
+                final msg = item as Map<String, dynamic>;
+                events.add(msg);
+                _eventController.add(msg);
               }
-            } else if (line.isNotEmpty) {
+            } catch (_) {
               nonProtocolStdoutLines.add(line);
             }
-            // After the handling above, never before it, and synchronous: the
-            // line is on disk while the process is still running.
-            _processLog?.recordStdout(line);
-          },
-          onDone: () => _processLog?.noteStdoutDone(),
-        );
+          } else if (line.isNotEmpty) {
+            nonProtocolStdoutLines.add(line);
+          }
+          // After the handling above, never before it, and synchronous: the
+          // line is on disk while the process is still running.
+          _processLog?.recordStdout(line);
+        }, onDone: () => _processLog?.noteStdoutDone());
     _stderrSub = process.stderr
         .transform(utf8.decoder)
         .transform(const LineSplitter())
-        .listen(
-          (line) {
-            stderrLines.add(line);
-            _stderrController.add(line);
-            _processLog?.recordStderr(line);
-          },
-          onDone: () => _processLog?.noteStderrDone(),
-        );
+        .listen((line) {
+          stderrLines.add(line);
+          _stderrController.add(line);
+          _processLog?.recordStderr(line);
+        }, onDone: () => _processLog?.noteStderrDone());
   }
 
   /// The first value from [source], failing as soon as the run dies.
@@ -262,7 +254,7 @@ class DevToolProcess {
     required Duration timeout,
     String Function()? seen,
   }) {
-    final died = process.exitCode.then<T>(
+    final Future<T> died = process.exitCode.then<T>(
       (code) => throw StateError(
         'The dev tool exited (code $code) while waiting for $what.\n'
         '${_lastLines('stderr', stderrLines)}'
@@ -304,7 +296,7 @@ class DevToolProcess {
     };
     // Snapshotted before the write, so the timeout reports what arrived *in
     // reply to this command* rather than everything the run has ever said.
-    final sentAt = events.length;
+    final int sentAt = events.length;
     process.stdin.writeln(json.encode(request));
 
     return _awaitFrom(
@@ -333,7 +325,7 @@ class DevToolProcess {
   /// serializes everything through one slot, so a reload that started and never
   /// finished is exactly why some later `app.getText` is still waiting.
   String _trafficSince(int from) {
-    final since = events.skip(from);
+    final Iterable<Map<String, dynamic>> since = events.skip(from);
     final counts = <String, int>{};
     for (final msg in since) {
       counts.update(_kindOf(msg), (n) => n + 1, ifAbsent: () => 1);
@@ -348,7 +340,7 @@ class DevToolProcess {
 
   /// The kind [_trafficSince] groups a protocol message under.
   static String _kindOf(Map<String, dynamic> msg) {
-    final event = msg['event'];
+    final dynamic event = msg['event'];
     if (event == null) return 'response to id ${msg['id']}';
     if (event != 'app.progress') return '$event';
     // `message` carries the method: the dev tool reports a long-running
@@ -364,7 +356,7 @@ class DevToolProcess {
     Duration timeout = const Duration(seconds: 120),
   }) {
     // Check already-received events first.
-    for (final e in events) {
+    for (final Map<String, dynamic> e in events) {
       if (e['event'] == eventName) return Future.value(e);
     }
     return _awaitFrom(
@@ -401,7 +393,7 @@ class DevToolProcess {
 
     // Synchronous, with no `await` before the subscribe below, so an event
     // cannot land in between and be missed by both halves.
-    for (final e in events.skip(after)) {
+    for (final Map<String, dynamic> e in events.skip(after)) {
       if (matches(e)) return Future.value(e);
     }
     return _awaitFrom(
@@ -409,7 +401,9 @@ class DevToolProcess {
       what: what,
       timeout: timeout,
       seen: () {
-        final since = events.skip(after).where((e) => e['event'] == eventName);
+        final Iterable<Map<String, dynamic>> since = events
+            .skip(after)
+            .where((e) => e['event'] == eventName);
         return 'Saw ${since.length} $eventName event(s) since: '
             '${since.map(json.encode).join(' | ')}';
       },
@@ -434,7 +428,7 @@ class DevToolProcess {
   }) {
     bool matches(String log) => log.contains(needle);
 
-    for (final log in appLogLines) {
+    for (final String log in appLogLines) {
       if (matches(log)) return Future.value(log);
     }
     return _awaitFrom(
@@ -462,7 +456,7 @@ class DevToolProcess {
   }) {
     bool matches(String line) => line.contains(needle);
 
-    for (final line in stderrLines) {
+    for (final String line in stderrLines) {
       if (matches(line)) return Future.value(line);
     }
     // No `seen`: what this wait would report is the stderr tail every timeout
@@ -499,7 +493,7 @@ class DevToolProcess {
     String path, {
     Map<String, String> queryParameters = const {},
   }) {
-    final info = httpControl;
+    final HttpControlInfo? info = httpControl;
     if (info == null) throw StateError('HTTP control channel not available');
     return info.uri.replace(
       path: path,
@@ -531,13 +525,13 @@ class DevToolProcess {
     // Snapshotted before anything is awaited, so the failure reports what
     // arrived *while this request was outstanding* rather than everything the
     // run has ever said.
-    final sentAt = events.length;
-    var phase = _RequestPhase.connecting;
+    final int sentAt = events.length;
+    _RequestPhase phase = _RequestPhase.connecting;
     int? status;
     final client = HttpClient();
 
     Future<_ControlReply> attempt() async {
-      final request = postJson == null
+      final HttpClientRequest request = postJson == null
           ? await client.getUrl(url)
           : await client.postUrl(url);
       if (postJson != null) {
@@ -545,7 +539,7 @@ class DevToolProcess {
         request.write(postJson);
       }
       phase = _RequestPhase.awaitingHeader;
-      final response = await request.close();
+      final HttpClientResponse response = await request.close();
       status = response.statusCode;
       phase = _RequestPhase.readingBody;
       final chunks = <List<int>>[];
@@ -634,7 +628,8 @@ class DevToolProcess {
     if (bound.inMilliseconds < Duration.millisecondsPerSecond) {
       return '${bound.inMilliseconds}ms';
     }
-    final seconds = bound.inMilliseconds / Duration.millisecondsPerSecond;
+    final double seconds =
+        bound.inMilliseconds / Duration.millisecondsPerSecond;
     return seconds == seconds.roundToDouble()
         ? '${seconds.round()}s'
         : '${seconds.toStringAsFixed(1)}s';
@@ -649,7 +644,7 @@ class DevToolProcess {
     int? limit,
     Duration timeout = _controlChannelTimeout,
   }) async {
-    final reply = await _controlRequest(
+    final _ControlReply reply = await _controlRequest(
       _controlUrl(
         '/sessions/$appId/logs',
         queryParameters: {
@@ -671,7 +666,7 @@ class DevToolProcess {
   /// Parses the `http_control_channel` structured log entry emitted by the
   /// dev tool when `LOG_FORMAT=json`.
   HttpControlInfo? get httpControl {
-    for (final line in stderrLines) {
+    for (final String line in stderrLines) {
       try {
         final obj = json.decode(line) as Map<String, dynamic>;
         if (obj['message'] == 'http_control_channel') {
@@ -691,7 +686,7 @@ class DevToolProcess {
   Future<HttpControlInfo> waitForHttpControl({
     Duration timeout = const Duration(seconds: 120),
   }) async {
-    final existing = httpControl;
+    final HttpControlInfo? existing = httpControl;
     if (existing != null) return existing;
     await _awaitFrom(
       _stderrController.stream.where((line) {
@@ -730,7 +725,11 @@ class DevToolProcess {
     String appId, {
     Duration timeout = _controlChannelTimeout,
   }) async {
-    final flutter = await _screenshotReply(appId, 'flutter', timeout: timeout);
+    final _ControlReply flutter = await _screenshotReply(
+      appId,
+      'flutter',
+      timeout: timeout,
+    );
     if (flutter.statusCode != HttpStatus.notImplemented) {
       return _screenshotBytes(flutter, 'Screenshot');
     }
@@ -747,7 +746,11 @@ class DevToolProcess {
     String appId, {
     Duration timeout = _controlChannelTimeout,
   }) async {
-    final reply = await _screenshotReply(appId, 'flutter', timeout: timeout);
+    final _ControlReply reply = await _screenshotReply(
+      appId,
+      'flutter',
+      timeout: timeout,
+    );
     return (statusCode: reply.statusCode, body: reply.body);
   }
 
@@ -784,7 +787,7 @@ class DevToolProcess {
 
   /// Take a screenshot and save to a file. Returns the file path.
   Future<String> httpScreenshotToFile(String appId, String outputPath) async {
-    final bytes = await httpScreenshot(appId);
+    final List<int> bytes = await httpScreenshot(appId);
     await File(outputPath).writeAsBytes(bytes);
     return outputPath;
   }
@@ -813,7 +816,7 @@ class DevToolProcess {
     bool? settle,
     Duration timeout = _controlChannelTimeout,
   }) async {
-    final reply = await _screenshotReply(
+    final _ControlReply reply = await _screenshotReply(
       appId,
       'native',
       settle: settle,
@@ -823,7 +826,7 @@ class DevToolProcess {
       bytes: _screenshotBytes(reply, 'Native screenshot'),
       settled: reply.headers['x-settled'],
       detail: switch (reply.headers['x-settle-detail']) {
-        final detail? => Uri.decodeComponent(detail),
+        final String detail? => Uri.decodeComponent(detail),
         null => null,
       },
     );
@@ -875,7 +878,7 @@ class DevToolProcess {
     bool? settle,
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    final deadline = DateTime.now().add(timeout);
+    final DateTime deadline = DateTime.now().add(timeout);
     const maxBackoff = Duration(seconds: 2);
     var backoff = const Duration(milliseconds: 100);
     String? lastAnswer;
@@ -885,7 +888,7 @@ class DevToolProcess {
       // left to make it in. One that is becomes an instant expiry naming the
       // connect phase, where what the reader needs is the endpoint's own
       // account of the windows it found.
-      final remaining = deadline.difference(DateTime.now());
+      final Duration remaining = deadline.difference(DateTime.now());
       if (remaining <= Duration.zero) {
         throw StateError(
           'The app never presented an on-screen window within '
@@ -921,7 +924,7 @@ class DevToolProcess {
   }
 
   static Duration _nextBackoff(Duration backoff, Duration max) {
-    final doubled = backoff * 2;
+    final Duration doubled = backoff * 2;
     return doubled > max ? max : doubled;
   }
 
@@ -940,10 +943,8 @@ class DevToolProcess {
 
   /// Extract appId from app.start events.
   String? get appId {
-    for (final e in events) {
-      if (e['event'] == 'app.start') {
-        return e['params']?['appId'] as String?;
-      }
+    for (final Map<String, dynamic> e in events) {
+      if (e['event'] == 'app.start') return e['params']?['appId'] as String?;
     }
     return null;
   }
@@ -955,7 +956,7 @@ class DevToolProcess {
   /// once Chrome's debugging port is known), and `daemon.commandsChanged` is
   /// how that is announced. Empty until `daemon.connected` arrives.
   List<String> get commands {
-    for (final e in events.reversed) {
+    for (final Map<String, dynamic> e in events.reversed) {
       if (e['event'] == 'daemon.commandsChanged' ||
           e['event'] == 'daemon.connected') {
         final list = e['params']?['commands'] as List?;
@@ -997,7 +998,7 @@ class DevToolProcess {
     Map<String, dynamic> params, {
     Duration timeout = _controlChannelTimeout,
   }) async {
-    final reply = await _controlRequest(
+    final _ControlReply reply = await _controlRequest(
       _controlUrl('/command'),
       what: 'the $method command',
       timeout: timeout,
@@ -1023,13 +1024,15 @@ class DevToolProcess {
   /// whole graceful path is skipped once the process is gone, so this is safe
   /// to call twice or after the run already ended.
   Future<void> dispose() async {
-    final endedOnItsOwn = await _requestStop();
+    final bool endedOnItsOwn = await _requestStop();
     // Before the kill, because the kill is what removes the evidence. This guard
     // has gone red four times; the three that were diagnosed were diagnosed by
     // sampling the live process, and the fourth — intermittent, browser runs
     // only — is still open precisely because every occurrence so far was killed
     // before anyone could look at it.
-    final wedgeEvidence = endedOnItsOwn ? null : await _captureWedgeEvidence();
+    final String? wedgeEvidence = endedOnItsOwn
+        ? null
+        : await _captureWedgeEvidence();
     await _stdoutSub.cancel();
     await _stderrSub.cancel();
     // Ends the log from teardown's side when the run did not end on its own:
@@ -1098,7 +1101,7 @@ class DevToolProcess {
     try {
       return await process.exitCode.timeout(bound);
     } on TimeoutException {
-      final evidence = await _captureWedgeEvidence();
+      final String evidence = await _captureWedgeEvidence();
       throw StateError(
         '$stillRunning (still running ${bound.inSeconds}s later)\n  $evidence',
       );
@@ -1111,12 +1114,14 @@ class DevToolProcess {
           '${Platform.operatingSystem}. Attach to pid ${process.pid} with '
           'whatever this platform offers before it is killed.';
     }
-    final dir = Directory.systemTemp.createTempSync('devtool_wedged_');
+    final Directory dir = Directory.systemTemp.createTempSync(
+      'devtool_wedged_',
+    );
     final notes = <String>['pid ${process.pid}'];
     Future<void> capture(String what, String tool, List<String> args) async {
-      final out = p.join(dir.path, '$what.txt');
+      final String out = p.join(dir.path, '$what.txt');
       try {
-        final result = await Process.run(tool, [...args, out]);
+        final _Result result = await Process.run(tool, [...args, out]);
         notes.add(
           result.exitCode == 0
               ? '$what: $out'
@@ -1132,8 +1137,8 @@ class DevToolProcess {
     // already failed.
     await capture('stacks', 'sample', ['${process.pid}', '3', '-file']);
     try {
-      final lsof = await Process.run('lsof', ['-p', '${process.pid}']);
-      final out = p.join(dir.path, 'lsof.txt');
+      final _Result lsof = await Process.run('lsof', ['-p', '${process.pid}']);
+      final String out = p.join(dir.path, 'lsof.txt');
       File(out).writeAsStringSync('${lsof.stdout}');
       notes.add('open handles: $out');
     } on ProcessException catch (e) {
@@ -1213,27 +1218,25 @@ Future<DevToolProcess> _spawnDevTool({
   required String target,
   required List<String> args,
   bool viaDartRun = false,
-}) async {
-  return spawnBoundToTest(
-    spawn: () async {
-      final process = viaDartRun
-          ? await Process.start(
-              await hermeticDart(workspace: workspace, target: target),
-              ['run', devToolBin, ...args],
-              workingDirectory: workspace,
-              environment: {...Platform.environment, 'LOG_FORMAT': 'json'},
-            )
-          : await Process.start(
-              await ensureBuiltDevTool(),
-              args,
-              workingDirectory: workspace,
-              environment: {...Platform.environment, 'LOG_FORMAT': 'json'},
-            );
-      return DevToolProcess(process);
-    },
-    dispose: (tool) => tool.dispose(),
-  );
-}
+}) async => spawnBoundToTest(
+  spawn: () async {
+    final Process process = viaDartRun
+        ? await Process.start(
+            await hermeticDart(workspace: workspace, target: target),
+            ['run', devToolBin, ...args],
+            workingDirectory: workspace,
+            environment: {...Platform.environment, 'LOG_FORMAT': 'json'},
+          )
+        : await Process.start(
+            await ensureBuiltDevTool(),
+            args,
+            workingDirectory: workspace,
+            environment: {...Platform.environment, 'LOG_FORMAT': 'json'},
+          );
+    return DevToolProcess(process);
+  },
+  dispose: (tool) => tool.dispose(),
+);
 
 /// Start `flutter_bazel run` on [device].
 Future<DevToolProcess> startDevTool({
@@ -1313,9 +1316,9 @@ Future<String> hermeticDart({
   required String workspace,
   required String target,
 }) async {
-  final cached = _hermeticDartByWorkspace[workspace];
+  final String? cached = _hermeticDartByWorkspace[workspace];
   if (cached != null) return cached;
-  final toolchain = await resolveToolchainPaths(
+  final ToolchainPaths toolchain = await resolveToolchainPaths(
     target,
     workspace: workspace,
     // Straight to bazel: this is the test harness resolving a `dart` to run
@@ -1384,14 +1387,14 @@ Future<BoundedRun> runBounded(
   required Duration timeout,
   Duration killGrace = const Duration(seconds: 2),
 }) async {
-  final process = await Process.start(executable, arguments);
+  final Process process = await Process.start(executable, arguments);
   final out = StringBuffer();
   final err = StringBuffer();
   // `allowMalformed` because a command's bytes are its own business: strict
   // decoding would throw out of here, turning a caller's "unavailable, skip"
   // into a test failure over an encoding.
   const decoder = Utf8Decoder(allowMalformed: true);
-  final drained = Future.wait([
+  final Future<List<void>> drained = Future.wait([
     process.stdout.transform(decoder).forEach(out.write),
     process.stderr.transform(decoder).forEach(err.write),
   ]);
@@ -1431,15 +1434,15 @@ Future<BoundedRun> runBounded(
 /// That is why every message built from a probe names the path that actually
 /// answered rather than the variable that was set.
 String resolveAdb(Map<String, String> environment) {
-  final androidHome = environment['ANDROID_HOME'];
+  final String? androidHome = environment['ANDROID_HOME'];
   if (androidHome != null) {
-    final adb = p.join(androidHome, 'platform-tools', 'adb');
+    final String adb = p.join(androidHome, 'platform-tools', 'adb');
     if (File(adb).existsSync()) return adb;
   }
   if (Platform.isMacOS) {
-    final home = environment['HOME'];
+    final String? home = environment['HOME'];
     if (home != null) {
-      final adb = p.join(
+      final String adb = p.join(
         home,
         'Library',
         'Android',
@@ -1503,10 +1506,10 @@ sealed class AndroidDeviceProbe {
     Map<String, String>? environment,
     String? adbPath,
   }) {
-    final env = environment ?? Platform.environment;
-    final adb = adbPath ?? resolveAdb(env);
+    final Map<String, String> env = environment ?? Platform.environment;
+    final String adb = adbPath ?? resolveAdb(env);
 
-    final ProcessResult result;
+    final _Result result;
     try {
       result = Process.runSync(adb, ['devices']);
     } on Object catch (error) {
@@ -1530,14 +1533,14 @@ sealed class AndroidDeviceProbe {
       );
     }
 
-    final lines = stdout.split('\n');
+    final List<String> lines = stdout.split('\n');
     // Anchored on adb's header rather than `skip(1)`, because adb interleaves
     // daemon chatter — `* daemon not running; starting now at tcp:5037 *` —
     // ahead of it. Splitting those lines on whitespace and reading the second
     // field yields a "device" whose serial is `*` and whose state is `daemon`,
     // which is how a machine with nothing attached would report a usable
     // device.
-    final header = lines.indexWhere(
+    final int header = lines.indexWhere(
       (l) => l.trim() == 'List of devices attached',
     );
     if (header < 0) {
@@ -1548,10 +1551,10 @@ sealed class AndroidDeviceProbe {
     }
 
     final entries = <AdbEntry>[];
-    for (final raw in lines.skip(header + 1)) {
-      final line = raw.trim();
+    for (final String raw in lines.skip(header + 1)) {
+      final String line = raw.trim();
       if (line.isEmpty) continue;
-      final split = line.indexOf(RegExp(r'\s'));
+      final int split = line.indexOf(RegExp(r'\s'));
       if (split < 0) {
         return AndroidProbeFailed(
           '`$adb devices` listed "$line", which carries no state and so '
@@ -1559,10 +1562,7 @@ sealed class AndroidDeviceProbe {
         );
       }
       entries.add(
-        AdbEntry(
-          line.substring(0, split),
-          line.substring(split).trim(),
-        ),
+        AdbEntry(line.substring(0, split), line.substring(split).trim()),
       );
     }
 
@@ -1570,7 +1570,7 @@ sealed class AndroidDeviceProbe {
     // every other attached device irrelevant and its own absence an error.
     // Silently running something else — or silently skipping — would be
     // ignoring an instruction that was given.
-    final requested = env['ANDROID_SERIAL'];
+    final String? requested = env['ANDROID_SERIAL'];
     if (requested != null && requested.isNotEmpty) {
       AdbEntry? match;
       for (final entry in entries) {
@@ -1691,7 +1691,7 @@ class DecodedPng {
 /// Decode enough of [bytes] to answer [DecodedPng.isUniform].
 DecodedPng decodePngForBlankness(List<int> bytes) {
   final distinct = <int>{};
-  final (:width, :height) = _walkPngRows(bytes, (line, channels) {
+  final (:int width, :int height) = _walkPngRows(bytes, (line, channels) {
     for (var i = 0; i + channels <= line.length; i += channels) {
       // Pack the channels into one int so "distinct pixel" is one comparison.
       var pixel = 0;
@@ -1724,7 +1724,7 @@ int countColourRuns(
     var runs = 0;
     var inRun = false;
     for (var i = 0; i + channels <= line.length; i += channels) {
-      final hit = matches(line[i], line[i + 1], line[i + 2]);
+      final bool hit = matches(line[i], line[i + 1], line[i + 2]);
       if (hit && !inRun) runs++;
       inRun = hit;
     }
@@ -1743,9 +1743,10 @@ int countColourRuns(
 ) {
   const signature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
   if (bytes.length < 8 ||
-      List.generate(8, (i) => bytes[i]).indexed.any(
-        (e) => e.$2 != signature[e.$1],
-      )) {
+      List.generate(
+        8,
+        (i) => bytes[i],
+      ).indexed.any((e) => e.$2 != signature[e.$1])) {
     throw StateError(
       'Not a PNG: the first bytes are '
       '${bytes.take(8).map((b) => '0x${b.toRadixString(16)}').join(' ')}.',
@@ -1758,9 +1759,9 @@ int countColourRuns(
   final idat = BytesBuilder();
   var offset = 8;
   while (offset + 8 <= data.length) {
-    final length = view.getUint32(offset);
+    final int length = view.getUint32(offset);
     final type = String.fromCharCodes(data.sublist(offset + 4, offset + 8));
-    final start = offset + 8;
+    final int start = offset + 8;
     if (type == 'IHDR') {
       width = view.getUint32(start);
       height = view.getUint32(start + 4);
@@ -1789,7 +1790,7 @@ int countColourRuns(
 
   final channels = colorType == 6 ? 4 : 3;
   final raw = Uint8List.fromList(ZLibDecoder().convert(idat.takeBytes()));
-  final stride = width * channels;
+  final int stride = width * channels;
   // The previous scanline, un-filtered — every filter but None refers to it.
   var previous = Uint8List(stride);
   var pos = 0;
@@ -1800,13 +1801,13 @@ int countColourRuns(
         'truncated, so what it shows cannot be judged.',
       );
     }
-    final filter = raw[pos++];
+    final int filter = raw[pos++];
     final line = Uint8List(stride);
     for (var i = 0; i < stride; i++) {
-      final x = pos + i < raw.length ? raw[pos + i] : 0;
-      final a = i >= channels ? line[i - channels] : 0; // left
-      final b = previous[i]; // above
-      final c = i >= channels ? previous[i - channels] : 0; // above-left
+      final int x = pos + i < raw.length ? raw[pos + i] : 0;
+      final int a = i >= channels ? line[i - channels] : 0; // left
+      final int b = previous[i]; // above
+      final int c = i >= channels ? previous[i - channels] : 0; // above-left
       line[i] =
           switch (filter) {
             0 => x,
@@ -1830,8 +1831,8 @@ int countColourRuns(
 
 /// PNG's Paeth predictor (RFC 2083 §6.6).
 int _paeth(int a, int b, int c) {
-  final p = a + b - c;
-  final pa = (p - a).abs(), pb = (p - b).abs(), pc = (p - c).abs();
+  final int p = a + b - c;
+  final int pa = (p - a).abs(), pb = (p - b).abs(), pc = (p - c).abs();
   if (pa <= pb && pa <= pc) return a;
   return pb <= pc ? b : c;
 }
@@ -1841,7 +1842,7 @@ int _paeth(int a, int b, int c) {
 /// The one place an e2e says "the UI rendered". [what] names the capture in
 /// the failure, since these tests take several.
 void expectRendered(List<int> bytes, {required String what}) {
-  final png = decodePngForBlankness(bytes);
+  final DecodedPng png = decodePngForBlankness(bytes);
   if (png.isUniform) {
     throw TestFailure(
       '$what is blank: every one of its ${png.width}x${png.height} pixels is '

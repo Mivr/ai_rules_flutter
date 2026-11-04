@@ -9,6 +9,7 @@ library;
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 /// Serves a single static file request from [webDir].
 ///
@@ -21,7 +22,7 @@ Future<void> serveWebBundleRequest(
   required String webDir,
   String? robotoFontFile,
 }) async {
-  final response = request.response;
+  final HttpResponse response = request.response;
   try {
     if (request.method != 'GET' && request.method != 'HEAD') {
       response.statusCode = HttpStatus.methodNotAllowed;
@@ -29,7 +30,7 @@ Future<void> serveWebBundleRequest(
       return;
     }
 
-    final relPath = _bundleRelativePath(request);
+    final String? relPath = _bundleRelativePath(request);
     if (relPath == null) {
       response.statusCode = HttpStatus.forbidden;
       await response.close();
@@ -83,14 +84,14 @@ Future<void> serveInternalError(HttpResponse response) async {
 /// Normalizes the request path to a bundle-relative path, or null when it
 /// tries to escape the bundle.
 String? _bundleRelativePath(HttpRequest request) {
-  var relPath = Uri.decodeComponent(request.uri.path);
+  String relPath = Uri.decodeComponent(request.uri.path);
   if (relPath == '/' || relPath.isEmpty) {
     return 'index.html';
   }
   if (relPath.startsWith('/')) {
     relPath = relPath.substring(1);
   }
-  final segments = relPath.split('/');
+  final List<String> segments = relPath.split('/');
   if (segments.contains('..') || segments.contains('.')) {
     return null;
   }
@@ -104,8 +105,8 @@ Future<bool> _serveFontManifest(
   String webDir,
   String? robotoFontFile,
 ) async {
-  final relPath = _bundleRelativePath(request);
-  final response = request.response;
+  final String? relPath = _bundleRelativePath(request);
+  final HttpResponse response = request.response;
   if (relPath != 'assets/FontManifest.json' ||
       robotoFontFile == null ||
       !File(robotoFontFile).existsSync()) {
@@ -114,12 +115,12 @@ Future<bool> _serveFontManifest(
   final manifestFile = File('$webDir/assets/FontManifest.json');
   List<dynamic> families = <dynamic>[];
   if (manifestFile.existsSync()) {
-    final decoded = json.decode(manifestFile.readAsStringSync());
+    final dynamic decoded = json.decode(manifestFile.readAsStringSync());
     if (decoded is List) {
       families = List<dynamic>.from(decoded);
     }
   }
-  final hasRoboto = families.any(
+  final bool hasRoboto = families.any(
     (entry) => entry is Map && entry['family'] == 'Roboto',
   );
   if (!hasRoboto) {
@@ -130,7 +131,7 @@ Future<bool> _serveFontManifest(
       ],
     });
   }
-  final body = utf8.encode(json.encode(families));
+  final Uint8List body = utf8.encode(json.encode(families));
   response.statusCode = HttpStatus.ok;
   response.headers.set(
     HttpHeaders.contentTypeHeader,
@@ -150,8 +151,8 @@ Future<void> _serveBundleFile(
   File file,
   String relPath,
 ) async {
-  final response = request.response;
-  final bytes = file.readAsBytesSync();
+  final HttpResponse response = request.response;
+  final Uint8List bytes = file.readAsBytesSync();
   response.statusCode = HttpStatus.ok;
   response.headers.set(
     HttpHeaders.contentTypeHeader,
@@ -170,7 +171,7 @@ Future<void> _serveBundleFile(
 /// Public, like [serveWebBundleRequest], because the test reaches it
 /// directly.
 String contentTypeForPath(String path) {
-  final lower = path.toLowerCase();
+  final String lower = path.toLowerCase();
   if (lower.endsWith('.html')) return 'text/html; charset=utf-8';
   if (lower.endsWith('.js') || lower.endsWith('.mjs')) {
     return 'application/javascript; charset=utf-8';

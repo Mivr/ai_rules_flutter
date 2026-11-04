@@ -39,6 +39,24 @@ import 'package:flutter_bazel_dev_tool/session.dart';
 import 'package:flutter_bazel_dev_tool/session_host.dart';
 import 'package:path/path.dart' as p;
 
+typedef _Out = ReloadOutcome;
+
+typedef _Relaunch = Future<RelaunchOutcome> Function()?;
+
+typedef _Patcher = Future<NativePatchOutcome> Function({
+  Set<String> movedLibraries,
+})?;
+
+typedef _Assets = AssetOutcome;
+typedef _Resolved = ({Map<String, dynamic>? error, List<AppInstance>? targets});
+typedef _Fail = Map<String, dynamic>?;
+
+typedef _Native = ({
+  NativePatchOutcome? patch,
+  Map<String, dynamic>? refusal,
+  NativeLibsVerdict? verdict,
+});
+
 final _logger = Logger('dev_tool.reload_pipeline');
 
 class ReloadPipeline {
@@ -309,7 +327,7 @@ class ReloadPipeline {
   /// the reader already knows which command they sent. It is passed anyway so
   /// the report is well-formed rather than carrying a placeholder — if the
   /// refusal arm ever grows a composed sentence, the word it needs is there.
-  Future<Map<String, dynamic>?> _awaitReady(String verb) async {
+  Future<_Fail> _awaitReady(String verb) async {
     await ready.whenReady.timeout(readyTimeout, onTimeout: () {});
     // An assembly in flight holds the gate open, and waiting for *it* is a
     // different thing from waiting out the clock above: something is running,
@@ -360,7 +378,7 @@ class ReloadPipeline {
   /// Not a retry loop: one attempt per request, and every request is a user
   /// event — a save, an `r`, an `app.hotReload`. Nothing here schedules itself.
   Future<void> _assembleAgain() async {
-    final previous = _attempts;
+    final Future<void> previous = _attempts;
     // Completed in the `finally` and never with an error, so one attempt's
     // failure cannot poison the queue behind it.
     final mine = Completer<void>();
@@ -368,7 +386,7 @@ class ReloadPipeline {
     try {
       await previous;
       if (!ready.isRetryable) return;
-      final retry = reassemble;
+      final Future<void> Function()? retry = reassemble;
       if (retry == null) return;
       ready.reopen();
       await trackAssembly(retry);
@@ -413,14 +431,14 @@ class ReloadPipeline {
   /// from the build tree when it reloads, so the rebuild is all it needs. A
   /// native restart delivers, because the restarted app reads its changed
   /// assets out of devFS.
-  Future<AssetOutcome> _refreshAssets(
+  Future<_Assets> _refreshAssets(
     List<DeviceSession> targets, {
     required bool deliver,
   }) async {
-    const nothingToDo = AssetOutcome.none;
-    final tracker = assetTracker;
-    final rebuild = rebuildAssets;
-    final applyTo = strategy;
+    const _Assets nothingToDo = AssetOutcome.none;
+    final AssetTracker? tracker = assetTracker;
+    final Future<bool> Function()? rebuild = rebuildAssets;
+    final ReloadStrategy? applyTo = strategy;
     if (tracker == null || rebuild == null || applyTo == null) {
       return nothingToDo;
     }
@@ -431,7 +449,7 @@ class ReloadPipeline {
     // delivered is how that edit is lost. Same guard, same reason, as the
     // tracker's own baseline. Off the filesystem's clock, not the wall
     // clock's: see [fileClockNow].
-    final rebuiltBefore = await fileClockNow();
+    final DateTime rebuiltBefore = await fileClockNow();
     if (!await rebuild()) {
       return const AssetOutcome(
         rebuildFailed: 'Asset rebuild (bazel) failed; see build output above.',
@@ -441,7 +459,9 @@ class ReloadPipeline {
     // restart has already delivered. The build is the authority on what
     // actually changed: an edit that leaves the bundle byte-identical reaches
     // here with nothing to do, and the app is left alone.
-    final changed = tracker.takeBundleChanges(rebuiltBefore: rebuiltBefore);
+    final Set<String> changed = tracker.takeBundleChanges(
+      rebuiltBefore: rebuiltBefore,
+    );
     if (changed.isEmpty || !deliver) {
       // Not `nothingToDo`. A source moved, a build ran, and the bundle came
       // back byte-identical — which is legitimate (an edit reverted, a save
@@ -454,7 +474,7 @@ class ReloadPipeline {
           : AssetOutcome(changed: changed);
     }
 
-    final outcome = await applyTo.applyAssets(
+    final StrategyOutcome outcome = await applyTo.applyAssets(
       changed,
       targets,
       shaders: {
@@ -473,11 +493,8 @@ class ReloadPipeline {
   /// it is [CommandReport.sourceRebuildFailed], whose doc says why: the build
   /// was attempted and broke, and a client reading `unavailable` would retire
   /// the session over an error in a generator that the next save can fix.
-  Future<Map<String, dynamic>?> _refreshGenerated(
-    String verb,
-    List<String> addressed,
-  ) async {
-    final refresh = refreshGenerated;
+  Future<_Fail> _refreshGenerated(String verb, List<String> addressed) async {
+    final Future<bool> Function()? refresh = refreshGenerated;
     if (refresh == null || await refresh()) return null;
     return toWire(
       CommandReport(
@@ -544,8 +561,8 @@ class ReloadPipeline {
     AssetOutcome assets, {
     bool patch = false,
   }) async {
-    var verdict = await nativeLibsVerdict?.call();
-    final patcher = patch ? patchNativeLibs : null;
+    NativeLibsVerdict? verdict = await nativeLibsVerdict?.call();
+    final _Patcher patcher = patch ? patchNativeLibs : null;
 
     // Bindings the running images cannot be known to serve. On its own that is
     // the end of the command — but it is the end only because nothing can put
@@ -567,12 +584,12 @@ class ReloadPipeline {
     // bindings are. (The rules cannot produce this state for a patchable
     // library — a `hot_patch` wrapper must declare a contract — and not relying
     // on that is what keeps the safe answer the default.)
-    final movedBindings = switch (verdict) {
+    final List<String> movedBindings = switch (verdict) {
       NativeBindingsMoved(:final libs) => libs,
       _ => const <String>[],
     };
-    final patchable = {...?patchableNativeLibs?.call()};
-    final noBuilder = [
+    final Set<String> patchable = {...?patchableNativeLibs?.call()};
+    final List<String> noBuilder = [
       for (final lib in movedBindings)
         if (!patchable.contains(p.basename(lib))) lib,
     ];
@@ -584,7 +601,7 @@ class ReloadPipeline {
 
     if (patcher == null) return (refusal: null, verdict: verdict, patch: null);
 
-    final outcome = await patcher(
+    final NativePatchOutcome outcome = await patcher(
       movedLibraries: switch (verdict) {
         NativeCodeStale(:final libs) || NativeBindingsMoved(:final libs) => {
           for (final l in libs) p.basename(l),
@@ -605,7 +622,7 @@ class ReloadPipeline {
     // Patched, reverted, unchanged or unmoved: whichever it was, every library
     // the patcher answers for now runs the code on disk — including its
     // declared bindings, which is what the builder was asked about.
-    final answered =
+    final bool answered =
         movedBindings.isNotEmpty ||
         switch (verdict) {
           NativeCodeStale(:final libs) => libs.any(
@@ -652,7 +669,7 @@ class ReloadPipeline {
     if (host.findSession(appId) == null) {
       return (targets: null, error: _refuse(verb, 'Unknown appId: $appId'));
     }
-    final named = [
+    final List<AppInstance> named = [
       for (final app in orch.apps)
         if (app.id == appId) app,
     ];
@@ -690,14 +707,14 @@ class ReloadPipeline {
     ReloadOrchestrator orch,
     Map<String, dynamic> params,
   ) async {
-    final resolved = _resolveTargets(orch, params, 'Restart');
+    final _Resolved resolved = _resolveTargets(orch, params, 'Restart');
     if (resolved.error != null) return resolved.error!;
-    final targets = resolved.targets!;
+    final List<AppInstance> targets = resolved.targets!;
     // What the reply reports it addressed. Read from the resolved targets
     // rather than from `params`, so it says what the command actually
     // reached: an unaddressed command names every app, and the set of apps
     // is not fixed for the life of a run.
-    final addressed = [for (final t in targets) t.id];
+    final List<String> addressed = [for (final t in targets) t.id];
     // Rebuild the asset bundle and deliver what changed to every app, the
     // restarting ones included. A restarted app's asset manager reads the
     // devFS asset directory the delivery writes to (see
@@ -705,8 +722,8 @@ class ReloadPipeline {
     // a sandboxed app cannot open. An app this restart leaves running needs
     // the delivery's evictions, or it shows the old artwork until its own
     // restart.
-    final orchestrated = {for (final app in orch.apps) app.id};
-    final assets = await _refreshAssets([
+    final Set<String> orchestrated = {for (final app in orch.apps) app.id};
+    final _Assets assets = await _refreshAssets([
       for (final s in host.sessions)
         if (orchestrated.contains(s.appId)) s,
     ], deliver: true);
@@ -720,15 +737,15 @@ class ReloadPipeline {
     // writes, and the compile reads the sources it writes. Once per command,
     // here rather than inside the orchestrator, because what a moved native
     // library *means* differs by verb and only this level knows the verb.
-    final rebuildFailed = await _refreshGenerated('Restart', addressed);
-    if (rebuildFailed != null) return rebuildFailed;
+    final _Fail failed = await _refreshGenerated('Restart', addressed);
+    if (failed != null) return failed;
 
     // Native libraries cannot be hot-restarted (the process keeps its
     // dlopened images) — rebuild first and relaunch if they changed. The
     // relauncher replaces every process that dlopened the stale libraries,
     // targeted or not: the bundle is one shared tree, and a process left on
     // unloaded old machine code would crash, not hot-reload.
-    final relaunch = relaunchIfNativeLibsChanged;
+    final _Relaunch relaunch = relaunchIfNativeLibsChanged;
     if (relaunch != null) {
       switch (await relaunch()) {
         // The rebuild that had to happen before anything could be compiled,
@@ -736,7 +753,7 @@ class ReloadPipeline {
         // and for the same reason: not `unavailable`, which says this run
         // cannot reload at all and would have a driver retire the session
         // over a build error it can fix and retry.
-        case RelaunchBuildFailed(:final reason):
+        case RelaunchBuildFailed(:final String reason):
           return toWire(
             CommandReport(
               verb: 'Restart',
@@ -778,7 +795,7 @@ class ReloadPipeline {
     // relauncher. A restart re-runs `main()` in the same process over the same
     // mapped images, so it can no more deliver the new library than a reload
     // can, and saying so is all this run can do about it.
-    final native = await _checkNativeLibs('Restart', addressed, assets);
+    final _Native native = await _checkNativeLibs('Restart', addressed, assets);
     if (native.refusal case final refusal?) return refusal;
     return toWire(
       CommandReport(
@@ -797,11 +814,11 @@ class ReloadPipeline {
     Map<String, dynamic> params,
     Set<String> declared,
   ) async {
-    final resolved = _resolveTargets(orch, params, 'Hot reload');
+    final _Resolved resolved = _resolveTargets(orch, params, 'Hot reload');
     if (resolved.error != null) return resolved.error!;
-    final targets = resolved.targets!;
+    final List<AppInstance> targets = resolved.targets!;
     // See `restart` above: reported from the resolved set, not from params.
-    final addressed = [for (final t in targets) t.id];
+    final List<String> addressed = [for (final t in targets) t.id];
     // Started here rather than around the inject alone, because this is the
     // wait a caller is actually timing: a codegen rebuild, a native patch
     // built and delivered to a device, and the compile. On this path the
@@ -815,7 +832,7 @@ class ReloadPipeline {
     // under every app, so an eviction withheld from an untargeted app would
     // not preserve its old artwork — it would strand its cache stale
     // forever, because the diff below is committed once.
-    final assets = await _refreshAssets(host.sessions, deliver: true);
+    final _Assets assets = await _refreshAssets(host.sessions, deliver: true);
     if (assets.rebuildFailed != null) {
       return toWire(
         CommandReport(verb: 'Hot reload', appIds: addressed, assets: assets),
@@ -823,22 +840,25 @@ class ReloadPipeline {
     }
     // Codegen apps: regenerate before the compiler reads the tree, so a
     // regenerated file is detected as changed and recompiled.
-    final rebuildFailed = await _refreshGenerated('Hot reload', addressed);
-    if (rebuildFailed != null) return rebuildFailed;
+    final _Fail failed = await _refreshGenerated('Hot reload', addressed);
+    if (failed != null) return failed;
     // And then the question that rebuild owes: a reload can never replace a
     // library the process has mapped, and it may not replace the process
     // either — so what is left to decide is whether the increment is one that
     // library can still serve. When it is, the reload goes through and the
     // stale machine code is reported; when nothing says it is, the increment
     // is withheld rather than injected over code that cannot serve it.
-    final native = await _checkNativeLibs(
+    final _Native native = await _checkNativeLibs(
       'Hot reload',
       addressed,
       assets,
       patch: true,
     );
     if (native.refusal case final refusal?) return refusal;
-    final outcome = await orch.reload(declared: declared, targets: targets);
+    final _Out outcome = await orch.reload(
+      declared: declared,
+      targets: targets,
+    );
     if (native.patch is NativePatched && outcome is ReloadNoChange) {
       await reassembleNativePatched?.call();
     }
@@ -859,11 +879,11 @@ class ReloadPipeline {
   /// Restart the app: a full recompile and a fresh `main()`.
   Future<Map<String, dynamic>> restart(Map<String, dynamic> params) async {
     command++;
-    final notReady = await _awaitReady('Restart');
+    final _Fail notReady = await _awaitReady('Restart');
     if (notReady != null) return notReady;
 
     // Native: orchestrator-based restart.
-    final orch = orchestrator;
+    final ReloadOrchestrator? orch = orchestrator;
     if (orch != null) return _restartNative(orch, params);
 
     // Web DDC.
@@ -876,25 +896,25 @@ class ReloadPipeline {
     // DWDS then reconciles by digest), so a rollback would leave the compiler
     // describing a program the server is no longer serving. Web's apply is
     // the strategy, and this is where it belongs.
-    final fs = frontendServer;
+    final FrontendServer? fs = frontendServer;
     if (fs == null || entrypoint.isEmpty) {
       return _refuse('Restart', 'No frontend server available');
     }
-    final applyTo = strategy;
+    final ReloadStrategy? applyTo = strategy;
     if (applyTo == null) {
       return _refuse('Restart', 'No reload strategy for this session.');
     }
-    final targets = host.targetSessions(params);
+    final List<DeviceSession> targets = host.targetSessions(params);
     if (targets.isEmpty && params.containsKey('appId')) {
       return _refuse('Restart', 'Unknown appId: ${params['appId']}');
     }
     // See the native arm: reported from what was resolved, not from params.
-    final addressed = [for (final s in targets) s.appId];
+    final List<String> addressed = [for (final s in targets) s.appId];
     // Codegen apps: regenerate before the restart's full recompile.
-    final webRebuildFailed = await _refreshGenerated('Restart', addressed);
-    if (webRebuildFailed != null) return webRebuildFailed;
+    final _Fail webFailed = await _refreshGenerated('Restart', addressed);
+    if (webFailed != null) return webFailed;
     // Same as native: rebuild the bundle, let the restart re-fetch it.
-    final assets = await _refreshAssets(targets, deliver: false);
+    final _Assets assets = await _refreshAssets(targets, deliver: false);
     if (assets.rebuildFailed != null) {
       // 'Restart', because that is the command that failed. Reported as a hot
       // reload, the one line the user gets names an operation they did not run.
@@ -911,17 +931,17 @@ class ReloadPipeline {
     // change. Read beforehand, the worst case is re-sending a file the
     // compile did pick up. Native's orchestrator snapshots before compiling
     // for the same reason.
-    final preCompile = workspaceView?.snapshot();
+    final SourceVersions? preCompile = workspaceView?.snapshot();
     // What the restart's `reset` + `recompile` is told changed. It does not
     // decide what is compiled — the reset re-reads the whole tree — but the
     // compiler takes both on one request and keeps per-file state, so it is
     // owed the same list an incremental compile would give it. Derived from the
     // same snapshot the success path commits, so the two cannot disagree about
     // which version of a file this restart is about.
-    final invalidated = preCompile == null
+    final List<String> invalidated = preCompile == null
         ? const <String>[]
         : appliedVersions.findChangedFrom(preCompile).toList();
-    final result = await recompileAndRestart(
+    final ReloadResult result = await recompileAndRestart(
       frontendServer: fs,
       entrypoint: entrypoint,
       invalidatedFiles: invalidated,
@@ -968,9 +988,7 @@ class ReloadPipeline {
   /// Run a restart when the page never loaded a program.
   ///
   /// Null when there is a baseline, meaning the reload proceeds.
-  Future<Map<String, dynamic>?> _promoteBaselineToRestart(
-    Map<String, dynamic> params,
-  ) async {
+  Future<_Fail> _promoteBaselineToRestart(Map<String, dynamic> params) async {
     if (webBaselineFailure == null) return null;
     // Said, not silently substituted. The answer comes back with the verb
     // `Restart`, and a client that asked for a hot reload is owed the reason
@@ -1013,38 +1031,36 @@ class ReloadPipeline {
 
   Future<Map<String, dynamic>> hotReload(Map<String, dynamic> params) async {
     command++;
-    final notReady = await _awaitReady('Hot reload');
+    final _Fail notReady = await _awaitReady('Hot reload');
     if (notReady != null) return notReady;
 
-    final declared =
+    final Set<String> declared =
         (params['invalidatedFiles'] as List?)?.cast<String>().toSet() ??
         <String>{};
 
     // Native: orchestrator-based reload (includes per-AppInstance RPC budget).
-    final orch = orchestrator;
-    if (orch != null) {
-      return _hotReloadNative(orch, params, declared);
-    }
+    final ReloadOrchestrator? orch = orchestrator;
+    if (orch != null) return _hotReloadNative(orch, params, declared);
 
     // Web DDC: recompileAndReload + AppliedVersions for change detection.
     // Not a global `_lastCompileTime`; every file's last-applied version is
     // tracked individually. See `restart` above for why this is web's path
     // rather than a stop on the way to the orchestrator.
-    final fs = frontendServer;
-    final ws = workspaceView;
+    final FrontendServer? fs = frontendServer;
+    final Workspace? ws = workspaceView;
     if (fs == null || entrypoint.isEmpty || ws == null) {
       return _refuse('Hot reload', 'No frontend server available');
     }
-    final applyTo = strategy;
+    final ReloadStrategy? applyTo = strategy;
     if (applyTo == null) {
       return _refuse('Hot reload', 'No reload strategy for this session.');
     }
-    final targets = host.targetSessions(params);
+    final List<DeviceSession> targets = host.targetSessions(params);
     if (targets.isEmpty && params.containsKey('appId')) {
       return _refuse('Hot reload', 'Unknown appId: ${params['appId']}');
     }
     // See the native arm: reported from what was resolved, not from params.
-    final addressed = [for (final s in targets) s.appId];
+    final List<String> addressed = [for (final s in targets) s.appId];
 
     // A page that was never given a program has no increment to take. Answered
     // by doing the thing that would work rather than by refusing: under
@@ -1057,13 +1073,13 @@ class ReloadPipeline {
     // Ahead of the rebuilds below because [restart] runs its own, and running
     // them twice for one request would rebuild the tree the user is still
     // editing.
-    final promoted = await _promoteBaselineToRestart(params);
+    final _Fail promoted = await _promoteBaselineToRestart(params);
     if (promoted != null) return promoted;
 
     // Codegen apps: rebuild generated sources via bazel before snapshotting, so
     // a regenerated `.g.dart` is detected as changed and recompiled.
-    final webRebuildFailed = await _refreshGenerated('Hot reload', addressed);
-    if (webRebuildFailed != null) return webRebuildFailed;
+    final _Fail webFailed = await _refreshGenerated('Hot reload', addressed);
+    if (webFailed != null) return webFailed;
     // And the question that rebuild owes, on the same terms as native: the page
     // instantiated its native modules once and a reload does not re-run `main()`,
     // so an increment generated against a rebuilt module would run against the
@@ -1072,36 +1088,38 @@ class ReloadPipeline {
     // native's: nothing below has run yet, so a withheld reload here has touched
     // the page in no way at all. `AssetOutcome.none` for the same reason — there
     // is no diff to fold into a refusal that precedes it.
-    final native = await _checkNativeLibs(
+    final _Native native = await _checkNativeLibs(
       'Hot reload',
       addressed,
       AssetOutcome.none,
     );
     if (native.refusal case final refusal?) return refusal;
 
-    final assets = await _refreshAssets(targets, deliver: true);
+    final _Assets assets = await _refreshAssets(targets, deliver: true);
     if (assets.rebuildFailed != null) {
       return toWire(
         CommandReport(verb: 'Hot reload', appIds: addressed, assets: assets),
       );
     }
 
-    final snap = ws.snapshot();
-    final fsChanged = appliedVersions.findChangedFrom(snap);
+    final SourceVersions snap = ws.snapshot();
+    final Set<String> fsChanged = appliedVersions.findChangedFrom(snap);
     final invalidated = {...fsChanged, ...declared};
-    final noChange = _reportReloadNoChange(addressed, assets, native.verdict);
+    final Map<String, dynamic> noChange = _reportReloadNoChange(
+      addressed,
+      assets,
+      native.verdict,
+    );
     if (invalidated.isEmpty) return noChange;
 
-    final result = await recompileAndReload(
+    final ReloadResult result = await recompileAndReload(
       frontendServer: fs,
       entrypoint: entrypoint,
       invalidatedFiles: invalidated.toList(),
       sessions: targets,
       reloadStrategy: applyTo,
     );
-    if (result.success) {
-      appliedVersions.markApplied(snap, files: invalidated);
-    }
+    if (result.success) appliedVersions.markApplied(snap, files: invalidated);
     return toWire(
       CommandReport(
         verb: 'Hot reload',

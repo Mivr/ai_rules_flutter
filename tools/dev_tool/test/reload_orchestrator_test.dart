@@ -89,7 +89,7 @@ void main() {
     /// Pretend we just launched: every file currently on disk is "applied"
     /// at its current version.
     void seedApplied() {
-      final snap = workspace.snapshot();
+      final SourceVersions snap = workspace.snapshot();
       applied.markApplied(snap, files: snap.fileUris.toSet());
     }
 
@@ -98,9 +98,9 @@ void main() {
       () async {
         writeFile('main.dart', 'void main() {}');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
 
-        final outcome = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.reload(targets: [app]);
         expect(outcome, isA<ReloadNoChange>());
         expect(
           compiler.recompileCalls,
@@ -123,9 +123,9 @@ void main() {
         writeFile('main.dart', 'void main() {}');
         seedApplied();
         baselineFailures['app1'] = 'main.dart:1:8: Error: Bad syntax';
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
 
-        final outcome = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.reload(targets: [app]);
         expect(outcome, isA<ReloadCompileFailed>());
         expect(
           (outcome as ReloadCompileFailed).diagnostics,
@@ -148,11 +148,11 @@ void main() {
       writeFile('main.dart', 'void main() {}');
       seedApplied();
       baselineFailures['app1'] = 'main.dart:1:8: Error: Bad syntax';
-      final orchestrator = makeOrchestrator();
+      final ReloadOrchestrator orchestrator = makeOrchestrator();
 
       // The fix lands, the watcher's reload compiles it, and it applies.
       writeFile('main.dart', 'void main() { print("fixed"); }');
-      final recovered = await orchestrator.reload(targets: [app]);
+      final ReloadOutcome recovered = await orchestrator.reload(targets: [app]);
       expect(
         recovered,
         isA<ReloadApplied>(),
@@ -161,7 +161,7 @@ void main() {
       expect(units['app1']!.baselineFailure, isNull);
 
       // So the next empty reload is an ordinary one again.
-      final second = await orchestrator.reload(targets: [app]);
+      final ReloadOutcome second = await orchestrator.reload(targets: [app]);
       expect(second, isA<ReloadNoChange>());
     });
 
@@ -175,7 +175,9 @@ void main() {
         seedApplied();
         final app2 = FakeAppInstance(id: 'app2');
         baselineFailures['app1'] = 'main.dart:1:8: Error: Bad syntax';
-        final orchestrator = makeOrchestrator(apps: [app, app2]);
+        final ReloadOrchestrator orchestrator = makeOrchestrator(
+          apps: [app, app2],
+        );
 
         expect(
           await orchestrator.reload(targets: [app2]),
@@ -205,7 +207,7 @@ void main() {
           ),
           generatedFiles: {genUri: genFile.path},
         );
-        final snap0 = ws.snapshot();
+        final SourceVersions snap0 = ws.snapshot();
         applied.markApplied(snap0, files: snap0.fileUris.toSet());
         final orch = ReloadOrchestrator(
           workspace: ws,
@@ -219,7 +221,7 @@ void main() {
         // still picked up, which only the snapshot diff can do.
         genFile.writeAsStringSync('// v2 regenerated (longer)');
 
-        final outcome = await orch.reload(targets: [app]);
+        final ReloadOutcome outcome = await orch.reload(targets: [app]);
 
         expect(outcome, isA<ReloadApplied>());
         expect(
@@ -235,17 +237,17 @@ void main() {
       () async {
         writeFile('main.dart', 'void main() { print(1); }');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'void main() { print(2); } // longer');
 
-        final outcome = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.reload(targets: [app]);
         expect(outcome, isA<ReloadApplied>());
         final applied_ = outcome as ReloadApplied;
         expect(applied_.filesRecompiled, {uriFor('main.dart')});
         expect(applied_.isEmpty, isFalse);
 
         // Subsequent reload sees nothing changed.
-        final second = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome second = await orchestrator.reload(targets: [app]);
         expect(second, isA<ReloadNoChange>());
       },
     );
@@ -255,9 +257,9 @@ void main() {
       () async {
         writeFile('main.dart', 'void main() {}');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
 
-        final outcome = await orchestrator.reload(
+        final ReloadOutcome outcome = await orchestrator.reload(
           declared: {uriFor('main.dart')},
           targets: [app],
         );
@@ -274,9 +276,9 @@ void main() {
       () async {
         writeFile('main.dart', 'void main() {}');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
 
-        final outcome = await orchestrator.reload(
+        final ReloadOutcome outcome = await orchestrator.reload(
           declared: {uriFor('main.dart')},
           targets: [app],
         );
@@ -294,10 +296,10 @@ void main() {
       () async {
         writeFile('main.dart', 'void main() { print(1); }');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'void main() { print(2); } // longer');
 
-        final outcome = await orchestrator.reload(
+        final ReloadOutcome outcome = await orchestrator.reload(
           declared: {uriFor('main.dart')},
           targets: [app],
         );
@@ -312,11 +314,11 @@ void main() {
         writeFile('a.dart', 'a-v1');
         writeFile('b.dart', 'b-v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('a.dart', 'a-v2 longer');
 
         // FS shows a.dart changed; caller declares b.dart.
-        final outcome = await orchestrator.reload(
+        final ReloadOutcome outcome = await orchestrator.reload(
           declared: {uriFor('b.dart')},
           targets: [app],
         );
@@ -336,15 +338,15 @@ void main() {
         // independently observes the new version.
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'v2 longer');
 
-        final first = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome first = await orchestrator.reload(targets: [app]);
         expect(first, isA<ReloadApplied>());
 
         writeFile('main.dart', 'v3 longer still much');
 
-        final second = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome second = await orchestrator.reload(targets: [app]);
         expect(
           second,
           isA<ReloadApplied>(),
@@ -361,15 +363,15 @@ void main() {
         writeFile('a.dart', 'a-v1');
         writeFile('b.dart', 'b-v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('a.dart', 'a-v2 longer');
 
-        final first = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome first = await orchestrator.reload(targets: [app]);
         expect(first, isA<ReloadApplied>());
 
         writeFile('b.dart', 'b-v2 longer');
 
-        final second = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome second = await orchestrator.reload(targets: [app]);
         expect(second, isA<ReloadApplied>());
         expect((second as ReloadApplied).filesRecompiled, {uriFor('b.dart')});
       },
@@ -380,12 +382,12 @@ void main() {
       () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'v2 longer');
 
         await orchestrator.reload(targets: [app]);
         // No further edits.
-        final second = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome second = await orchestrator.reload(targets: [app]);
         expect(second, isA<ReloadNoChange>());
         expect(
           compiler.recompileCalls,
@@ -400,11 +402,11 @@ void main() {
       () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'v2 longer');
 
         compiler.nextOutcome = const CompileFailed('syntax error');
-        final outcome = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.reload(targets: [app]);
         expect(outcome, isA<ReloadCompileFailed>());
         expect((outcome as ReloadCompileFailed).diagnostics, 'syntax error');
         expect(compiler.rollbackCount, 1);
@@ -412,7 +414,7 @@ void main() {
 
         // applied not advanced — the next reload should still see main.dart as changed.
         compiler.nextOutcome = const CompileSucceeded('/tmp/d.dill');
-        final retry = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome retry = await orchestrator.reload(targets: [app]);
         expect(retry, isA<ReloadApplied>());
       },
     );
@@ -422,11 +424,11 @@ void main() {
       () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'v2 longer');
 
         app.nextOutcome = const ApplyFailed('device error');
-        final outcome = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.reload(targets: [app]);
         expect(outcome, isA<ReloadApplyFailed>());
         expect(
           (outcome as ReloadApplyFailed).perApp['app1'],
@@ -437,7 +439,7 @@ void main() {
 
         // applied not advanced — retry should still find main.dart changed.
         app.nextOutcome = const Applied();
-        final retry = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome retry = await orchestrator.reload(targets: [app]);
         expect(retry, isA<ReloadApplied>());
       },
     );
@@ -447,11 +449,11 @@ void main() {
       () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'v2 longer');
 
         app.nextOutcome = const Applied(notShown: 'not drawing');
-        final outcome = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.reload(targets: [app]);
 
         expect(outcome, isA<ReloadApplied>());
         expect((outcome as ReloadApplied).notShown, {'app1': 'not drawing'});
@@ -465,11 +467,11 @@ void main() {
       () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'v2 longer');
 
         app.nextOutcome = const ApplyTimedOut();
-        final outcome = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.reload(targets: [app]);
         expect(outcome, isA<ReloadApplyFailed>());
         expect(
           (outcome as ReloadApplyFailed).perApp['app1'],
@@ -487,13 +489,13 @@ void main() {
         // Applied)` is silently correct only for as long as a test says so.
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'v2 longer');
 
         app.nextOutcome = const AppliedThenThrew(
           FlutterErrorReport({'description': 'Null is not a String'}),
         );
-        final outcome = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.reload(targets: [app]);
         expect(outcome, isA<ReloadApplyFailed>());
         expect(
           (outcome as ReloadApplyFailed).perApp['app1'],
@@ -523,12 +525,12 @@ void main() {
         writeFile('main.dart', 'v2 longer');
 
         final app2 = FakeAppInstance(id: 'app2');
-        final orch2 = makeOrchestrator(apps: [app, app2]);
-        final compiler2 = compilers['app2']!;
+        final ReloadOrchestrator orch2 = makeOrchestrator(apps: [app, app2]);
+        final FakeCompiler compiler2 = compilers['app2']!;
         app.nextOutcome = const ApplyFailed('boom');
         app2.nextOutcome = const Applied();
 
-        final outcome = await orch2.reload(targets: [app, app2]);
+        final ReloadOutcome outcome = await orch2.reload(targets: [app, app2]);
         expect(outcome, isA<ReloadApplyFailed>());
         // Both apps were attempted in parallel; app2 succeeded but the
         // overall outcome is failure because app1 failed.
@@ -545,7 +547,7 @@ void main() {
 
         // So a retry re-offers the edit to app1 only.
         app.nextOutcome = const Applied();
-        final retry = await orch2.reload(targets: [app, app2]);
+        final ReloadOutcome retry = await orch2.reload(targets: [app, app2]);
         expect(retry, isA<ReloadApplied>());
         expect(
           (retry as ReloadApplied).apps,
@@ -561,16 +563,18 @@ void main() {
         writeFile('a.dart', 'a-v1');
         writeFile('b.dart', 'b-v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
 
-        final outcome = await orchestrator.restart(targets: [app]);
+        final ReloadOutcome outcome = await orchestrator.restart(
+          targets: [app],
+        );
         expect(outcome, isA<ReloadApplied>());
         expect(compiler.fullCompileCalls, hasLength(1));
         expect(app.calls.last.mode, ApplyMode.hotRestart);
 
         // After restart, applied is repopulated to current snapshot. No
         // further changes, so next reload is a no-op.
-        final second = await orchestrator.reload(targets: [app]);
+        final ReloadOutcome second = await orchestrator.reload(targets: [app]);
         expect(second, isA<ReloadNoChange>());
       },
     );
@@ -585,11 +589,11 @@ void main() {
         // ensure that after we release it, both calls return cleanly.
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orchestrator = makeOrchestrator();
+        final ReloadOrchestrator orchestrator = makeOrchestrator();
         writeFile('main.dart', 'v2 longer');
 
         compiler.pendingResult = Completer<void>();
-        final f1 = orchestrator.reload(targets: [app]);
+        final Future<ReloadOutcome> f1 = orchestrator.reload(targets: [app]);
         // Don't fire the second one until the first has captured its
         // snapshot — the two compile calls would otherwise interleave the
         // FakeCompiler's single recompileCalls list. The orchestrator
@@ -598,7 +602,7 @@ void main() {
         await Future<void>.delayed(Duration.zero);
 
         compiler.pendingResult!.complete();
-        final r1 = await f1;
+        final ReloadOutcome r1 = await f1;
         expect(r1, isA<ReloadApplied>());
       },
     );
@@ -613,10 +617,10 @@ void main() {
       test('a targeted reload reaches only the targeted app', () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orch = makeOrchestrator(apps: [app, app2]);
+        final ReloadOrchestrator orch = makeOrchestrator(apps: [app, app2]);
         writeFile('main.dart', 'v2 longer');
 
-        final outcome = await orch.reload(targets: [app]);
+        final ReloadOutcome outcome = await orch.reload(targets: [app]);
 
         expect(outcome, isA<ReloadApplied>());
         expect(
@@ -636,14 +640,14 @@ void main() {
           'the earlier edit', () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orch = makeOrchestrator(apps: [app, app2]);
+        final ReloadOrchestrator orch = makeOrchestrator(apps: [app, app2]);
         writeFile('main.dart', 'v2 longer');
 
         await orch.reload(targets: [app]);
 
         // No further edits. app2 never received v2; a reload aimed at it must
         // still recompile and deliver main.dart, not report "no changes".
-        final second = await orch.reload(targets: [app2]);
+        final ReloadOutcome second = await orch.reload(targets: [app2]);
 
         expect(second, isA<ReloadApplied>());
         expect(
@@ -658,7 +662,7 @@ void main() {
         expect(app2.calls, hasLength(1));
 
         // Now both are current: a reload of everything has nothing to do.
-        final third = await orch.reload(targets: [app, app2]);
+        final ReloadOutcome third = await orch.reload(targets: [app, app2]);
         expect(third, isA<ReloadNoChange>());
       });
 
@@ -666,10 +670,10 @@ void main() {
           'app still reloads correctly afterwards', () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orch = makeOrchestrator(apps: [app, app2]);
+        final ReloadOrchestrator orch = makeOrchestrator(apps: [app, app2]);
         writeFile('main.dart', 'v2 longer');
 
-        final outcome = await orch.restart(targets: [app]);
+        final ReloadOutcome outcome = await orch.restart(targets: [app]);
 
         expect(outcome, isA<ReloadApplied>());
         expect(app.calls.last.mode, ApplyMode.hotRestart);
@@ -681,7 +685,7 @@ void main() {
 
         // The restart marked everything applied FOR app1 ONLY. app2 is still
         // running v1, and a reload aimed at it must deliver v2.
-        final second = await orch.reload(targets: [app2]);
+        final ReloadOutcome second = await orch.reload(targets: [app2]);
         expect(second, isA<ReloadApplied>());
         expect(
           (second as ReloadApplied).filesRecompiled,
@@ -696,14 +700,14 @@ void main() {
         () async {
           writeFile('main.dart', 'v1');
           seedApplied();
-          final orch = makeOrchestrator(apps: [app, app2]);
+          final ReloadOrchestrator orch = makeOrchestrator(apps: [app, app2]);
           writeFile('main.dart', 'v2 longer');
 
           await orch.reload(targets: [app]);
 
           // app1 already has v2; declaring main.dart at it is a semantic no-op
           // even though app2 still lags.
-          final outcome = await orch.reload(
+          final ReloadOutcome outcome = await orch.reload(
             declared: {uriFor('main.dart')},
             targets: [app],
           );
@@ -727,13 +731,13 @@ void main() {
           final tree = FakeSourceTree()
             ..add(uriFor('a.dart'))
             ..add(uriFor('b.dart'), inlinesFrom: {uriFor('a.dart')});
-          final launched = {
+          final Map<String, LibImage> launched = {
             for (final uri in tree.versions.keys) uri: tree.imageOf(uri),
           };
           for (final id in ['app1', 'app2']) {
             compilers.remove(id);
           }
-          final depCompilers = {
+          final Map<String, DependencyFakeCompiler> depCompilers = {
             for (final id in ['app1', 'app2'])
               id: DependencyFakeCompiler(tree)..seedFromTree(),
           };
@@ -760,7 +764,7 @@ void main() {
           await orch.reload(targets: [app2]);
 
           for (final target in [app, app2]) {
-            final live = liveImageOf(
+            final Map<String, LibImage> live = liveImageOf(
               target,
               tree: tree,
               launchedWith: launched,
@@ -782,8 +786,8 @@ void main() {
         () async {
           writeFile('main.dart', 'v1');
           seedApplied();
-          final orch = makeOrchestrator(apps: [app, app2]);
-          final unitBefore = orch.unitFor(app);
+          final ReloadOrchestrator orch = makeOrchestrator(apps: [app, app2]);
+          final SessionReloader unitBefore = orch.unitFor(app);
 
           // What the relauncher does: same id, new process.
           final replacement = FakeAppInstance(id: 'app1');
@@ -804,8 +808,8 @@ void main() {
         () async {
           writeFile('main.dart', 'v1');
           seedApplied();
-          final orch = makeOrchestrator(apps: [app, app2]);
-          final unitBefore = orch.unitFor(app2);
+          final ReloadOrchestrator orch = makeOrchestrator(apps: [app, app2]);
+          final SessionReloader unitBefore = orch.unitFor(app2);
 
           // The relauncher reports only the apps that reconnected.
           orch.syncLiveApps([app]);
@@ -822,7 +826,7 @@ void main() {
           // An unaddressed reload reaches the healthy app and does not fail on
           // the dead one.
           writeFile('main.dart', 'v2 longer');
-          final outcome = await orch.reload(targets: orch.apps);
+          final ReloadOutcome outcome = await orch.reload(targets: orch.apps);
           expect(outcome, isA<ReloadApplied>());
           expect(app2.calls, isEmpty);
 
@@ -830,7 +834,7 @@ void main() {
           final back = FakeAppInstance(id: 'app2');
           orch.syncLiveApps([app, back]);
           expect(orch.apps, [app, back]);
-          final second = await orch.reload(targets: [back]);
+          final ReloadOutcome second = await orch.reload(targets: [back]);
           expect(
             second,
             isA<ReloadApplied>(),
@@ -846,7 +850,7 @@ void main() {
       test('a target the orchestrator does not know is a loud error', () async {
         writeFile('main.dart', 'v1');
         seedApplied();
-        final orch = makeOrchestrator(apps: [app]);
+        final ReloadOrchestrator orch = makeOrchestrator(apps: [app]);
 
         expect(
           () => orch.reload(targets: [FakeAppInstance(id: 'ghost')]),

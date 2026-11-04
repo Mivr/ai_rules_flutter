@@ -55,7 +55,7 @@ void main() {
     });
 
     Future<Map<String, LibImage>> increment(Set<String> invalidated) async {
-      final outcome = await compiler.compileIncrement(
+      final CompileOutcome outcome = await compiler.compileIncrement(
         invalidated: invalidated,
         entrypoint: 'main',
       );
@@ -65,7 +65,7 @@ void main() {
     test(
       'an explicitly invalidated URI is re-emitted even when unchanged',
       () async {
-        final delta = await increment({'a'});
+        final Map<String, LibImage> delta = await increment({'a'});
         expect(
           delta.keys,
           {'a'},
@@ -76,7 +76,7 @@ void main() {
 
     test('a changed library drags its dependents into the delta', () async {
       tree.edit('a');
-      final delta = await increment({'a'});
+      final Map<String, LibImage> delta = await increment({'a'});
       expect(delta.keys, {'a', 'b'});
       expect(delta['b'], const LibImage(own: 1, inlined: {'a': 2}));
     });
@@ -89,7 +89,7 @@ void main() {
 
       // Same invalidation again. The compiler now believes b is current, so it
       // withholds it — the exact behaviour that strands a lagging app.
-      final delta = await increment({'a'});
+      final Map<String, LibImage> delta = await increment({'a'});
       expect(delta.keys, {
         'a',
       }, reason: 'dependents are judged against the accepted state');
@@ -102,7 +102,7 @@ void main() {
         await increment({'a'});
         await compiler.rollback();
 
-        final delta = await increment({'a'});
+        final Map<String, LibImage> delta = await increment({'a'});
         expect(
           delta.keys,
           {'a', 'b'},
@@ -126,11 +126,12 @@ void main() {
 
     test('compileFull emits the whole tree and resets the baseline', () async {
       tree.edit('a');
-      final outcome = await compiler.compileFull(
+      final CompileOutcome outcome = await compiler.compileFull(
         entrypoint: 'main',
         invalidated: {'a'},
       );
-      final delta = tree.deltaByDill[(outcome as CompileSucceeded).dillPath]!;
+      final Map<String, LibImage> delta =
+          tree.deltaByDill[(outcome as CompileSucceeded).dillPath]!;
       expect(delta.keys, {'a', 'b'});
       await compiler.commit();
       expect(compiler.accepted['b'], const LibImage(own: 1, inlined: {'a': 2}));
@@ -140,13 +141,13 @@ void main() {
       final other = DependencyFakeCompiler(tree)..seedFromTree();
       tree.edit('a');
 
-      final mine = await increment({'a'});
+      final Map<String, LibImage> mine = await increment({'a'});
       await compiler.commit();
       expect(mine.keys, {'a', 'b'});
 
       // The second compiler never saw that delta, so its baseline still holds
       // the old `a` and it re-derives b for its own app.
-      final theirs = await other.compileIncrement(
+      final CompileOutcome theirs = await other.compileIncrement(
         invalidated: {'a'},
         entrypoint: 'main',
       );
@@ -163,11 +164,11 @@ void main() {
         ..add('a')
         ..add('b', inlinesFrom: {'a'});
       final compiler = DependencyFakeCompiler(tree)..seedFromTree();
-      final launched = {...compiler.accepted};
+      final Map<String, LibImage> launched = {...compiler.accepted};
       final app = FakeAppInstance(id: 'app1');
 
       tree.edit('a');
-      final outcome = await compiler.compileIncrement(
+      final CompileOutcome outcome = await compiler.compileIncrement(
         invalidated: {'a'},
         entrypoint: 'main',
       );
@@ -176,7 +177,11 @@ void main() {
         mode: ApplyMode.hotReload,
       );
 
-      final live = liveImageOf(app, tree: tree, launchedWith: launched);
+      final Map<String, LibImage> live = liveImageOf(
+        app,
+        tree: tree,
+        launchedWith: launched,
+      );
       expect(live['a']!.own, 2);
       expect(live['b'], const LibImage(own: 1, inlined: {'a': 2}));
     });
@@ -187,7 +192,7 @@ void main() {
       final app = FakeAppInstance(id: 'app1');
 
       tree.edit('a');
-      final outcome = await compiler.compileFull(
+      final CompileOutcome outcome = await compiler.compileFull(
         entrypoint: 'main',
         invalidated: {'a'},
       );
@@ -196,7 +201,7 @@ void main() {
         mode: ApplyMode.hotRestart,
       );
 
-      final live = liveImageOf(
+      final Map<String, LibImage> live = liveImageOf(
         app,
         tree: tree,
         launchedWith: const {'stale': LibImage(own: 99)},

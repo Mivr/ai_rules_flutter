@@ -80,7 +80,7 @@ List<String> expandDefineFlagfiles(
   List<String> argv, {
   FlagfileReader? readFile,
 }) {
-  final read = readFile ?? readFlagfileLines;
+  final List<String> Function(String path) read = readFile ?? readFlagfileLines;
   final out = <String>[];
   for (final arg in argv) {
     if (arg.startsWith('@')) {
@@ -103,7 +103,7 @@ List<String> expandDefineFlagfile(
   FlagfileReader? readFile,
   List<String> chain = const [],
 }) {
-  final read = readFile ?? readFlagfileLines;
+  final List<String> Function(String path) read = readFile ?? readFlagfileLines;
   return _expandDefineFlagfile(path, read, chain, <String>{});
 }
 
@@ -113,7 +113,7 @@ List<String> _expandDefineFlagfile(
   List<String> chain,
   Set<String> visiting,
 ) {
-  final identity = File(path).absolute.path;
+  final String identity = File(path).absolute.path;
   final fileChain = [...chain, path];
   if (!visiting.add(identity)) {
     throw FormatException(
@@ -121,10 +121,10 @@ List<String> _expandDefineFlagfile(
     );
   }
   try {
-    final lines = _readDefineFlagfile(path, read, fileChain);
+    final List<String> lines = _readDefineFlagfile(path, read, fileChain);
     final out = <String>[];
     for (var index = 0; index < lines.length; index++) {
-      final line = lines[index];
+      final String line = lines[index];
       if (line.isEmpty) continue;
       if (line.startsWith('@')) {
         out.addAll(
@@ -178,7 +178,7 @@ bool isBoundaryLine(String line) => _boundary.hasMatch(line);
 ({List<String> reads, String rest}) splitDependencyLines(String stdoutText) {
   final reads = <String>[];
   final kept = <String>[];
-  for (final line in stdoutText.split('\n')) {
+  for (final String line in stdoutText.split('\n')) {
     if (isBoundaryLine(line)) continue;
     if (line.startsWith('+')) {
       reads.add(line);
@@ -199,7 +199,7 @@ String _collapseSlashes(String path) => path.replaceAll(RegExp('/{2,}'), '/');
 /// when the line names no file under the compile's working directory. Percent
 /// escapes decode once, the way the front end spells them.
 String? dependencyExecPath(String line) {
-  final text = line.substring(1).trim();
+  final String text = line.substring(1).trim();
   final Uri uri;
   try {
     uri = Uri.parse(text);
@@ -207,8 +207,8 @@ String? dependencyExecPath(String line) {
     return null;
   }
   if (uri.scheme != 'file') return null;
-  final path = _collapseSlashes(uri.toFilePath().replaceAll(r'\', '/'));
-  final cwd = Directory.current.path.replaceAll(r'\', '/');
+  final String path = _collapseSlashes(uri.toFilePath().replaceAll(r'\', '/'));
+  final String cwd = Directory.current.path.replaceAll(r'\', '/');
   if (path == cwd) return '';
   if (!path.startsWith('$cwd/')) return null;
   return path.substring(cwd.length + 1);
@@ -220,7 +220,7 @@ String? dependencyExecPath(String line) {
 /// segments resolve first (`toFilePath` normalizes both spellings), the way
 /// the front end spells them.
 String? dependencyAbsolutePath(String line) {
-  final text = line.substring(1).trim();
+  final String text = line.substring(1).trim();
   final Uri uri;
   try {
     uri = Uri.parse(text);
@@ -228,7 +228,7 @@ String? dependencyAbsolutePath(String line) {
     return null;
   }
   if (uri.scheme != 'file') return null;
-  var path = _collapseSlashes(uri.toFilePath().replaceAll(r'\', '/'));
+  String path = _collapseSlashes(uri.toFilePath().replaceAll(r'\', '/'));
   if (!path.startsWith('/') && !RegExp(r'^[a-zA-Z]:').hasMatch(path)) {
     path = '${Directory.current.path.replaceAll(r'\', '/')}/$path';
   }
@@ -278,7 +278,7 @@ List<String> findUndeclaredReadsWithMirrorRoots(
 ) {
   final undeclared = <String>[];
   for (final line in lines) {
-    final rel = dependencyExecPath(line);
+    final String? rel = dependencyExecPath(line);
     if (rel != null) {
       if (!declared.contains(rel) && !extraAllowed.contains(rel)) {
         undeclared.add(line);
@@ -306,9 +306,9 @@ List<String> findUndeclaredReadsWithMirrorRoots(
 /// root.
 bool _readUnderRoot(String line, List<String> mirrorRoots) {
   if (mirrorRoots.isEmpty) return false;
-  final abs = dependencyAbsolutePath(line);
+  final String? abs = dependencyAbsolutePath(line);
   if (abs == null) return false;
-  final cwd = Directory.current.path.replaceAll(r'\', '/');
+  final String cwd = Directory.current.path.replaceAll(r'\', '/');
   for (final rawRoot in mirrorRoots) {
     if (abs.startsWith('${_absoluteRoot(rawRoot, cwd)}/')) return true;
   }
@@ -317,7 +317,7 @@ bool _readUnderRoot(String line, List<String> mirrorRoots) {
 
 /// [root] as an absolute slash path: a relative root resolves against [cwd].
 String _absoluteRoot(String root, String cwd) {
-  var path = root.replaceAll(r'\', '/');
+  String path = root.replaceAll(r'\', '/');
   while (path.endsWith('/') && path.length > 1) {
     path = path.substring(0, path.length - 1);
   }
@@ -387,8 +387,8 @@ KernelInputsManifest readKernelInputsManifest(String manifestPath) {
   final entrypoint = <String>[];
   String? outputDill;
   var section = 'sources';
-  for (final line in File(manifestPath).readAsLinesSync()) {
-    final path = line.trim().replaceAll(r'\', '/');
+  for (final String line in File(manifestPath).readAsLinesSync()) {
+    final String path = line.trim().replaceAll(r'\', '/');
     if (path.isEmpty) continue;
     if (path.startsWith('#')) {
       section = switch (path) {
@@ -489,7 +489,7 @@ String? checkNoDeclaredSourceReads(
   Set<String> declared,
 ) {
   for (final line in lines) {
-    final rel = dependencyExecPath(line);
+    final String? rel = dependencyExecPath(line);
     if (rel != null && declared.contains(rel)) return null;
   }
   return noDeclaredSourceReadsMessage();
@@ -506,7 +506,7 @@ String? checkMissingEntrypointRead(
     return missingEntrypointReadMessage('the entrypoint');
   }
   for (final line in lines) {
-    final rel = dependencyExecPath(line);
+    final String? rel = dependencyExecPath(line);
     if (rel != null && candidates.contains(rel)) return null;
   }
   return missingEntrypointReadMessage(candidates.first);
@@ -522,7 +522,7 @@ Future<void> main(List<String> argv) async {
 /// Returns null after describing the usage error on [err].
 ({String manifestPath, String executable, List<String> cmdArgs})?
 _splitFilterArgv(List<String> argv, StringSink err) {
-  final i = argv.indexOf('--');
+  final int i = argv.indexOf('--');
   if (i < 0 || i + 1 >= argv.length) {
     err.writeln(
       'Usage: dart kernel_filter.dart --declared-inputs <manifest> -- <executable> <arguments>',
@@ -559,7 +559,7 @@ int? _refuseDisallowedDirectives(
   List<String> fsRoots,
   StringSink err,
 ) {
-  final guardErrors = findDisallowedFlutterDirectives(
+  final List<String> guardErrors = findDisallowedFlutterDirectives(
     sources,
     fsRoots,
     tool: 'flutter',
@@ -589,7 +589,9 @@ int _reportCompilerFailure(
   StringSink out,
   StringSink err,
 ) {
-  final split = splitDependencyLines(result.stdout as String);
+  final ({List<String> reads, String rest}) split = splitDependencyLines(
+    result.stdout as String,
+  );
   out.write(split.rest);
   err.write(result.stderr as String);
   if ('${result.stdout}${result.stderr}'.contains(
@@ -623,7 +625,7 @@ int? _refuseUndeclaredReads(
     _deleteRefusedOutput(manifest.outputDill);
     return 1;
   }
-  final undeclared = findUndeclaredReads(
+  final List<String> undeclared = findUndeclaredReads(
     split.reads,
     manifest.declared,
     manifest.extraAllowed,
@@ -638,7 +640,7 @@ int? _refuseUndeclaredReads(
     _deleteRefusedOutput(manifest.outputDill);
     return 1;
   }
-  final noSource = checkNoDeclaredSourceReads(
+  final String? noSource = checkNoDeclaredSourceReads(
     split.reads,
     manifest.declared,
   );
@@ -647,7 +649,7 @@ int? _refuseUndeclaredReads(
     _deleteRefusedOutput(manifest.outputDill);
     return 1;
   }
-  final noEntry = checkMissingEntrypointRead(
+  final String? noEntry = checkMissingEntrypointRead(
     split.reads,
     entrypointSpellingCandidates(manifest),
   );
@@ -683,9 +685,10 @@ Future<int> runFiltered(
   StringSink out,
   StringSink err,
 ) async {
-  final parsed = _splitFilterArgv(argv, err);
+  final ({List<String> cmdArgs, String executable, String manifestPath})?
+  parsed = _splitFilterArgv(argv, err);
   if (parsed == null) return 2;
-  final manifestPath = parsed.manifestPath;
+  final String manifestPath = parsed.manifestPath;
   if (!File(manifestPath).existsSync()) {
     err.writeln(
       'kernel_filter: declared-inputs manifest $manifestPath does not exist.',
@@ -699,8 +702,8 @@ Future<int> runFiltered(
   // `# output` with the output dill. The guard scans the sources, while the
   // read set allows the source spellings, the staged spellings, and the
   // allowed reads — all of them manifest entries, never argv values.
-  final inputs = readKernelInputsManifest(manifestPath);
-  final sources = [
+  final KernelInputsManifest inputs = readKernelInputsManifest(manifestPath);
+  final List<String> sources = [
     for (final path in inputs.sources)
       if (path.endsWith('.dart')) path,
   ];
@@ -713,14 +716,14 @@ Future<int> runFiltered(
     return 2;
   }
 
-  final directiveRefusal = _refuseDisallowedDirectives(
+  final int? directiveRefusal = _refuseDisallowedDirectives(
     sources,
     inputs.fsRoots,
     err,
   );
   if (directiveRefusal != null) return directiveRefusal;
 
-  final result = await Process.run(
+  final ProcessResult result = await Process.run(
     parsed.executable,
     withForcedDependencyReport(cmdArgs),
   );
@@ -728,8 +731,10 @@ Future<int> runFiltered(
     return _reportCompilerFailure(result, out, err);
   }
 
-  final split = splitDependencyLines(result.stdout as String);
-  final readsRefusal = _refuseUndeclaredReads(split, inputs, err);
+  final ({List<String> reads, String rest}) split = splitDependencyLines(
+    result.stdout as String,
+  );
+  final int? readsRefusal = _refuseUndeclaredReads(split, inputs, err);
   if (readsRefusal != null) return readsRefusal;
   out.write(split.rest);
   err.write(result.stderr as String);

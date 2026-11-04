@@ -22,6 +22,12 @@ import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
 import 'package:flutter_bazel_dev_tool/teardown.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 
+typedef _Log = void Function(String message);
+
+typedef _Signal = Future<void>?;
+
+typedef _Devtools = ({Process process, String? serverUrl});
+
 final _logger = Logger('dev_tool.session');
 
 /// Runtime state for a single device in a multi-device run.
@@ -128,7 +134,7 @@ class DeviceSession {
   /// the work being waited on here, and the platform note on the iOS override
   /// is what both are sized against.
   Future<void> waitUntilDrivable(MachineProtocol protocol) async {
-    final client = vmClient;
+    final VmServiceClient? client = vmClient;
     if (client == null) {
       // Left unsettled rather than refused, because "no client yet" is the
       // normal web case, not a failure: a browser's VM service is handed over
@@ -468,7 +474,7 @@ Future<ReloadResult> _compileAndApply({
 
   final CompileResult compiled;
   try {
-    final result = await compile();
+    final CompileResult result = await compile();
     if (!result.success) {
       // A completed compile owes a verdict whether or not it succeeded, and a
       // full compile no less than an incremental one — the compiler sets its
@@ -554,7 +560,7 @@ void reportReloadCommand(
     });
     return;
   }
-  final message = result['message'] ?? '$action complete';
+  final dynamic message = result['message'] ?? '$action complete';
   // `isEmpty` is a verdict on the Dart half alone, and the suffix exists to
   // explain a bare "successful" that would otherwise look like something
   // happened. When `toWire` has already finished the sentence with an asset
@@ -568,7 +574,7 @@ void reportReloadCommand(
     log('$message (no changes)');
     return;
   }
-  final files = result['filesRecompiled'];
+  final dynamic files = result['filesRecompiled'];
   if (files is List && files.isNotEmpty) {
     log('$message (${files.length} file(s))');
     return;
@@ -699,7 +705,7 @@ Future<void> runInteractiveSession({
     shutdownSignal: null,
   ),
 }) async {
-  final log = _defaultSessionLog(targets.protocol, terminal.log);
+  final _Log log = _defaultSessionLog(targets.protocol, terminal.log);
 
   // The machine-readable half of the same report. A no-op outside `--machine`
   // mode, like every other event — the terminal reader has [log].
@@ -727,7 +733,7 @@ Future<void> runInteractiveSession({
   // Gated on the reload command, not on a frontend server: native has one
   // compiler per app and no single server to check, and the command is what
   // the handler actually dispatches through.
-  final watcher = watch.watcher;
+  final SourceWatcher? watcher = watch.watcher;
   if (watcher != null &&
       options.hotReloadUnavailable == null &&
       targets.commandRunner.hasCommand('app.hotReload')) {
@@ -767,13 +773,13 @@ Future<void> runInteractiveSession({
   // two devices outlives the first of them ending — whether it was stopped or
   // died. A single-device run is unchanged, its one app being both the first
   // and the last.
-  final shutdownSignal = terminal.shutdownSignal;
+  final Future<void>? shutdownSignal = terminal.shutdownSignal;
   final exitSignals = <Future<void>>[
     if (targets.sessions.isNotEmpty)
       Future.wait([for (final s in targets.sessions) s.terminated]),
     if (shutdownSignal != null) shutdownSignal,
   ];
-  final exited = exitSignals.isEmpty ? null : Future.any(exitSignals);
+  final _Signal exited = exitSignals.isEmpty ? null : Future.any(exitSignals);
 
   // In machine mode, stdin is consumed by MachineProtocol — skip the
   // keyboard loop and wait for sessions to end via machine commands.
@@ -800,7 +806,7 @@ Future<void> runInteractiveSession({
 }
 
 /// The human-facing line, in the stream a machine client is not parsing.
-void Function(String message) _defaultSessionLog(
+_Log _defaultSessionLog(
   MachineProtocol protocol,
   void Function(String message)? log,
 ) {
@@ -843,14 +849,14 @@ void _wireDevTools({
             // its DDS but not a DevTools server, so it spawns one and points it
             // at the DDS endpoint — never at the raw VM service, because DDS
             // multiplexing is what stops DevTools evicting our own vmClient.
-            var url = session.devToolsUrl;
+            String? url = session.devToolsUrl;
             if (url == null) {
               // Not `session.dds!`: being debug-ready does not imply a DDS of
               // our own. Web never has one — DWDS owns it and hands over a URL
               // — so the null check throws `Null check operator used on a null
               // value`, which the catch below prints as the reason DevTools
               // could not launch.
-              final dds = session.dds;
+              final DartDevelopmentService? dds = session.dds;
               if (dds == null) {
                 throw StateError(
                   'No DevTools URL and no Dart Development Service on '
@@ -859,7 +865,10 @@ void _wireDevTools({
                   'URL; this one did not.',
                 );
               }
-              final devtools = await _launchDevTools(dartExecutable, dds.uri!);
+              final _Devtools devtools = await _launchDevTools(
+                dartExecutable,
+                dds.uri!,
+              );
               session.devToolsProcess = devtools.process;
               if (devtools.serverUrl == null) return;
               url = devToolsConnectUri(
@@ -980,7 +989,7 @@ Future<void> _runKeyboardLoop({
   required Future<void>? shutdownSignal,
   required KeyboardReader? keyboardReader,
 }) async {
-  final inputStream = keyboardReader != null ? keyboardReader() : stdin;
+  final Stream<List<int>> inputStream = keyboardReader?.call() ?? stdin;
 
   // Race each key read against [exited] — the same thing `--machine` waits on
   // above. A teardown requested over a transport ends the loop like 'q' does,
@@ -996,7 +1005,7 @@ Future<void> _runKeyboardLoop({
       await exited!;
       break;
     }
-    final wake = await Future.any<_Wake>([
+    final _Wake wake = await Future.any<_Wake>([
       keys.moveNext().then((has) => has ? _Wake.key : _Wake.keyboardClosed),
       if (exited != null) exited.then((_) => _Wake.exit),
     ]);
@@ -1026,8 +1035,7 @@ Future<void> _runKeyboardLoop({
       );
       continue;
     }
-    final input = keys.current;
-    final char = String.fromCharCode(input.first);
+    final char = String.fromCharCode(keys.current.first);
     if (await _handleKeyPress(
       char: char,
       loop: loop,
@@ -1101,12 +1109,10 @@ Future<bool> _handleKeyPress({
       );
     case 'q':
       await watcherSubscription?.cancel();
-      for (final session in loop.sessions) {
+      for (final DeviceSession session in loop.sessions) {
         await session.shutdown(loop.protocol);
       }
-      if (loop.frontendServer != null) {
-        await loop.frontendServer!.shutdown();
-      }
+      if (loop.frontendServer != null) await loop.frontendServer!.shutdown();
       return true;
   }
   return false;
@@ -1146,15 +1152,15 @@ StreamSubscription<SourceChange> _watchAndReload({
     // outside every package. A path the app compiles nothing from (e.g. a
     // tool script) resolves to null and is skipped — never invalidated with a
     // bogus file:// URI.
-    final map = plan.resolver();
-    final invalidated = [
+    final SourceUriResolver? map = plan.resolver();
+    final List<String> invalidated = [
       for (final f in change.paths)
         if (map?.uriFor(f) case final uri?) uri,
     ];
     // An asset carries no package URI and never will, so an empty
     // `invalidated` does not mean there is nothing to do. The reload command
     // rebuilds the bundle and delivers it; the Dart half is simply a no-op.
-    final assetsChanged = change.paths.any(
+    final bool assetsChanged = change.paths.any(
       (f) => plan.isAsset?.call(f) ?? false,
     );
     // Nor does it when there is no resolver yet, which is the state a pipeline
@@ -1221,14 +1227,14 @@ Future<void> _reportToggle(
   Future<bool> Function(VmServiceClient) toggle,
 ) async {
   for (final session in sessions) {
-    final client = session.vmClient;
-    final where = session.device.name;
+    final VmServiceClient? client = session.vmClient;
+    final String where = session.device.name;
     if (client == null) {
       log('$label is unavailable on $where: this run has no VM service.');
       continue;
     }
     try {
-      final enabled = await toggle(client);
+      final bool enabled = await toggle(client);
       log('$label ${enabled ? "enabled" : "disabled"} ($where).');
     } catch (e) {
       log('Could not toggle the ${label.toLowerCase()} on $where: $e');
@@ -1245,9 +1251,7 @@ Future<void> _reportToggle(
 ///
 /// Must be the **ws** URI: DevTools dials it as a WebSocket.
 Uri devToolsConnectUri(String serverUrl, Uri vmServiceWsUri) =>
-    Uri.parse(serverUrl).replace(
-      queryParameters: {'uri': vmServiceWsUri.toString()},
-    );
+    Uri.parse(serverUrl).replace(queryParameters: {'uri': '$vmServiceWsUri'});
 
 /// Start `dart devtools` and return the process plus its announced server root.
 ///
@@ -1255,11 +1259,11 @@ Uri devToolsConnectUri(String serverUrl, Uri vmServiceWsUri) =>
 /// rather than spawning a bare `dart` keeps the DevTools we launch tied to the
 /// SDK the app was built with, and fails loudly when the toolchain is missing
 /// instead of picking up whatever happens to be on `PATH`.
-Future<({Process process, String? serverUrl})> _launchDevTools(
+Future<_Devtools> _launchDevTools(
   String dartExecutable,
   Uri vmServiceUri,
 ) async {
-  final process = await Process.start(
+  final Process process = await Process.start(
     dartExecutable,
     ['devtools', '--no-launch-browser', '--vm-uri=$vmServiceUri'],
   );
@@ -1275,13 +1279,12 @@ Future<({Process process, String? serverUrl})> _launchDevTools(
       .transform(const SystemEncoding().decoder)
       .transform(const LineSplitter())
       .listen((line) {
-        final url = parseDevToolsUrl(line);
+        final String? url = parseDevToolsUrl(line);
         if (url != null && !completer.isCompleted) {
           timeout?.cancel();
           completer.complete(url);
         }
       });
 
-  final serverUrl = await completer.future;
-  return (process: process, serverUrl: serverUrl);
+  return (process: process, serverUrl: await completer.future);
 }

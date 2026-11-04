@@ -43,15 +43,15 @@ int _scanRun(ZlibRawState s, int si, int mi, int strend) {
 /// match is stored in `s.matchStart`. The two-byte-at-a-time path is not
 /// ported: `UNALIGNED_OK` is never defined by the reference builds.
 int zlibLongestMatch(ZlibRawState s, int curMatch) {
-  var chainLength = zlibMaxChainLength;
+  int chainLength = zlibMaxChainLength;
   final int strstart = s.strstart;
-  var bestLen = s.prevLength;
-  var niceMatch = zlibNiceMatch;
+  int bestLen = s.prevLength;
+  int niceMatch = zlibNiceMatch;
   final int limit = strstart > zlibMaxDist ? strstart - zlibMaxDist : 0;
   const int wmask = zlibWindowSize - 1;
   final int strend = strstart + zlibMaxMatch;
-  var scanEnd1 = s.window[strstart + bestLen - 1];
-  var scanEnd = s.window[strstart + bestLen];
+  int scanEnd1 = s.window[strstart + bestLen - 1];
+  int scanEnd = s.window[strstart + bestLen];
   if (s.prevLength >= zlibGoodMatch) chainLength >>= 2;
   if (niceMatch > s.lookahead) niceMatch = s.lookahead;
   var cur = curMatch;
@@ -117,7 +117,7 @@ void zlibDeflateSlow(ZlibRawState s) {
       zlibFillWindow(s);
       if (s.lookahead == 0) break;
     }
-    var hashHead = zlibNil;
+    int hashHead = zlibNil;
     if (s.lookahead >= zlibMinMatch) {
       hashHead = zlibInsertString(s, s.strstart);
     }

@@ -16,7 +16,9 @@ void main() {
     /// A directory with the one file the static server needs, cleaned up with
     /// the test.
     Future<Directory> appDir() async {
-      final tmpDir = await Directory.systemTemp.createTemp('web_test_');
+      final Directory tmpDir = await Directory.systemTemp.createTemp(
+        'web_test_',
+      );
       addTearDown(() => tmpDir.delete(recursive: true));
       await File('${tmpDir.path}/index.html').writeAsString('<html></html>');
       return tmpDir;
@@ -37,7 +39,7 @@ void main() {
         // Chrome was launched on, anything else is the page's WebSocket. A
         // fixed well-known port such as 9222 is a landmine here — a real
         // developer Chrome with debugging enabled commonly sits on it.
-        final cdp = await HttpServer.bind('127.0.0.1', 0);
+        final HttpServer cdp = await HttpServer.bind('127.0.0.1', 0);
         addTearDown(() => cdp.close(force: true));
         List<String>? chromeArgs;
         final enableReceived = Completer<String>();
@@ -56,7 +58,9 @@ void main() {
             );
             await request.response.close();
           } else {
-            final socket = await WebSocketTransformer.upgrade(request);
+            final WebSocket socket = await WebSocketTransformer.upgrade(
+              request,
+            );
             socket.listen((data) {
               if (!enableReceived.isCompleted) {
                 enableReceived.complete(data as String);
@@ -79,8 +83,8 @@ void main() {
                 enableExpressionEvaluation: false,
               );
 
-        final tmpDir = await appDir();
-        final launch = device.launch(tmpDir.path);
+        final Directory tmpDir = await appDir();
+        final Future<AppInstance> launch = device.launch(tmpDir.path);
         // The launch waits for the debugging port, so the fake has to announce
         // one the way Chrome does — the fake endpoint's real port, never a
         // constant.
@@ -90,7 +94,7 @@ void main() {
           'ws://127.0.0.1:${cdp.port}/devtools/browser/abc123\n',
         );
 
-        final instance = await launch;
+        final AppInstance instance = await launch;
         expect(instance.server, isNotNull);
         expect(instance.server!.port, greaterThan(0));
         expect(device.cdpPort, cdp.port);
@@ -139,8 +143,8 @@ void main() {
                 enableExpressionEvaluation: false,
               );
 
-        final tmpDir = await appDir();
-        final launch = device.launch(tmpDir.path);
+        final Directory tmpDir = await appDir();
+        final Future<AppInstance> launch = device.launch(tmpDir.path);
         await fakeChrome.outputAttached;
         // Chrome dies having said nothing. Silently accepting a null port
         // leaves the run with no screenshots, no page reload and no console,
@@ -199,14 +203,14 @@ void main() {
         }),
       );
 
-      final instance = await device.launch('/path/to/app.apk');
+      final AppInstance instance = await device.launch('/path/to/app.apk');
       expect(instance.vmServiceUri, isNotNull);
       // Should be the forwarded port, not the device port.
       expect(instance.vmServiceUri!.port, 54321);
       expect(instance.vmServiceUri!.host, '127.0.0.1');
 
       // Verify adb forward was called.
-      final forwardCall = calls
+      final List<(String, List<String>)> forwardCall = calls
           .where((c) => c.$1 == 'adb' && c.$2.contains('forward'))
           .toList();
       expect(forwardCall, isNotEmpty);
@@ -232,9 +236,11 @@ void main() {
       );
 
       var stopCompleted = false;
-      final stopFuture = device.stop(AppInstance(process: fakeLog)).then((_) {
-        stopCompleted = true;
-      });
+      final Future<void> stopFuture = device
+          .stop(AppInstance(process: fakeLog))
+          .then((_) {
+            stopCompleted = true;
+          });
 
       // Give stop() time to call kill and start awaiting exitCode.
       await Future.delayed(Duration(milliseconds: 20));

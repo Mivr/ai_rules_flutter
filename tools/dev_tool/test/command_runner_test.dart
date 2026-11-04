@@ -17,7 +17,9 @@ void main() {
         return {'echo': params['msg']};
       });
 
-      final result = await runner.run('test.echo', {'msg': 'hello'});
+      final Map<String, dynamic> result = await runner.run('test.echo', {
+        'msg': 'hello',
+      });
       expect(result, {'echo': 'hello'});
     });
 
@@ -57,7 +59,7 @@ void main() {
       });
 
       // Start first call — it will block on completer1.
-      final future1 = runner.run('test.slow', {});
+      final Future<Map<String, dynamic>> future1 = runner.run('test.slow', {});
       // Give it a microtask to enter the handler.
       await Future<void>.delayed(Duration.zero);
 
@@ -66,7 +68,7 @@ void main() {
         order.add(3);
         return {'done': true};
       });
-      final future2 = runner.run('test.fast', {});
+      final Future<Map<String, dynamic>> future2 = runner.run('test.fast', {});
 
       // Release the first call.
       completer1.complete();
@@ -192,7 +194,7 @@ void main() {
 
         await runner.run('first', {});
         // If 'first' had not released the pool, this would hang.
-        final r = await runner
+        final Map<String, dynamic> r = await runner
             .run('second', {})
             .timeout(const Duration(seconds: 2));
         expect(r['ok'], isTrue);
@@ -212,7 +214,7 @@ void main() {
           throwsA(isA<StateError>()),
         );
         // If the throwing handler hadn't released the pool, this would hang.
-        final r = await runner
+        final Map<String, dynamic> r = await runner
             .run('next', {})
             .timeout(const Duration(seconds: 2));
         expect(r['ok'], isTrue);
@@ -228,8 +230,8 @@ void main() {
         });
         runner.register('fast', (_) async => {'ok': true});
 
-        final f1 = runner.run('slow', {});
-        final f2 = runner.run('fast', {});
+        final Future<Map<String, dynamic>> f1 = runner.run('slow', {});
+        final Future<Map<String, dynamic>> f2 = runner.run('fast', {});
 
         expect(await f1.timeout(const Duration(seconds: 2)), {'ok': true});
         expect(await f2.timeout(const Duration(seconds: 2)), {'ok': true});
@@ -259,8 +261,8 @@ void main() {
       expect(events, hasLength(2));
       expect(events[0], endsWith('/start'));
       expect(events[1], endsWith('/end'));
-      final startId = events[0].split('/')[1];
-      final endId = events[1].split('/')[1];
+      final String startId = events[0].split('/')[1];
+      final String endId = events[1].split('/')[1];
       expect(startId, endId, reason: 'the pair has to be correlatable');
     });
 

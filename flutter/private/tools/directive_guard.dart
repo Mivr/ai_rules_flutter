@@ -72,8 +72,8 @@ const flutterMultiRootPrefix = 'org-dartlang-app:///';
 /// directory (tests), keep the [stripFsRootPrefix] spelling, which stays
 /// consistent because every key in the comparison uses this function.
 String flutterSourceKey(String path, List<String> fsRoots) {
-  var slash = path.replaceAll(r'\', '/');
-  final cwd = Directory.current.path
+  String slash = path.replaceAll(r'\', '/');
+  final String cwd = Directory.current.path
       .replaceAll(r'\', '/')
       .replaceFirst(RegExp(r'/+$'), '');
   if (slash == cwd) {
@@ -84,7 +84,7 @@ String flutterSourceKey(String path, List<String> fsRoots) {
   slash = slash.replaceFirst(RegExp(r'^(?:\./)+'), '');
   String? best;
   for (final rawRoot in fsRoots) {
-    final root = rawRoot
+    final String root = rawRoot
         .replaceAll(r'\', '/')
         .replaceFirst(RegExp(r'/+$'), '')
         .replaceFirst(RegExp(r'^(?:\./)+'), '');
@@ -104,7 +104,7 @@ String flutterSourceKey(String path, List<String> fsRoots) {
   // spelling a repository's generated files arrive under, their keys meet the
   // importers' keys exactly when the files are staged as siblings — the same
   // condition under which the front end resolves the import.
-  final bin = RegExp('^bazel-out/[^/]+/bin/').firstMatch(slash);
+  final RegExpMatch? bin = RegExp('^bazel-out/[^/]+/bin/').firstMatch(slash);
   if (bin != null) {
     slash = slash.substring(bin[0]!.length);
   }
@@ -115,11 +115,13 @@ String flutterSourceKey(String path, List<String> fsRoots) {
 /// prefix stripped (`<root>/` only; a bare `<root>` without the slash is not a
 /// prefix). Mirrors rules_dart's whole-program `gen_kernel` wrapper.
 String stripFsRootPrefix(String path, List<String> fsRoots) {
-  final slashPath = path.replaceAll(r'\', '/');
+  final String slashPath = path.replaceAll(r'\', '/');
   var bestRootLen = -1;
   String? bestRel;
   for (final rawRoot in fsRoots) {
-    final root = rawRoot.replaceAll(r'\', '/').replaceFirst(RegExp(r'/+$'), '');
+    final String root = rawRoot
+        .replaceAll(r'\', '/')
+        .replaceFirst(RegExp(r'/+$'), '');
     if (root.isEmpty || root == '.') continue;
     final prefix = '$root/';
     if (slashPath.startsWith(prefix) && root.length > bestRootLen) {
@@ -163,10 +165,10 @@ String? resolveFlutterKeyRelativeTarget(String uri, String fromKey) {
 /// dropped, or null when it holds a fragment (which names no file: the front
 /// end reports it instead of reading through it) or a `:` (a scheme).
 String? _relativePathPart(String uri) {
-  final text = uri.contains(r'\') ? uri.replaceAll(r'\', '/') : uri;
+  final String text = uri.contains(r'\') ? uri.replaceAll(r'\', '/') : uri;
   if (text.contains('#')) return null;
-  final query = text.indexOf('?');
-  final path = query < 0 ? text : text.substring(0, query);
+  final int query = text.indexOf('?');
+  final String path = query < 0 ? text : text.substring(0, query);
   return path.contains(':') ? null : path;
 }
 
@@ -277,7 +279,7 @@ bool _isAllowedFlutterDirective(
     // names no declared key fails the build here instead of at the front
     // end, where the message would name the URI but not the file that
     // reads it.
-    final key = resolveDirectiveUri(
+    final String? key = resolveDirectiveUri(
       uri,
       '',
       const {},
@@ -334,9 +336,9 @@ bool _isAllowedSchemeless(
   if (hasEmptyPathSegment(uri)) {
     return _isAllowedEmptySegment(uri, from, fromKey, declared, declaredKeys);
   }
-  final target = resolveStagedRelativeTarget(uri, from);
+  final String? target = resolveStagedRelativeTarget(uri, from);
   if (target != null && declared.contains(target)) return true;
-  final keyTarget = resolveFlutterKeyRelativeTarget(uri, fromKey);
+  final String? keyTarget = resolveFlutterKeyRelativeTarget(uri, fromKey);
   return keyTarget != null && declaredKeys.contains(keyTarget);
 }
 

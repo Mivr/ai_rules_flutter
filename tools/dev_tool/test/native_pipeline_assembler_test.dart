@@ -206,7 +206,7 @@ void main() {
       // A release app cannot be reloaded, and the app is the only thing that
       // knows it is one. Reported here means reported before the dev build —
       // the build whose flags this record supplies.
-      final pipeline = await assembleAgainst(
+      final ReloadPipeline pipeline = await assembleAgainst(
         buildInfo: buildInfoJson(compilationMode: 'opt'),
       );
 
@@ -234,7 +234,7 @@ void main() {
     test(
       'waits for the record’s extension instead of racing the app',
       () async {
-        final pipeline = await assembleAgainst(
+        final ReloadPipeline pipeline = await assembleAgainst(
           buildInfo: buildInfoJson(),
           extensionRegistered: false,
         );
@@ -247,7 +247,7 @@ void main() {
     );
 
     test('names the missing record when the app carries none', () async {
-      final pipeline = await assembleAgainst(buildInfo: null);
+      final ReloadPipeline pipeline = await assembleAgainst(buildInfo: null);
 
       // The app's own words, not the transport's. The refusal arrives as a
       // JSON-RPC error whose `message` is "Invalid params" for every failure
@@ -268,7 +268,7 @@ void main() {
         // disconnects the VM service the assembler reads from — so whatever the
         // assembly was doing fails. Calling that a broken frontend server names
         // the wrong cause.
-        final pipeline = await assembleAgainst(
+        final ReloadPipeline pipeline = await assembleAgainst(
           buildInfo: buildInfoJson(compilationMode: 'opt'),
           shuttingDown: true,
         );
@@ -369,7 +369,9 @@ void main() {
         // No VM service is no app to apply a reload to, so there is nothing here
         // to assemble — and nothing to build, which is why this returns rather
         // than spending a bazel invocation on it. Both callers settle the gate.
-        final pipeline = await assembleAgainst(withVmService: false);
+        final ReloadPipeline pipeline = await assembleAgainst(
+          withVmService: false,
+        );
 
         expect(pipeline.ready.isSettled, isFalse);
         expect(pipeline.frontendServer, isNull);
@@ -385,7 +387,9 @@ void main() {
         // workspace does not exist), which is the shape of everything that
         // reaches this arm: something below the compiler broke before there was
         // a compiler.
-        final pipeline = await assembleAgainst(buildInfo: buildInfoJson());
+        final ReloadPipeline pipeline = await assembleAgainst(
+          buildInfo: buildInfoJson(),
+        );
 
         expect(
           pipeline.ready.unavailableReason,
@@ -443,7 +447,7 @@ class _BuildInfoVmService extends FakeVmService {
     Map<String, dynamic>? args,
   }) async {
     if (method == buildInfoExtension) {
-      final record = buildInfo;
+      final Map<String, dynamic>? record = buildInfo;
       if (record == null) {
         // `_err`'s exact shape: the generic code and message, the handler's
         // own words in `details`.

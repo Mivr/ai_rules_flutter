@@ -32,28 +32,28 @@ void main() {
     test(
       'an edited asset reaches the running app',
       () async {
-        final ws = await editableWorkspace('macos_example');
-        final asset = ws.file('assets/message.txt');
-        final original = asset.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('macos_example');
+        final File asset = ws.file('assets/message.txt');
+        final String original = asset.readAsStringSync();
         expect(
           original.trim(),
           'asset v1',
           reason: 'fixture marker present in macos_example assets',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app',
           device: 'macos',
         );
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(seconds: 240),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 60));
 
-        final ready = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'key': 'e2e_asset_label',
           'timeoutMs': '15000',
@@ -64,7 +64,7 @@ void main() {
           reason: 'e2e_asset_label: ${ready['error']}',
         );
 
-        var label = await dt.httpCommand('app.getText', {
+        Map<String, dynamic> label = await dt.httpCommand('app.getText', {
           'appId': appId,
           'key': 'e2e_asset_label',
         });
@@ -77,7 +77,7 @@ void main() {
         // Edit the asset and reload. No Dart source changed, so everything that
         // happens next is the asset path doing its job.
         asset.writeAsStringSync('asset v2\n');
-        final reload = await dt.sendCommand(
+        final Map<String, dynamic> reload = await dt.sendCommand(
           1,
           'app.hotReload',
           params: {'appId': appId},
@@ -121,10 +121,13 @@ void main() {
         // Still the same app: an asset reload that quietly restarted would lose
         // every bit of state the user had built up, which is the thing hot
         // reload exists to avoid.
-        final define = await dt.httpCommand('app.getText', {
-          'appId': appId,
-          'key': 'e2e_define_label',
-        });
+        final Map<String, dynamic> define = await dt.httpCommand(
+          'app.getText',
+          {
+            'appId': appId,
+            'key': 'e2e_define_label',
+          },
+        );
         expect(
           define['error'],
           isNull,
@@ -141,25 +144,25 @@ void main() {
         // reads `assets/` off the build tree on every request, so the new bytes
         // are already on the wire and all that is left is convincing the page to
         // stop trusting its caches.
-        final ws = await editableWorkspace('web_example');
-        final asset = ws.file('assets/message.txt');
-        final original = asset.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('web_example');
+        final File asset = ws.file('assets/message.txt');
+        final String original = asset.readAsStringSync();
         expect(
           original.trim(),
           'web asset v1',
           reason: 'fixture marker present in web_example assets',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app_wasm',
           device: 'chrome',
         );
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(seconds: 240),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
         // `app.started` fires when Chrome launches; the page only reaches DWDS
         // later, and nothing below can be asked before it does.
@@ -167,7 +170,7 @@ void main() {
           'dwds_vm_service',
           timeout: const Duration(seconds: 120),
         );
-        final moduleServer = Uri.parse(
+        final Uri moduleServer = Uri.parse(
           json.decode(await dt.waitForStderr('frontend_server_ready'))['uri']
               as String,
         );
@@ -178,7 +181,7 @@ void main() {
         Future<String> served() async {
           final client = HttpClient();
           try {
-            final response = await (await client.getUrl(
+            final HttpClientResponse response = await (await client.getUrl(
               moduleServer.resolve('assets/assets/message.txt'),
             )).close();
             return (await utf8.decoder.bind(response).join()).trim();
@@ -190,7 +193,7 @@ void main() {
         expect(await served(), 'web asset v1');
 
         asset.writeAsStringSync('web asset v2\n');
-        final reload = await dt.sendCommand(
+        final Map<String, dynamic> reload = await dt.sendCommand(
           1,
           'app.hotReload',
           params: {'appId': appId},
@@ -228,7 +231,7 @@ void main() {
         // captures of this web canvas are never byte-identical, so such a check
         // passes even with delivery disabled entirely. Reading the label is the
         // difference between "the bytes were served" and "the app took them".
-        final label = await dt.httpCommand('app.getText', {
+        final Map<String, dynamic> label = await dt.httpCommand('app.getText', {
           'appId': appId,
           'key': 'e2e_asset_label',
         });
@@ -265,16 +268,16 @@ void main() {
     test(
       'an edited asset reaches a running iOS simulator app',
       () async {
-        final ws = await editableWorkspace('ios_example');
-        final asset = ws.file('assets/message.txt');
-        final original = asset.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('ios_example');
+        final File asset = ws.file('assets/message.txt');
+        final String original = asset.readAsStringSync();
         expect(
           original.trim(),
           'asset v1',
           reason: 'fixture marker present in ios_example assets',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app',
           device: 'ios-simulator',
@@ -284,7 +287,7 @@ void main() {
         // launch can begin (`app.start`), and the simulator install plus
         // first launch takes minutes more (`app.started`). Measured cold,
         // the build was still emitting actions past the old 300 s bound.
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: e2eColdBuildTimeout,
         );
@@ -292,10 +295,10 @@ void main() {
           'app.started',
           timeout: const Duration(minutes: 10),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 60));
 
-        final ready = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'key': 'e2e_asset_label',
           'timeoutMs': '30000',
@@ -306,7 +309,7 @@ void main() {
           reason: 'e2e_asset_label: ${ready['error']}',
         );
 
-        var label = await dt.httpCommand('app.getText', {
+        Map<String, dynamic> label = await dt.httpCommand('app.getText', {
           'appId': appId,
           'key': 'e2e_asset_label',
         });
@@ -317,7 +320,7 @@ void main() {
         );
 
         asset.writeAsStringSync('asset v2\n');
-        final reload = await dt.sendCommand(
+        final Map<String, dynamic> reload = await dt.sendCommand(
           1,
           'app.hotReload',
           params: {'appId': appId},

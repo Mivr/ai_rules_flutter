@@ -49,11 +49,11 @@ class _Harness {
   }) {
     _wireOrchestrator();
     runner.register('app.hotReload', (params) async {
-      final declared =
+      final Set<String> declared =
           (params['invalidatedFiles'] as List?)?.cast<String>().toSet() ??
           <String>{};
       // The no-appId shape: every app the orchestrator drives is targeted.
-      final outcome = await orchestrator.reload(
+      final ReloadOutcome outcome = await orchestrator.reload(
         declared: declared,
         targets: orchestrator.apps,
       );
@@ -77,7 +77,9 @@ class _Harness {
   }
 
   static Future<_Harness> create() async {
-    final tmp = await Directory.systemTemp.createTemp('lifecycle_test_');
+    final Directory tmp = await Directory.systemTemp.createTemp(
+      'lifecycle_test_',
+    );
     Directory(p.join(tmp.path, 'lib')).createSync();
     final resolver = SourceUriResolver(
       workspaceRoot: tmp.path,
@@ -106,7 +108,7 @@ class _Harness {
   }
 
   void seedApplied() {
-    final snap = workspace.snapshot();
+    final SourceVersions snap = workspace.snapshot();
     applied.markApplied(snap, files: snap.fileUris.toSet());
     _wireOrchestrator();
   }
@@ -117,7 +119,7 @@ void main() {
     test(
       'a manual hotReload after a clean reload returns ReloadNoChange',
       () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         try {
           h.writeFile('main.dart', 'v1');
           h.seedApplied();
@@ -125,13 +127,19 @@ void main() {
           // First call after an edit.
           h.writeFile('main.dart', 'v2 longer');
 
-          final r1 = await h.runner.run('app.hotReload', {});
+          final Map<String, dynamic> r1 = await h.runner.run(
+            'app.hotReload',
+            {},
+          );
           expect(r1['outcome'], 'ReloadApplied');
 
           // Immediately after, a second manual call sees no further changes.
           // Pool(1) serializes the call after r1 finishes; the orchestrator
           // re-snapshots and finds nothing new.
-          final r2 = await h.runner.run('app.hotReload', {});
+          final Map<String, dynamic> r2 = await h.runner.run(
+            'app.hotReload',
+            {},
+          );
           expect(r2['outcome'], 'ReloadNoChange');
         } finally {
           await h.dispose();
@@ -145,16 +153,19 @@ void main() {
         // Two reloads come in for the same file at different versions.
         // With per-file AppliedVersions and Pool(1) serialization, the
         // second observes its own distinct `Version`.
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         try {
           h.writeFile('main.dart', 'v1');
           h.seedApplied();
 
           // Watcher's reload (passes explicit invalidatedFiles).
           h.writeFile('main.dart', 'v2 longer');
-          final watcherCall = await h.runner.run('app.hotReload', {
-            'invalidatedFiles': ['package:app/main.dart'],
-          });
+          final Map<String, dynamic> watcherCall = await h.runner.run(
+            'app.hotReload',
+            {
+              'invalidatedFiles': ['package:app/main.dart'],
+            },
+          );
           expect(watcherCall['outcome'], 'ReloadApplied');
 
           // User edits again.
@@ -162,7 +173,10 @@ void main() {
 
           // Manual reload (no explicit files). Must observe the new
           // `Version` and recompile — not return ReloadNoChange.
-          final manual = await h.runner.run('app.hotReload', {});
+          final Map<String, dynamic> manual = await h.runner.run(
+            'app.hotReload',
+            {},
+          );
           expect(
             manual['outcome'],
             'ReloadApplied',
@@ -177,7 +191,7 @@ void main() {
     test(
       'a watcher-driven reload while another is in-flight runs sequentially via Pool(1)',
       () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         try {
           h.writeFile('main.dart', 'v1');
           h.seedApplied();
@@ -186,17 +200,23 @@ void main() {
 
           // Hold the first compile open via FakeCompiler.pendingResult.
           h.compiler.pendingResult = Completer<void>();
-          final f1 = h.runner.run('app.hotReload', {});
+          final Future<Map<String, dynamic>> f1 = h.runner.run(
+            'app.hotReload',
+            {},
+          );
 
           // Fire a second call before the first finishes — it queues.
           await Future<void>.delayed(Duration.zero);
-          final f2 = h.runner.run('app.hotReload', {});
+          final Future<Map<String, dynamic>> f2 = h.runner.run(
+            'app.hotReload',
+            {},
+          );
 
           // Release the first compile.
           h.compiler.pendingResult!.complete();
 
-          final r1 = await f1;
-          final r2 = await f2;
+          final Map<String, dynamic> r1 = await f1;
+          final Map<String, dynamic> r2 = await f2;
           expect(r1['outcome'], 'ReloadApplied');
           // The second call ran after the first finished and applied
           // versions had advanced; it sees nothing changed.
@@ -213,7 +233,7 @@ void main() {
     test(
       'Bug C repro: an AppInstance timeout surfaces as ReloadApplyFailed and does not wedge the pool',
       () async {
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         try {
           h.writeFile('main.dart', 'v1');
           h.seedApplied();
@@ -221,12 +241,15 @@ void main() {
           h.writeFile('main.dart', 'v2 longer');
 
           h.app.nextOutcome = const ApplyTimedOut();
-          final r1 = await h.runner.run('app.hotReload', {});
+          final Map<String, dynamic> r1 = await h.runner.run(
+            'app.hotReload',
+            {},
+          );
           expect(r1['outcome'], 'ReloadApplyFailed');
 
           // Pool is still healthy: another command runs immediately.
           h.app.nextOutcome = const Applied();
-          final r2 = await h.runner
+          final Map<String, dynamic> r2 = await h.runner
               .run('app.hotReload', {})
               .timeout(
                 const Duration(seconds: 2),
@@ -245,7 +268,7 @@ void main() {
       'a real DirectoryWatcher firing on a tmp file results in orchestrator.reload running once',
       () async {
         // Slower test (uses real FSEvents/inotify). Generous timeout.
-        final h = await _Harness.create();
+        final _Harness h = await _Harness.create();
         try {
           h.writeFile('main.dart', 'v1');
           h.seedApplied();
@@ -261,17 +284,22 @@ void main() {
           final primed = Completer<void>();
           final ranCompleter = Completer<void>();
           final reloadResults = <Map<String, dynamic>>[];
-          final sub = watcher.changes.listen((change) async {
+          final StreamSubscription<SourceChange> sub = watcher.changes.listen((
+            change,
+          ) async {
             if (change.paths.any((p) => p.endsWith('primer.dart'))) {
               if (!primed.isCompleted) primed.complete();
             }
             if (!change.paths.any((p) => p.endsWith('main.dart'))) return;
-            final result = await h.runner.run('app.hotReload', {
-              'invalidatedFiles': [
-                for (final p in change.paths)
-                  if (h.resolver.uriFor(p) case final uri?) uri,
-              ],
-            });
+            final Map<String, dynamic> result = await h.runner.run(
+              'app.hotReload',
+              {
+                'invalidatedFiles': [
+                  for (final p in change.paths)
+                    if (h.resolver.uriFor(p) case final uri?) uri,
+                ],
+              },
+            );
             reloadResults.add(result);
             if (!ranCompleter.isCompleted) ranCompleter.complete();
           });

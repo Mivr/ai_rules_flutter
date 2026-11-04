@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_bazel_dev_tool/compiler_config.dart';
 import 'package:flutter_bazel_dev_tool/frontend_server.dart';
 
@@ -29,7 +31,10 @@ void main() {
     /// Put the server in the state a verdict is meaningful in: one compile
     /// done and not yet accepted or rejected.
     Future<void> compileAwaitingVerdict() async {
-      final first = server.recompile('lib/main.dart', const []);
+      final Future<CompileResult> first = server.recompile(
+        'lib/main.dart',
+        const [],
+      );
       fakeProcess.emitStdout('result boundary_1');
       fakeProcess.emitStdout('boundary_1 /tmp/delta.dill 0');
       await first;
@@ -39,7 +44,7 @@ void main() {
     /// `quit` but the process has not exited, so the pipe is already gone
     /// while the run is still using the server.
     Future<Future<void>> beginShutdown() async {
-      final shuttingDown = server.shutdown();
+      final Future<void> shuttingDown = server.shutdown();
       await pumpEventQueue();
       fakeProcess.stdinWriteError = const SocketException(
         'Broken pipe',
@@ -56,9 +61,11 @@ void main() {
       await server.start();
       await compileAwaitingVerdict();
       final logs = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(logs.add);
+      final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+        logs.add,
+      );
       addTearDown(sub.cancel);
-      final shuttingDown = await beginShutdown();
+      final Future<void> shuttingDown = await beginShutdown();
 
       expect(server.accept, returnsNormally);
       expect(server.reject, returnsNormally);
@@ -79,9 +86,9 @@ void main() {
     test('nothing is written to the pipe after shutdown begins', () async {
       await server.start();
       await compileAwaitingVerdict();
-      final shuttingDown = server.shutdown();
+      final Future<void> shuttingDown = server.shutdown();
       await pumpEventQueue();
-      final afterQuit = fakeProcess.stdinBuffer.length;
+      final int afterQuit = fakeProcess.stdinBuffer.length;
 
       server.accept();
       server.reject();
@@ -104,7 +111,7 @@ void main() {
       await server.start();
       await compileAwaitingVerdict();
 
-      final rejecting = server.reject();
+      final Future<void> rejecting = server.reject();
       await pumpEventQueue();
       fakeProcess.complete(1);
 
@@ -128,7 +135,7 @@ void main() {
         fakeProcess.emitStdout('result stale');
         await pumpEventQueue();
 
-        final next = server.compile('lib/main.dart');
+        final Future<CompileResult> next = server.compile('lib/main.dart');
         await pumpEventQueue();
         fakeProcess.emitStdout('result fresh');
         fakeProcess.emitStdout('fresh /tmp/next.dill 0');
@@ -145,7 +152,9 @@ void main() {
         await server.start();
         await compileAwaitingVerdict();
         final logs = <LogRecord>[];
-        final sub = Logger.root.onRecord.listen(logs.add);
+        final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+          logs.add,
+        );
         addTearDown(sub.cancel);
 
         // No shutdown: the pipe went away by itself, which means every later
@@ -170,9 +179,9 @@ void main() {
         // without completing it would leave the caller waiting forever for a
         // compiler that is gone.
         await server.start();
-        final shuttingDown = await beginShutdown();
+        final Future<void> shuttingDown = await beginShutdown();
 
-        final result = await server
+        final CompileResult result = await server
             .compile('package:app/main.dart')
             .timeout(const Duration(seconds: 5));
 
@@ -186,9 +195,9 @@ void main() {
 
     test('a recompile requested mid-shutdown answers too', () async {
       await server.start();
-      final shuttingDown = await beginShutdown();
+      final Future<void> shuttingDown = await beginShutdown();
 
-      final result = await server
+      final CompileResult result = await server
           .recompile('package:app/main.dart', ['package:app/main.dart'])
           .timeout(const Duration(seconds: 5));
 
@@ -396,13 +405,13 @@ void main() {
 
     test('compile sends "compile <entrypoint>" to stdin', () async {
       await server.start();
-      final future = server.compile('lib/main.dart');
+      final Future<CompileResult> future = server.compile('lib/main.dart');
 
       // Simulate real frontend_server protocol: result <key>, then <key> <path> <errors>.
       fakeProcess.emitStdout('result abc');
       fakeProcess.emitStdout('abc /tmp/out.dill 0');
 
-      final result = await future;
+      final CompileResult result = await future;
       expect(
         fakeProcess.stdinBuffer.toString(),
         contains('compile lib/main.dart'),
@@ -415,7 +424,7 @@ void main() {
       'recompile sends recompile with boundary key + invalidated files',
       () async {
         await server.start();
-        final future = server.recompile(
+        final Future<CompileResult> future = server.recompile(
           'lib/main.dart',
           ['file:///lib/foo.dart', 'file:///lib/bar.dart'],
         );
@@ -442,12 +451,15 @@ void main() {
 
     test('reject sends "reject" to stdin', () async {
       await server.start();
-      final first = server.recompile('lib/main.dart', const []);
+      final Future<CompileResult> first = server.recompile(
+        'lib/main.dart',
+        const [],
+      );
       fakeProcess.emitStdout('result boundary_1');
       fakeProcess.emitStdout('boundary_1 /tmp/delta.dill 1');
       await first;
 
-      final rejected = server.reject();
+      final Future<void> rejected = server.reject();
       fakeProcess.emitStdout('result reject_key');
       fakeProcess.emitStdout('reject_key');
       await rejected;
@@ -461,21 +473,26 @@ void main() {
       // compile's result lines match nothing and its future never completes —
       // one failed reload hanging every command after it.
       await server.start();
-      final first = server.recompile('lib/main.dart', const []);
+      final Future<CompileResult> first = server.recompile(
+        'lib/main.dart',
+        const [],
+      );
       fakeProcess.emitStdout('result boundary_1');
       fakeProcess.emitStdout('boundary_1 /tmp/delta.dill 1');
       await first;
 
-      final rejected = server.reject();
+      final Future<void> rejected = server.reject();
       fakeProcess.emitStdout('result reject_key');
       fakeProcess.emitStdout('reject_key');
       await rejected;
 
-      final next = server.recompile('lib/main.dart', ['file:///lib/a.dart']);
+      final Future<CompileResult> next = server.recompile('lib/main.dart', [
+        'file:///lib/a.dart',
+      ]);
       fakeProcess.emitStdout('result boundary_2');
       fakeProcess.emitStdout('boundary_2 /tmp/delta2.dill 0');
 
-      final result = await next.timeout(
+      final CompileResult result = await next.timeout(
         const Duration(seconds: 5),
         onTimeout: () => throw StateError(
           'the compile after a reject never completed — the parser is still '
@@ -493,8 +510,11 @@ void main() {
       // the debugger's expression compiles arrive on DWDS's own schedule.
       // Queued, both get the right dill.
       await server.start();
-      final first = server.compile('lib/main.dart');
-      final second = server.recompile('lib/main.dart', const []);
+      final Future<CompileResult> first = server.compile('lib/main.dart');
+      final Future<CompileResult> second = server.recompile(
+        'lib/main.dart',
+        const [],
+      );
 
       var secondSettled = false;
       second.then((_) => secondSettled = true).ignore();
@@ -520,11 +540,14 @@ void main() {
       // requests interleaved on the compiler's stdin is the same corruption
       // seen from the writing end.
       await server.start();
-      final first = server.compile('lib/main.dart');
+      final Future<CompileResult> first = server.compile('lib/main.dart');
       await pumpEventQueue();
       final writtenBefore = fakeProcess.stdinBuffer.toString();
 
-      final second = server.recompile('lib/other.dart', const []);
+      final Future<CompileResult> second = server.recompile(
+        'lib/other.dart',
+        const [],
+      );
       await pumpEventQueue();
       expect(
         fakeProcess.stdinBuffer.toString(),
@@ -549,7 +572,7 @@ void main() {
     group('compileExpressionToJs', () {
       /// The one line of JSON the compiler is sent, decoded.
       Map<String, dynamic> requestJson() {
-        final lines = fakeProcess.stdinBuffer
+        final List<String> lines = fakeProcess.stdinBuffer
             .toString()
             .split('\n')
             .where((l) => l.isNotEmpty)
@@ -579,10 +602,10 @@ void main() {
 
       test('sends the request the frontend server understands', () async {
         await server.start();
-        final pending = compileExpression();
+        final Future<CompileResult> pending = compileExpression();
         await pumpEventQueue();
 
-        final request = requestJson();
+        final Map<String, dynamic> request = requestJson();
         expect(request['type'], 'COMPILE_EXPRESSION_JS');
         expect(request['data'], {
           'expression': 'a + b',
@@ -597,7 +620,7 @@ void main() {
 
         fakeProcess.emitStdout('result exp1');
         fakeProcess.emitStdout('exp1 /tmp/expr.js 0');
-        final result = await pending;
+        final CompileResult result = await pending;
         expect(result.success, isTrue);
         expect(result.outputPath, '/tmp/expr.js');
       });
@@ -610,12 +633,14 @@ void main() {
           // every reload caller treats a path there as something to hand a
           // device.
           await server.start();
-          final pending = compileExpression(expression: 'not valid dart');
+          final Future<CompileResult> pending = compileExpression(
+            expression: 'not valid dart',
+          );
           await pumpEventQueue();
           fakeProcess.emitStdout('result exp1');
           fakeProcess.emitStdout('exp1 /tmp/expr.js 1');
 
-          final result = await pending;
+          final CompileResult result = await pending;
           expect(result.success, isFalse);
           expect(result.errorCount, 1);
           expect(result.dillPath, isEmpty);
@@ -629,13 +654,13 @@ void main() {
         // the server an `accept` it has no state to interpret, desynchronising
         // the stream.
         await server.start();
-        final pending = compileExpression();
+        final Future<CompileResult> pending = compileExpression();
         await pumpEventQueue();
         fakeProcess.emitStdout('result exp1');
         fakeProcess.emitStdout('exp1 /tmp/expr.js 0');
         await pending;
 
-        final before = fakeProcess.stdinBuffer.length;
+        final int before = fakeProcess.stdinBuffer.length;
         server.accept();
         expect(
           fakeProcess.stdinBuffer.length,
@@ -650,13 +675,13 @@ void main() {
         await server.start();
         await compileAwaitingVerdict();
 
-        final pending = compileExpression();
+        final Future<CompileResult> pending = compileExpression();
         await pumpEventQueue();
         fakeProcess.emitStdout('result exp1');
         fakeProcess.emitStdout('exp1 /tmp/expr.js 0');
         await pending;
 
-        final before = fakeProcess.stdinBuffer.length;
+        final int before = fakeProcess.stdinBuffer.length;
         server.accept();
         expect(
           fakeProcess.stdinBuffer.toString().substring(before).trim(),
@@ -672,11 +697,13 @@ void main() {
           // reload path. Two exchanges at once would hand one the other's
           // answer.
           await server.start();
-          final compiling = server.compile('lib/main.dart');
+          final Future<CompileResult> compiling = server.compile(
+            'lib/main.dart',
+          );
           await pumpEventQueue();
           final beforeExpression = fakeProcess.stdinBuffer.toString();
 
-          final evaluating = compileExpression();
+          final Future<CompileResult> evaluating = compileExpression();
           await pumpEventQueue();
           expect(
             fakeProcess.stdinBuffer.toString(),
@@ -700,9 +727,9 @@ void main() {
         'answers instead of hanging once the compiler is shutting down',
         () async {
           await server.start();
-          final shuttingDown = await beginShutdown();
+          final Future<void> shuttingDown = await beginShutdown();
 
-          final result = await compileExpression().timeout(
+          final CompileResult result = await compileExpression().timeout(
             const Duration(seconds: 5),
           );
           expect(result.success, isFalse);
@@ -730,7 +757,7 @@ void main() {
       );
       await s.start();
 
-      final abandoned = await s.compile('lib/main.dart');
+      final CompileResult abandoned = await s.compile('lib/main.dart');
       expect(abandoned.success, isFalse);
       expect(abandoned.diagnostics, contains('did not answer'));
       expect(
@@ -744,7 +771,7 @@ void main() {
       fakeProcess.emitStdout('abc /tmp/stale.dill 0');
       await pumpEventQueue();
 
-      final later = await s.compile('lib/main.dart');
+      final CompileResult later = await s.compile('lib/main.dart');
       expect(
         later.dillPath,
         isNot('/tmp/stale.dill'),
@@ -794,19 +821,19 @@ void main() {
 
     test('output parsing extracts dill path from result line', () async {
       await server.start();
-      final future = server.compile('lib/main.dart');
+      final Future<CompileResult> future = server.compile('lib/main.dart');
 
       fakeProcess.emitStdout('result abc');
       fakeProcess.emitStdout('abc /path/to/output.dill 0');
 
-      final result = await future;
+      final CompileResult result = await future;
       expect(result.dillPath, '/path/to/output.dill');
       expect(result.success, isTrue);
     });
 
     test('diagnostics captures non-result output lines', () async {
       await server.start();
-      final future = server.compile('lib/main.dart');
+      final Future<CompileResult> future = server.compile('lib/main.dart');
 
       // Simulate compiler errors before the result line.
       fakeProcess.emitStdout(
@@ -815,19 +842,19 @@ void main() {
       fakeProcess.emitStdout('result abc');
       fakeProcess.emitStdout('abc /tmp/out.dill 0');
 
-      final result = await future;
+      final CompileResult result = await future;
       expect(result.diagnostics, contains("Error: Expected ';' after this."));
       expect(result.dillPath, '/tmp/out.dill');
     });
 
     test('diagnostics is empty when no errors', () async {
       await server.start();
-      final future = server.compile('lib/main.dart');
+      final Future<CompileResult> future = server.compile('lib/main.dart');
 
       fakeProcess.emitStdout('result abc');
       fakeProcess.emitStdout('abc /tmp/out.dill 0');
 
-      final result = await future;
+      final CompileResult result = await future;
       expect(result.diagnostics, isEmpty);
     });
   });

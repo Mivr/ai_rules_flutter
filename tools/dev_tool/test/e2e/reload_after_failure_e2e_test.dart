@@ -1,6 +1,8 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
@@ -32,11 +34,11 @@ void main() {
     test(
       'a failed reload does not wedge the commands after it',
       () async {
-        final ws = await editableWorkspace('codegen');
-        final user = ws.file('lib/user.dart');
-        final settings = ws.file('dep_part/lib/settings.dart');
-        final userOrig = user.readAsStringSync();
-        final settingsOrig = settings.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('codegen');
+        final File user = ws.file('lib/user.dart');
+        final File settings = ws.file('dep_part/lib/settings.dart');
+        final String userOrig = user.readAsStringSync();
+        final String settingsOrig = settings.readAsStringSync();
         expect(
           userOrig,
           contains('const User(this.name, this.age);'),
@@ -62,19 +64,19 @@ void main() {
               'run; restore it before running this test',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app_macos',
           device: 'macos',
         );
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(minutes: 8),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 90));
 
-        final ready = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'text': '{name: Ada Lovelace, age: 36}',
           'timeoutMs': '30000',
@@ -100,7 +102,7 @@ void main() {
                 "const User(this.name, this.age, [this.email = 'ada@lovelace.dev']);",
               ),
         );
-        final failed = await dt.sendCommand(
+        final Map<String, dynamic> failed = await dt.sendCommand(
           1,
           'app.hotReload',
           params: {'appId': appId},
@@ -123,7 +125,7 @@ void main() {
             'final String mode;\n  int get probe => 1;',
           ),
         );
-        final afterFailure = await dt.sendCommand(
+        final Map<String, dynamic> afterFailure = await dt.sendCommand(
           2,
           'app.hotReload',
           params: {'appId': appId},
@@ -139,7 +141,7 @@ void main() {
 
         // And the session is recoverable: a restart re-runs main(), which builds
         // a fresh User that has the new field.
-        final restart = await dt.sendCommand(
+        final Map<String, dynamic> restart = await dt.sendCommand(
           3,
           'app.restart',
           params: {'appId': appId},
@@ -159,7 +161,7 @@ void main() {
         // The agent surface answers too, rather than sitting behind a held permit.
         // Exact equality, not a substring: `app.waitFor`'s `text` selector
         // compares the whole rendered string, so a fragment never matches.
-        final text = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> text = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'text': '{name: Ada Lovelace, age: 36, email: ada@lovelace.dev}',
           'timeoutMs': '30000',

@@ -48,7 +48,7 @@ class SourceUriResolver {
     String workspaceRoot,
     List<({String name, String libRoot})> sourcePackages,
   ) {
-    final entries = [
+    final List<({String libDir, String packageName})> entries = [
       for (final pkg in sourcePackages)
         (
           libDir: p.normalize(
@@ -67,7 +67,7 @@ class SourceUriResolver {
 
   /// The lib directory of each source package, in declared order.
   Iterable<String> get sourceLibDirs {
-    final byDeclared = [..._entries]
+    final List<({String libDir, String packageName})> byDeclared = [..._entries]
       ..sort((a, b) => a.libDir.length.compareTo(b.libDir.length));
     return byDeclared.map((e) => e.libDir);
   }
@@ -81,10 +81,10 @@ class SourceUriResolver {
   /// The URI the compiler keys [absPath] by, or null when the app compiles
   /// no library from it.
   String? uriFor(String absPath) {
-    final norm = p.normalize(absPath);
-    for (final e in _entries) {
+    final String norm = p.normalize(absPath);
+    for (final ({String libDir, String packageName}) e in _entries) {
       if (p.isWithin(e.libDir, norm)) {
-        final rel = p.split(p.relative(norm, from: e.libDir)).join('/');
+        final String rel = p.split(p.relative(norm, from: e.libDir)).join('/');
         return 'package:${e.packageName}/$rel';
       }
     }

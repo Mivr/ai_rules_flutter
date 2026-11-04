@@ -56,7 +56,7 @@ class AssetOutcome {
   /// The reason assets are not live, or null when they are.
   String? get problem {
     if (rebuildFailed != null) return rebuildFailed;
-    final d = delivery;
+    final StrategyOutcome? d = delivery;
     if (d != null && !d.isSuccess) return d.message;
     return null;
   }
@@ -250,7 +250,8 @@ class CommandReport {
     // all there is to say.
     if (nativePatchWithheld) {
       return switch (nativePatch) {
-        NativePatchLoadFailed(:final applied) when applied.isNotEmpty =>
+        NativePatchLoadFailed(:final List<String> applied)
+            when applied.isNotEmpty =>
           RunningCode.updated,
         _ => RunningCode.unchanged,
       };
@@ -327,7 +328,7 @@ class CommandReport {
 
   /// The apps that did not take the edit, with why. Empty when none failed.
   Map<String, ApplyOutcome> get failedApps => switch (outcome) {
-    ReloadApplyFailed(:final perApp) => {
+    ReloadApplyFailed(:final Map<String, ApplyOutcome> perApp) => {
       for (final e in perApp.entries)
         if (e.value is! Applied) e.key: e.value,
     },

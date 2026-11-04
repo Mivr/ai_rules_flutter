@@ -8,6 +8,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:flutter_bazel_dev_tool/command_runner.dart';
@@ -17,6 +18,9 @@ import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/machine_protocol.dart';
 import 'package:flutter_bazel_dev_tool/session.dart';
 import 'package:http_multi_server/http_multi_server.dart';
+
+typedef _Parsed = Map<String, dynamic>;
+typedef _Settle = ({String? detail, String state});
 
 final _logger = Logger('dev_tool.http_control_channel');
 
@@ -56,7 +60,7 @@ class HttpControlChannel {
   /// `localhost` rather than a literal address, so this names whichever
   /// loopback families [start] found on the host instead of one chosen here.
   Uri get uri {
-    final server = _server;
+    final HttpServer? server = _server;
     if (server == null) throw StateError('Server not started');
     return Uri(scheme: 'http', host: 'localhost', port: server.port);
   }
@@ -99,7 +103,7 @@ class HttpControlChannel {
   /// while the request that triggered it is still awaiting its response. A
   /// force-close here would sever that connection mid-response.
   Future<void> stop() async {
-    final server = _server;
+    final HttpServer? server = _server;
     _server = null;
     if (server == null) return;
     // force: false stops the listener and closes idle connections but lets
@@ -128,7 +132,7 @@ class HttpControlChannel {
     // HttpServer is HTTP/1.1 only and, when an `Upgrade` header is present,
     // silently discards the request body — which turns a POST /command into a
     // mysterious hang/empty-reply. Fail loudly and early with guidance instead.
-    final upgrade = request.headers.value(HttpHeaders.upgradeHeader);
+    final String? upgrade = request.headers.value(HttpHeaders.upgradeHeader);
     if (upgrade != null) {
       request.response.statusCode = HttpStatus.upgradeRequired;
       request.response.headers.contentType = ContentType.json;
@@ -150,7 +154,7 @@ class HttpControlChannel {
     // `Authorization` header — and a bare "invalid or missing" then looks like
     // the value is wrong rather than in the wrong place, which is a round trip
     // spent on the wrong question.
-    final requestToken = request.uri.queryParameters['token'];
+    final String? requestToken = request.uri.queryParameters['token'];
     if (requestToken != _token) {
       request.response.statusCode = HttpStatus.unauthorized;
       request.response.headers.contentType = ContentType.json;
@@ -167,7 +171,7 @@ class HttpControlChannel {
       return;
     }
 
-    final path = request.uri.path;
+    final String path = request.uri.path;
 
     try {
       if (request.method == 'POST' && path == '/command') {
@@ -176,7 +180,7 @@ class HttpControlChannel {
         await _handleCommands(request);
       } else if (request.method == 'GET' &&
           _sessionScreenshotMatch(path) != null) {
-        final match = _sessionScreenshotMatch(path)!;
+        final _ScreenshotMatch match = _sessionScreenshotMatch(path)!;
         if (match.type == 'flutter') {
           await _handleFlutterScreenshot(request, match.appId);
         } else {
@@ -221,8 +225,8 @@ class HttpControlChannel {
   }
 
   Future<void> _handleCommand(HttpRequest request) async {
-    final body = await utf8.decoder.bind(request).join();
-    Map<String, dynamic> parsed;
+    final String body = await utf8.decoder.bind(request).join();
+    _Parsed parsed;
     try {
       parsed = json.decode(body) as Map<String, dynamic>;
     } catch (e) {
@@ -250,10 +254,10 @@ class HttpControlChannel {
       return;
     }
 
-    final params = (parsed['params'] as Map<String, dynamic>?) ?? {};
+    final _Parsed params = (parsed['params'] as Map<String, dynamic>?) ?? {};
 
     try {
-      final result = await _commandRunner.run(method, params);
+      final _Parsed result = await _commandRunner.run(method, params);
       request.response.statusCode = HttpStatus.ok;
       request.response.headers.contentType = ContentType.json;
       request.response.write(json.encode({'result': result}));
@@ -297,7 +301,7 @@ class HttpControlChannel {
     HttpRequest request,
     String appId,
   ) async {
-    final session = _findSession(appId);
+    final DeviceSession? session = _findSession(appId);
     if (session == null) {
       request.response.statusCode = HttpStatus.notFound;
       request.response.headers.contentType = ContentType.json;
@@ -341,7 +345,7 @@ class HttpControlChannel {
     // The engine capture is a moment too, and the same argument applies: an
     // agent that acts and then captures wants the frame that includes the
     // action. See [_settleBeforeCapture].
-    final settle = await _settleBeforeCapture(session, request);
+    final _Settle settle = await _settleBeforeCapture(session, request);
 
     final List<int> bytes;
     try {
@@ -390,7 +394,7 @@ class HttpControlChannel {
     DeviceSession session,
     HttpRequest request,
   ) async {
-    final raw = request.uri.queryParameters['settle'];
+    final String? raw = request.uri.queryParameters['settle'];
     if (raw != null && raw != 'true' && raw != 'false') {
       return (
         state: 'skipped',
@@ -415,7 +419,7 @@ class HttpControlChannel {
     // anything was skipped in a header. `app.settle` waits for the handover
     // itself (see `DeviceSession.debugReady`), the way every other agent
     // command does, so asking it is what tells "not yet" from "never".
-    final askable =
+    final bool askable =
         _commandRunner.knows('app.settle') &&
         (session.device is WebDevice || session.vmClient != null);
     if (!askable) {
@@ -427,13 +431,13 @@ class HttpControlChannel {
       );
     }
     try {
-      final json = await _commandRunner.run('app.settle', {
+      final _Parsed json = await _commandRunner.run('app.settle', {
         'appId': session.appId,
       });
       // `app.settle` answers in the vocabulary of every other command —
       // `yes`, `no` or `skipped`, and why when it is not `yes` — which is the
       // header's own.
-      final state = json['settled'];
+      final dynamic state = json['settled'];
       if (state == 'yes' || state == 'skipped') {
         return (
           state: state as String,
@@ -469,7 +473,7 @@ class HttpControlChannel {
   /// that prints the header without decoding still reads it.
   static String _headerValue(String text) {
     final encoded = StringBuffer();
-    for (final byte in utf8.encode(text)) {
+    for (final int byte in utf8.encode(text)) {
       if (byte >= 0x20 && byte < 0x7F && byte != 0x25) {
         encoded.writeCharCode(byte);
       } else {
@@ -485,7 +489,7 @@ class HttpControlChannel {
     HttpRequest request,
     String appId,
   ) async {
-    final session = _findSession(appId);
+    final DeviceSession? session = _findSession(appId);
     if (session == null) {
       request.response.statusCode = HttpStatus.notFound;
       request.response.headers.contentType = ContentType.json;
@@ -498,9 +502,9 @@ class HttpControlChannel {
     // that support multi-window selection (currently macOS, exact title
     // match). Devices that ignore it composite or capture however they do
     // by default.
-    final window = request.uri.queryParameters['window'];
+    final String? window = request.uri.queryParameters['window'];
 
-    final settle = await _settleBeforeCapture(session, request);
+    final _Settle settle = await _settleBeforeCapture(session, request);
 
     final tmpFile = File(
       '${Directory.systemTemp.path}/'
@@ -516,7 +520,7 @@ class HttpControlChannel {
         tmpFile.path,
         window: window,
       );
-      final bytes = await tmpFile.readAsBytes();
+      final Uint8List bytes = await tmpFile.readAsBytes();
       request.response.statusCode = HttpStatus.ok;
       request.response.headers.contentType = ContentType('image', 'png');
       _reportSettle(request, settle);
@@ -549,22 +553,22 @@ class HttpControlChannel {
       await request.response.close();
     }
 
-    final session = _findSession(appId);
+    final DeviceSession? session = _findSession(appId);
     if (session == null) {
       return fail(HttpStatus.notFound, 'Unknown appId: $appId');
     }
 
-    final params = request.uri.queryParameters;
+    final Map<String, String> params = request.uri.queryParameters;
 
     // A malformed cursor is an error, not a reason to quietly serve the
     // default: a caller polling with a typo'd cursor would otherwise re-read
     // the tail forever and never notice.
-    final sinceRaw = params['since'];
+    final String? sinceRaw = params['since'];
     final int since;
     if (sinceRaw == null) {
       since = _defaultLogTail;
     } else {
-      final parsed = int.tryParse(sinceRaw);
+      final int? parsed = int.tryParse(sinceRaw);
       if (parsed == null) {
         return fail(
           HttpStatus.badRequest,
@@ -576,12 +580,12 @@ class HttpControlChannel {
       since = parsed;
     }
 
-    final limitRaw = params['limit'];
+    final String? limitRaw = params['limit'];
     final int limit;
     if (limitRaw == null) {
       limit = _defaultLogLimit;
     } else {
-      final parsed = int.tryParse(limitRaw);
+      final int? parsed = int.tryParse(limitRaw);
       if (parsed == null || parsed <= 0) {
         return fail(
           HttpStatus.badRequest,
@@ -591,8 +595,8 @@ class HttpControlChannel {
       limit = parsed > _defaultLogLimit ? _defaultLogLimit : parsed;
     }
 
-    final logs = session.appInstance.logs;
-    final page = logs.read(since, limit: limit);
+    final AppLogStream logs = session.appInstance.logs;
+    final LogPage page = logs.read(since, limit: limit);
 
     request.response.statusCode = HttpStatus.ok;
     request.response.headers.contentType = ContentType.json;
@@ -603,11 +607,7 @@ class HttpControlChannel {
         // `app.log` calls `error`.
         'lines': [
           for (final line in page.lines)
-            {
-              'index': line.index,
-              'text': line.text,
-              'error': line.isError,
-            },
+            {'index': line.index, 'text': line.text, 'error': line.isError},
         ],
         'nextCursor': page.nextCursor,
         // Which launch of this app the page came from: 1 for the original, one
@@ -630,7 +630,7 @@ class HttpControlChannel {
 
   /// Parse `/sessions/{appId}/screenshot/{type}` from a path.
   _ScreenshotMatch? _sessionScreenshotMatch(String path) {
-    final match = RegExp(
+    final RegExpMatch? match = RegExp(
       r'^/sessions/([^/]+)/screenshot/(flutter|native)$',
     ).firstMatch(path);
     if (match == null) return null;
@@ -642,7 +642,8 @@ class HttpControlChannel {
 
   /// Parse `/sessions/{appId}/logs` from a path, returning the appId.
   String? _sessionLogsMatch(String path) {
-    final match = RegExp(r'^/sessions/([^/]+)/logs$').firstMatch(path);
+    final RegExpMatch? match = RegExp(r'^/sessions/([^/]+)/logs$')
+        .firstMatch(path);
     if (match == null) return null;
     return Uri.decodeComponent(match.group(1)!);
   }

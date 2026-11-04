@@ -17,6 +17,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:runfiles/runfiles.dart';
 
@@ -33,6 +34,12 @@ export 'flutter_integration_test_ios.dart';
 export 'flutter_integration_test_launcher.dart';
 export 'flutter_integration_test_web_serve.dart';
 
+typedef _Resolved = ({
+  Map<String, String> declared,
+  String? fontconfigFile,
+  String timeZone,
+});
+
 void main(List<String> args) async {
   if (args.isNotEmpty) {
     stderr.writeln(
@@ -43,9 +50,9 @@ void main(List<String> args) async {
   }
 
   final r = Runfiles.create();
-  final platform =
+  final String platform =
       Platform.environment['FLUTTER_INTEGRATION_TEST_PLATFORM'] ?? 'web';
-  final testPath =
+  final String testPath =
       Platform.environment['FLUTTER_INTEGRATION_TEST_PATH'] ??
       'integration_test.dart';
 
@@ -67,10 +74,8 @@ void main(List<String> args) async {
     exit(64);
   }
 
-  final shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
-  if (shardStatus != null) {
-    File(shardStatus).writeAsStringSync('');
-  }
+  final String? shardStatus = Platform.environment['TEST_SHARD_STATUS_FILE'];
+  if (shardStatus != null) File(shardStatus).writeAsStringSync('');
 
   final PlatformLauncher launcher;
   try {
@@ -126,7 +131,7 @@ String _requireLauncherEnv(
   String key,
   String platform,
 ) {
-  final value = env[key];
+  final String? value = env[key];
   if (value == null || value.isEmpty) {
     throw FormatException('$key must be set for platform="$platform".');
   }
@@ -136,18 +141,19 @@ String _requireLauncherEnv(
 /// Builds the web launcher: the built bundle served over localhost HTTP to
 /// the pinned `chrome-headless-shell`.
 WebPlatformLauncher _webLauncherFromEnv(Map<String, String> env, Runfiles r) {
-  final webDir = r.rlocation(
+  final String webDir = r.rlocation(
     _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_WEB_DIR', 'web'),
   );
-  final browserBinary = r.rlocation(
+  final String browserBinary = r.rlocation(
     _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_BROWSER', 'web'),
   );
-  final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
-  final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
+  final String? fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
+  final String? fontconfigFile =
+      (fontconfigKey == null || fontconfigKey.isEmpty)
       ? null
       : r.rlocation(fontconfigKey);
-  final robotoKey = env['FLUTTER_INTEGRATION_TEST_ROBOTO_FONT'];
-  final robotoFont = (robotoKey == null || robotoKey.isEmpty)
+  final String? robotoKey = env['FLUTTER_INTEGRATION_TEST_ROBOTO_FONT'];
+  final String? robotoFont = (robotoKey == null || robotoKey.isEmpty)
       ? null
       : r.rlocation(robotoKey);
   return WebPlatformLauncher(
@@ -164,22 +170,23 @@ LinuxPlatformLauncher _linuxLauncherFromEnv(
   Map<String, String> env,
   Runfiles r,
 ) {
-  final bundleDir = r.rlocation(
+  final String bundleDir = r.rlocation(
     _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_LINUX_BUNDLE', 'linux'),
   );
-  final binaryName = _requireLauncherEnv(
+  final String binaryName = _requireLauncherEnv(
     env,
     'FLUTTER_INTEGRATION_TEST_LINUX_BINARY',
     'linux',
   );
-  final xvfbBinary = r.rlocation(
+  final String xvfbBinary = r.rlocation(
     _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_XVFB', 'linux'),
   );
-  final xkbcompBinary = r.rlocation(
+  final String xkbcompBinary = r.rlocation(
     _requireLauncherEnv(env, 'FLUTTER_INTEGRATION_TEST_XKBCOMP', 'linux'),
   );
-  final fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
-  final fontconfigFile = (fontconfigKey == null || fontconfigKey.isEmpty)
+  final String? fontconfigKey = env['FLUTTER_INTEGRATION_TEST_FONTCONFIG'];
+  final String? fontconfigFile =
+      (fontconfigKey == null || fontconfigKey.isEmpty)
       ? null
       : r.rlocation(fontconfigKey);
   return LinuxPlatformLauncher(
@@ -196,25 +203,23 @@ LinuxPlatformLauncher _linuxLauncherFromEnv(
 List<String> buildChromeArguments({
   required String url,
   required String userDataDir,
-}) {
-  return <String>[
-    '--headless',
-    '--no-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-background-networking',
-    '--disable-extensions',
-    '--disable-sync',
-    '--disable-translate',
-    '--metrics-recording-only',
-    '--mute-audio',
-    '--window-size=800,600',
-    '--user-data-dir=$userDataDir',
-    url,
-  ];
-}
+}) => <String>[
+  '--headless',
+  '--no-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--no-first-run',
+  '--no-default-browser-check',
+  '--disable-background-networking',
+  '--disable-extensions',
+  '--disable-sync',
+  '--disable-translate',
+  '--metrics-recording-only',
+  '--mute-audio',
+  '--window-size=800,600',
+  '--user-data-dir=$userDataDir',
+  url,
+];
 
 /// Builds the hermetic environment for `chrome-headless-shell`.
 ///
@@ -227,16 +232,16 @@ Map<String, String> buildChromeEnvironment({
   EnvForwarding forwarding = const EnvForwarding(),
 }) {
   final browserFile = File(browserBinary);
-  final browserDir = browserFile.parent.path;
-  final repoRoot = browserFile.parent.parent.path;
+  final String browserDir = browserFile.parent.path;
+  final String repoRoot = browserFile.parent.parent.path;
   final libDirs = <String>[
     browserDir,
     '$repoRoot/sysroot/usr/lib/x86_64-linux-gnu',
     '$repoRoot/sysroot/lib/x86_64-linux-gnu',
   ];
 
-  final resolved = resolveForwarding(forwarding);
-  final fontconfigFile = resolved.fontconfigFile;
+  final _Resolved resolved = resolveForwarding(forwarding);
+  final String? fontconfigFile = resolved.fontconfigFile;
 
   final result = <String, String>{
     'PATH': '',
@@ -260,20 +265,18 @@ Map<String, String> buildChromeEnvironment({
 ///
 /// Uses `-displayfd 1` so `Xvfb` picks a free display number and writes
 /// `<display>\n` to stdout once the X server is listening for connections.
-List<String> buildXvfbArguments({required String xkbDir}) {
-  return <String>[
-    '-displayfd',
-    '1',
-    '-screen',
-    '0',
-    '1024x768x24',
-    '-nolisten',
-    'tcp',
-    '-noreset',
-    '-xkbdir',
-    xkbDir,
-  ];
-}
+List<String> buildXvfbArguments({required String xkbDir}) => <String>[
+  '-displayfd',
+  '1',
+  '-screen',
+  '0',
+  '1024x768x24',
+  '-nolisten',
+  'tcp',
+  '-noreset',
+  '-xkbdir',
+  xkbDir,
+];
 
 /// Builds the hermetic environment for `Xvfb`.
 ///
@@ -317,8 +320,8 @@ Map<String, String> buildLinuxAppEnvironment({
   ];
   final driDir = '$sysrootDir/usr/lib/x86_64-linux-gnu/dri';
 
-  final resolved = resolveForwarding(forwarding);
-  final fontconfigFile = resolved.fontconfigFile;
+  final _Resolved resolved = resolveForwarding(forwarding);
+  final String? fontconfigFile = resolved.fontconfigFile;
 
   final result = <String, String>{
     'PATH': '$sysrootDir/usr/bin',
@@ -365,7 +368,7 @@ String prepareHermeticXvfbBinary({
   final destPath = '${binDir.path}/Xvfb';
   File(sourceXvfbBinary).copySync(destPath);
 
-  final bytes = File(destPath).readAsBytesSync();
+  final Uint8List bytes = File(destPath).readAsBytesSync();
   // In Xorg's xkbInit.c, XkbBinDirectory is initialized to "/usr/bin"
   // immediately adjacent to XkbBaseDirectory ("/usr/share/X11/xkb"). Clearing
   // "/usr/bin" to an empty C string causes XkbDDXCompileKeymapByNames to omit
@@ -375,17 +378,18 @@ String prepareHermeticXvfbBinary({
     0x2f, 0x75, 0x73, 0x72, 0x2f, 0x73, 0x68, 0x61, 0x72, 0x65, // /usr/share
     0x2f, 0x58, 0x31, 0x31, 0x2f, 0x78, 0x6b, 0x62, 0x00, // /X11/xkb\0
   ];
-  final xkbIdx = _indexOfBytes(bytes, xkbShare);
+  final int xkbIdx = _indexOfBytes(bytes, xkbShare);
   if (xkbIdx >= usrBin.length) {
-    final searchStart = xkbIdx - 32 < 0 ? 0 : xkbIdx - 32;
-    final usrBinIdx = _indexOfBytes(
+    final int searchStart = xkbIdx - 32 < 0 ? 0 : xkbIdx - 32;
+    final int usrBinIdx = _indexOfBytes(
       bytes,
       usrBin,
       start: searchStart,
       end: xkbIdx,
     );
     if (usrBinIdx >= 0) {
-      final raf = File(destPath).openSync(mode: FileMode.writeOnlyAppend);
+      final RandomAccessFile raf = File(destPath)
+          .openSync(mode: FileMode.writeOnlyAppend);
       try {
         raf.setPositionSync(usrBinIdx);
         raf.writeFromSync(const <int>[0, 0, 0, 0, 0, 0, 0, 0]);
@@ -403,7 +407,7 @@ int _indexOfBytes(
   int start = 0,
   int? end,
 }) {
-  final limit = (end ?? haystack.length) - needle.length;
+  final int limit = (end ?? haystack.length) - needle.length;
   outer:
   for (var i = start; i <= limit; i++) {
     for (var j = 0; j < needle.length; j++) {
@@ -473,15 +477,15 @@ class WebPlatformLauncher implements PlatformLauncher {
     // The page URL carries the run's token; the in-app bootstrap forwards it
     // onto the dial-back URL, so the harness adopts only this run's browser.
     final pageUrl = 'http://127.0.0.1:${binding.port}/?token=${binding.token}';
-    final args = buildChromeArguments(
+    final List<String> args = buildChromeArguments(
       url: pageUrl,
       userDataDir: userDataDir.path,
     );
-    final declaredEnv = decodeDeclaredEnv(
+    final Map<String, String> declaredEnv = decodeDeclaredEnv(
       Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
     );
-    final tz = Platform.environment['TZ'];
-    final env = buildChromeEnvironment(
+    final String? tz = Platform.environment['TZ'];
+    final Map<String, String> env = buildChromeEnvironment(
       browserBinary: browserBinary,
       scratchDir: scratch.path,
       forwarding: EnvForwarding(
@@ -510,7 +514,7 @@ class WebPlatformLauncher implements PlatformLauncher {
 
   @override
   Future<void> dispose() async {
-    final dir = _scratchDir;
+    final Directory? dir = _scratchDir;
     _scratchDir = null;
     if (dir != null && dir.existsSync()) {
       cleanupQuietly(() => dir.deleteSync(recursive: true));
@@ -600,7 +604,7 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     List<String> xvfbArgs,
     Map<String, String> xvfbEnv,
   ) async {
-    final xvfb = await Process.start(
+    final Process xvfb = await Process.start(
       patchedXvfb,
       xvfbArgs,
       environment: xvfbEnv,
@@ -612,18 +616,16 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     xvfb.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen((
       line,
     ) {
-      if (xvfbStderr.length < 50) {
-        xvfbStderr.add(line);
-      }
+      if (xvfbStderr.length < 50) xvfbStderr.add(line);
     });
 
     final displayCompleter = Completer<String>();
-    final stdoutSub = xvfb.stdout
+    final StreamSubscription<String> stdoutSub = xvfb.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())
         .listen(
           (line) {
-            final trimmed = line.trim();
+            final String trimmed = line.trim();
             if (trimmed.isNotEmpty && !displayCompleter.isCompleted) {
               displayCompleter.complete(trimmed);
             }
@@ -674,41 +676,41 @@ class LinuxPlatformLauncher implements PlatformLauncher {
     }
 
     // xvfbBinary is at <repoRoot>/sysroot/usr/bin/Xvfb.
-    final sysrootDir = File(xvfbBinary).parent.parent.parent.path;
+    final String sysrootDir = File(xvfbBinary).parent.parent.parent.path;
 
-    final scratch = _prepareLinuxScratch();
-    final effectiveFontconfig = _writeScratchFontsConf(scratch, sysrootDir);
+    final Directory scratch = _prepareLinuxScratch();
+    final String? fontconfig = _writeScratchFontsConf(scratch, sysrootDir);
 
-    final patchedXvfb = prepareHermeticXvfbBinary(
+    final String patchedXvfb = prepareHermeticXvfbBinary(
       sourceXvfbBinary: xvfbBinary,
       scratchDir: scratch.path,
     );
-    final xvfbArgs = buildXvfbArguments(
+    final List<String> xvfbArgs = buildXvfbArguments(
       xkbDir: '$sysrootDir/usr/share/X11/xkb',
     );
-    final xvfbEnv = buildXvfbEnvironment(
+    final Map<String, String> xvfbEnv = buildXvfbEnvironment(
       sysrootDir: sysrootDir,
       scratchDir: scratch.path,
     );
 
-    final displayNumber = await _bootXvfb(patchedXvfb, xvfbArgs, xvfbEnv);
-    _displayNumber = displayNumber;
+    final String display = await _bootXvfb(patchedXvfb, xvfbArgs, xvfbEnv);
+    _displayNumber = display;
 
-    final harnessUrl = binding.url;
-    final declaredEnv = decodeDeclaredEnv(
+    final String harnessUrl = binding.url;
+    final Map<String, String> declaredEnv = decodeDeclaredEnv(
       Platform.environment['FLUTTER_INTEGRATION_TEST_DECLARED_ENV'],
     );
-    final tz = Platform.environment['TZ'];
-    final appEnv = buildLinuxAppEnvironment(
+    final String? tz = Platform.environment['TZ'];
+    final Map<String, String> appEnv = buildLinuxAppEnvironment(
       bundleDir: bundleDir,
       sysrootDir: sysrootDir,
       scratchDir: scratch.path,
-      display: ':$displayNumber',
+      display: ':$display',
       harnessUrl: harnessUrl,
       forwarding: EnvForwarding(
         env: declaredEnv,
         tz: tz,
-        fontconfigFile: effectiveFontconfig,
+        fontconfigFile: fontconfig,
       ),
     );
 
@@ -729,7 +731,7 @@ class LinuxPlatformLauncher implements PlatformLauncher {
 
   @override
   Future<void> dispose() async {
-    final xvfb = _xvfbProcess;
+    final Process? xvfb = _xvfbProcess;
     _xvfbProcess = null;
     if (xvfb != null) {
       xvfb.kill(ProcessSignal.sigkill);
@@ -741,7 +743,7 @@ class LinuxPlatformLauncher implements PlatformLauncher {
       );
     }
 
-    final display = _displayNumber;
+    final String? display = _displayNumber;
     _displayNumber = null;
     if (display != null) {
       cleanupQuietly(() {
@@ -754,7 +756,7 @@ class LinuxPlatformLauncher implements PlatformLauncher {
       });
     }
 
-    final dir = _scratchDir;
+    final Directory? dir = _scratchDir;
     _scratchDir = null;
     if (dir != null && dir.existsSync()) {
       cleanupQuietly(() => dir.deleteSync(recursive: true));
@@ -811,7 +813,10 @@ Future<int> runIntegrationSuite(
   IntegrationSuiteRun run, {
   String? harnessToken,
 }) async {
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  final HttpServer server = await HttpServer.bind(
+    InternetAddress.loopbackIPv4,
+    0,
+  );
   final harness = _IntegrationHarness(
     server: server,
     launcher: run.launcher,
@@ -860,8 +865,8 @@ class _IntegrationHarness {
   int _nextId = 1;
 
   ({int outputId, int inputId}) _allocChannel() {
-    final out = _nextId;
-    final inp = _nextId + 1;
+    final int out = _nextId;
+    final int inp = _nextId + 1;
     _nextId += 2;
     return (outputId: out, inputId: inp);
   }
@@ -907,16 +912,14 @@ class _IntegrationHarness {
       return;
     }
     try {
-      final socket = await WebSocketTransformer.upgrade(request);
+      final WebSocket socket = await WebSocketTransformer.upgrade(request);
       if (!_wsConnected.isCompleted) {
         _wsConnected.complete(socket);
       } else {
         await socket.close();
       }
     } catch (e) {
-      if (!_wsConnected.isCompleted) {
-        _wsConnected.completeError(e);
-      }
+      if (!_wsConnected.isCompleted) _wsConnected.completeError(e);
     }
   }
 
@@ -926,9 +929,7 @@ class _IntegrationHarness {
   /// once it is running.
   Future<int?> _launchTarget(List<String> processLogs) async {
     void recordProcessLine(String streamName, String line) {
-      if (processLogs.length < 200) {
-        processLogs.add('[$streamName] $line');
-      }
+      if (processLogs.length < 200) processLogs.add('[$streamName] $line');
     }
 
     try {
@@ -960,7 +961,7 @@ class _IntegrationHarness {
   /// target exited or stayed silent, or null once connected.
   Future<int?> _settleTargetDialBack(List<String> processLogs) async {
     switch (await _awaitDialBack()) {
-      case _TargetExited(:final exitCode):
+      case _TargetExited(:final int exitCode):
         stderr.writeln(
           'flutter_integration_test: ${_launcher.platformName} target exited '
           'with code $exitCode before connecting to the test harness.',
@@ -979,7 +980,7 @@ class _IntegrationHarness {
           stderr.writeln('  $line');
         }
         return 1;
-      case _BootstrapConnected(:final socket):
+      case _BootstrapConnected(:final WebSocket socket):
         _ws = socket;
         return null;
     }
@@ -993,7 +994,7 @@ class _IntegrationHarness {
     _Results results,
     Completer<Map<String, dynamic>?> suiteReady,
   ) {
-    final msg = (data as Map).cast<String, dynamic>();
+    final Map<String, dynamic> msg = (data as Map).cast<String, dynamic>();
     switch (msg['type']) {
       case 'success':
         if (!suiteReady.isCompleted) {
@@ -1003,7 +1004,8 @@ class _IntegrationHarness {
         results.recordError('load failure — ${msg['message']}');
         if (!suiteReady.isCompleted) suiteReady.complete(null);
       case 'error':
-        final err = (msg['error'] as Map).cast<String, dynamic>();
+        final Map<String, dynamic> err = (msg['error'] as Map)
+            .cast<String, dynamic>();
         results.recordError(
           'uncaught error — ${err['message']}\n${err['stackChain']}',
         );
@@ -1027,7 +1029,7 @@ class _IntegrationHarness {
       onDone: () {
         _socketClosed = true;
         if (!suiteReady.isCompleted) suiteReady.complete(null);
-        for (final c in _pendingTests.values) {
+        for (final Completer<void> c in _pendingTests.values) {
           if (!c.isCompleted) c.complete();
         }
         _pendingTests.clear();
@@ -1083,10 +1085,10 @@ class _IntegrationHarness {
     _serveHttp();
 
     final processLogs = <String>[];
-    final launchExit = await _launchTarget(processLogs);
+    final int? launchExit = await _launchTarget(processLogs);
     if (launchExit != null) return launchExit;
 
-    final dialBackExit = await _settleTargetDialBack(processLogs);
+    final int? dialBackExit = await _settleTargetDialBack(processLogs);
     if (dialBackExit != null) return dialBackExit;
 
     final results = _Results();
@@ -1097,8 +1099,8 @@ class _IntegrationHarness {
 
     _send(0, _initialMessage(testPath, bazelTestTimeout, libraryTags));
 
-    final ceiling = testCeiling(bazelTestTimeout);
-    final root = await suiteReady.future.timeout(
+    final Duration ceiling = testCeiling(bazelTestTimeout);
+    final Map<String, dynamic>? root = await suiteReady.future.timeout(
       ceiling,
       onTimeout: () => null,
     );
@@ -1113,9 +1115,8 @@ class _IntegrationHarness {
     }
 
     if (xmlOutput != null) {
-      await File(
-        xmlOutput,
-      ).writeAsString(junitXml(results.cases, suiteName: testPath));
+      await File(xmlOutput)
+          .writeAsString(junitXml(results.cases, suiteName: testPath));
     }
 
     await _shutdownTarget();
@@ -1125,7 +1126,7 @@ class _IntegrationHarness {
   }
 
   Future<_DialBack> _awaitDialBack() async {
-    final outcome = await Future.any<_DialBack?>([
+    final _DialBack? outcome = await Future.any<_DialBack?>([
       _wsConnected.future.then<_DialBack?>(_BootstrapConnected.new),
       _process!.exitCode.then<_DialBack?>(_TargetExited.new),
     ]).timeout(_dialBackBound, onTimeout: () => null);
@@ -1133,27 +1134,23 @@ class _IntegrationHarness {
   }
 
   void _onSocketMessage(dynamic raw) {
-    final decoded = json.decode(raw as String);
+    final dynamic decoded = json.decode(raw as String);
     if (decoded is Map && decoded['type'] == 'uncaughtError') {
-      final handler = _inbound[0];
-      if (handler != null) {
-        handler(decoded);
-      }
-      for (final c in _pendingTests.values) {
+      final void Function(Object?)? handler = _inbound[0];
+      if (handler != null) handler(decoded);
+      for (final Completer<void> c in _pendingTests.values) {
         if (!c.isCompleted) c.complete();
       }
       return;
     }
     final list = decoded as List;
-    final id = (list[0] as num).toInt();
+    final int id = (list[0] as num).toInt();
     if (list.length == 1) {
       _inbound.remove(id);
       return;
     }
-    final handler = _inbound[id];
-    if (handler != null) {
-      handler(list[1]);
-    }
+    final void Function(Object?)? handler = _inbound[id];
+    if (handler != null) handler(list[1]);
   }
 
   Future<void> _runGroup(
@@ -1171,9 +1168,9 @@ class _IntegrationHarness {
       );
     }
 
-    final entries = group['entries'] as List? ?? const [];
+    final List<dynamic> entries = group['entries'] as List? ?? const [];
     for (final entry in entries) {
-      final m = (entry as Map).cast<String, dynamic>();
+      final Map<String, dynamic> m = (entry as Map).cast<String, dynamic>();
       if (m['type'] == 'group') {
         await _runGroup(m, results, ceiling);
       } else {
@@ -1198,8 +1195,8 @@ class _IntegrationHarness {
     Duration ceiling, {
     bool fixture = false,
   }) async {
-    final testChannelId = (test['channel'] as num).toInt();
-    final reportName = test['name'] as String? ?? '';
+    final int testChannelId = (test['channel'] as num).toInt();
+    final String reportName = test['name'] as String? ?? '';
 
     if (fileUnstartedTest(
       test: test,
@@ -1215,7 +1212,7 @@ class _IntegrationHarness {
 
     TestFailureSummary? failure;
     void noteFailure(TestFailureSummary summary) => failure ??= summary;
-    final tracked = trackTestRun(
+    final RunningTest tracked = trackTestRun(
       channel: _allocChannel(),
       pending: _pendingTests,
       inbound: _inbound,
@@ -1290,30 +1287,28 @@ class _IntegrationHarness {
     String testPath,
     String? bazelTestTimeout,
     Set<String> libraryTags,
-  ) {
-    return {
-      'type': 'initial',
-      'metadata': defaultSuiteMetadata(
-        suiteTimeout(bazelTestTimeout),
-        libraryTags,
-      ),
-      'platform': {
-        'runtime': _launcher.suiteRuntime,
-        'compiler': _launcher.suiteCompiler,
-        'os': _launcher.suiteRuntime == 'chrome' ? 'none' : _osIdentifier(),
-        'inGoogle': false,
-      },
-      'platformVariables': const <String>[],
-      'collectTraces': true,
-      'noRetry': true,
-      'allowDuplicateTestNames': true,
-      'foldTraceExcept': const <String>[],
-      'foldTraceOnly': const <String>[],
-      'path': testPath,
-      'asciiGlyphs': !stdout.supportsAnsiEscapes,
-      'ignoreTimeouts': false,
-    };
-  }
+  ) => {
+    'type': 'initial',
+    'metadata': defaultSuiteMetadata(
+      suiteTimeout(bazelTestTimeout),
+      libraryTags,
+    ),
+    'platform': {
+      'runtime': _launcher.suiteRuntime,
+      'compiler': _launcher.suiteCompiler,
+      'os': _launcher.suiteRuntime == 'chrome' ? 'none' : _osIdentifier(),
+      'inGoogle': false,
+    },
+    'platformVariables': const <String>[],
+    'collectTraces': true,
+    'noRetry': true,
+    'allowDuplicateTestNames': true,
+    'foldTraceExcept': const <String>[],
+    'foldTraceOnly': const <String>[],
+    'path': testPath,
+    'asciiGlyphs': !stdout.supportsAnsiEscapes,
+    'ignoreTimeouts': false,
+  };
 
   static String _osIdentifier() {
     if (Platform.isMacOS) return 'mac-os';
@@ -1349,9 +1344,7 @@ bool integrationRunFailed({
   required int passed,
   required int failed,
   required bool suiteError,
-}) {
-  return failed > 0 || suiteError || passed + failed == 0;
-}
+}) => failed > 0 || suiteError || passed + failed == 0;
 
 class _Results implements TestResultSink {
   int passed = 0;
@@ -1417,6 +1410,5 @@ class _Results implements TestResultSink {
   );
 }
 
-String _indent(String body, String prefix) {
-  return body.split('\n').map((l) => l.isEmpty ? l : '$prefix$l').join('\n');
-}
+String _indent(String body, String prefix) =>
+    body.split('\n').map((l) => l.isEmpty ? l : '$prefix$l').join('\n');

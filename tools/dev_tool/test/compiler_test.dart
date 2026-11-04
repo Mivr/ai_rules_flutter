@@ -26,7 +26,7 @@ void main() {
     test(
       'compileIncrement returns CompileSucceeded with dill path on success',
       () async {
-        final future = compiler.compileIncrement(
+        final Future<CompileOutcome> future = compiler.compileIncrement(
           invalidated: {'package:app/main.dart'},
           entrypoint: 'package:app/main.dart',
         );
@@ -34,7 +34,7 @@ void main() {
         fakeProcess.emitStdout('result boundary_1');
         fakeProcess.emitStdout('boundary_1 /tmp/delta.dill 0');
 
-        final outcome = await future;
+        final CompileOutcome outcome = await future;
         expect(outcome, isA<CompileSucceeded>());
         expect((outcome as CompileSucceeded).dillPath, '/tmp/delta.dill');
       },
@@ -43,7 +43,7 @@ void main() {
     test(
       'compileIncrement returns CompileFailed with diagnostics on error',
       () async {
-        final future = compiler.compileIncrement(
+        final Future<CompileOutcome> future = compiler.compileIncrement(
           invalidated: {'package:app/main.dart'},
           entrypoint: 'package:app/main.dart',
         );
@@ -52,14 +52,14 @@ void main() {
         fakeProcess.emitStdout('result boundary_1');
         fakeProcess.emitStdout('boundary_1 /tmp/delta.dill 1');
 
-        final outcome = await future;
+        final CompileOutcome outcome = await future;
         expect(outcome, isA<CompileFailed>());
         expect((outcome as CompileFailed).diagnostics, contains('Bad syntax'));
       },
     );
 
     test('compileFull returns CompileSucceeded on success', () async {
-      final future = compiler.compileFull(
+      final Future<CompileOutcome> future = compiler.compileFull(
         entrypoint: 'package:app/main.dart',
         invalidated: {'package:app/a.dart'},
       );
@@ -67,7 +67,7 @@ void main() {
       fakeProcess.emitStdout('result boundary_1');
       fakeProcess.emitStdout('boundary_1 /tmp/full.dill 0');
 
-      final outcome = await future;
+      final CompileOutcome outcome = await future;
       expect(outcome, isA<CompileSucceeded>());
       expect((outcome as CompileSucceeded).dillPath, '/tmp/full.dill');
     });
@@ -82,7 +82,7 @@ void main() {
     test(
       'compileFull sends reset then recompile, not a second compile',
       () async {
-        final future = compiler.compileFull(
+        final Future<CompileOutcome> future = compiler.compileFull(
           entrypoint: 'package:app/main.dart',
           invalidated: {'file:///app/lib/a.dart'},
         );
@@ -123,24 +123,24 @@ void main() {
       // flight at once hand one request the other's answer. Serialized, each
       // keeps its own dill — including when the second caller is the debugger
       // rather than the reload path.
-      final first = compiler.compileIncrement(
+      final Future<CompileOutcome> first = compiler.compileIncrement(
         invalidated: {'package:app/a.dart'},
         entrypoint: 'package:app/main.dart',
       );
-      final second = compiler.compileIncrement(
+      final Future<CompileOutcome> second = compiler.compileIncrement(
         invalidated: {'package:app/b.dart'},
         entrypoint: 'package:app/main.dart',
       );
 
       fakeProcess.emitStdout('result boundary_1');
       fakeProcess.emitStdout('boundary_1 /tmp/delta1.dill 0');
-      final firstOutcome = await first;
+      final CompileOutcome firstOutcome = await first;
       expect((firstOutcome as CompileSucceeded).dillPath, '/tmp/delta1.dill');
 
       await pumpEventQueue();
       fakeProcess.emitStdout('result boundary_2');
       fakeProcess.emitStdout('boundary_2 /tmp/delta2.dill 0');
-      final secondOutcome = await second;
+      final CompileOutcome secondOutcome = await second;
       expect(
         (secondOutcome as CompileSucceeded).dillPath,
         '/tmp/delta2.dill',
@@ -150,14 +150,14 @@ void main() {
     test(
       'compileIncrement returns CompileFailed when the frontend_server process dies',
       () async {
-        final future = compiler.compileIncrement(
+        final Future<CompileOutcome> future = compiler.compileIncrement(
           invalidated: {'package:app/main.dart'},
           entrypoint: 'package:app/main.dart',
         );
 
         fakeProcess.complete(1);
 
-        final outcome = await future;
+        final CompileOutcome outcome = await future;
         expect(outcome, isA<CompileFailed>());
         expect(
           (outcome as CompileFailed).diagnostics,
@@ -171,7 +171,7 @@ void main() {
       () async {
         // A verdict is only meaningful on a compile the server is still holding,
         // so each half needs its own compile to answer for.
-        final first = compiler.compileIncrement(
+        final Future<CompileOutcome> first = compiler.compileIncrement(
           invalidated: {'package:app/main.dart'},
           entrypoint: 'package:app/main.dart',
         );
@@ -180,14 +180,14 @@ void main() {
         await first;
         await compiler.commit();
 
-        final second = compiler.compileIncrement(
+        final Future<CompileOutcome> second = compiler.compileIncrement(
           invalidated: {'package:app/main.dart'},
           entrypoint: 'package:app/main.dart',
         );
         fakeProcess.emitStdout('result boundary_2');
         fakeProcess.emitStdout('boundary_2 /tmp/delta2.dill 0');
         await second;
-        final rolledBack = compiler.rollback();
+        final Future<void> rolledBack = compiler.rollback();
         fakeProcess.emitStdout('result reject_key');
         fakeProcess.emitStdout('reject_key');
         await rolledBack;
@@ -205,7 +205,7 @@ void main() {
         // reject must be awaited before a new compile can be done. A rollback
         // that returns early lets the next compile start against two unread
         // protocol lines, which wedges the session.
-        final first = compiler.compileIncrement(
+        final Future<CompileOutcome> first = compiler.compileIncrement(
           invalidated: {'package:app/main.dart'},
           entrypoint: 'package:app/main.dart',
         );
@@ -214,7 +214,9 @@ void main() {
         await first;
 
         var returned = false;
-        final rolledBack = compiler.rollback().then((_) => returned = true);
+        final Future<bool> rolledBack = compiler.rollback().then(
+          (_) => returned = true,
+        );
         await pumpEventQueue();
         expect(
           returned,

@@ -146,7 +146,7 @@ Future<void> main(List<String> args) async {
   final config =
       json.decode(File(args[1]).readAsStringSync()) as Map<String, dynamic>;
   final errors = <String>[];
-  final result = substituteTemplates(config, errors);
+  final Map<String, String> result = substituteTemplates(config, errors);
 
   if (errors.isNotEmpty) {
     stderr.writeln('web template substitution failed:');
@@ -182,11 +182,12 @@ Map<String, String> substituteTemplates(
   final keepPlaceholders = <String>{
     ...((config['keep_placeholders'] as List<dynamic>?) ?? []).cast<String>(),
   };
-  final files = (config['files'] as List<dynamic>).cast<Map<String, dynamic>>();
+  final List<Map<String, dynamic>> files = (config['files'] as List<dynamic>)
+      .cast<Map<String, dynamic>>();
 
   // A define that shadows a built-in would be dropped without trace, and one
   // that is also an allowed passthrough asks for two different things at once.
-  for (final name in webDefines.keys) {
+  for (final String name in webDefines.keys) {
     if (_builtinNames.contains(name)) {
       errors.add(
         'web_defines declares `$name`, which is a name the build supplies. '
@@ -207,8 +208,8 @@ Map<String, String> substituteTemplates(
 
   for (final file in files) {
     final label = file['label'] as String;
-    final content = File(file['template'] as String).readAsStringSync();
-    final result = _substituteFile(
+    final String content = File(file['template'] as String).readAsStringSync();
+    final String result = _substituteFile(
       content: content,
       file: file,
       priorOutputs: substituted,
@@ -226,7 +227,7 @@ Map<String, String> substituteTemplates(
 
   // Checked across the whole invocation, not per file: a define may legitimately
   // appear only in the bootstrap or only in index.html.
-  for (final name in webDefines.keys) {
+  for (final String name in webDefines.keys) {
     if (!usedDefines.contains(name)) {
       errors.add(
         'web_defines declares `$name`, which no template references. Searched: '
@@ -266,7 +267,7 @@ String _substituteFile({
 }) {
   final baseHref = file['base_href'] as String?;
   final staticAssetsUrl = file['static_assets_url'] as String?;
-  final devLoopGuard = (file['dev_loop_guard'] as bool?) ?? false;
+  final bool devLoopGuard = (file['dev_loop_guard'] as bool?) ?? false;
 
   var result = content;
   if (baseHref != null) {
@@ -279,7 +280,7 @@ String _substituteFile({
   // False only for a second entry over a template another entry already read,
   // so one deprecated construct is reported once.
   final checkConstructs = file['check_constructs'] as bool;
-  final managesServiceWorker =
+  final bool managesServiceWorker =
       (file['manages_service_worker'] as bool?) ?? false;
   _refusedConstructErrors(
     result,
@@ -289,14 +290,12 @@ String _substituteFile({
     sub.errors,
   );
 
-  final builtins = _resolveBuiltins(
+  final Map<String, String> builtins = _resolveBuiltins(
     (file['builtins'] as Map<String, dynamic>?) ?? {},
     priorOutputs,
   );
 
-  if (devLoopGuard) {
-    _bootPathErrors(result, sub.label, sub.errors);
-  }
+  if (devLoopGuard) _bootPathErrors(result, sub.label, sub.errors);
 
   return result.replaceAllMapped(
     _variablePattern,
@@ -318,7 +317,7 @@ void _refusedConstructErrors(
       ..._managedServiceWorkerConstructs,
   };
   refused.forEach((pattern, remedy) {
-    for (final match in pattern.allMatches(result)) {
+    for (final RegExpMatch match in pattern.allMatches(result)) {
       errors.add(
         '$label:${_lineOf(result, match.start)}: `${match.group(0)}` is '
         'deprecated wiring these rules do not support. $remedy',
@@ -335,8 +334,8 @@ void _refusedConstructErrors(
 /// never reaches the dev loop's: the page runs against the built bundle, so it
 /// renders and hot reload does nothing.
 void _bootPathErrors(String result, String label, List<String> errors) {
-  for (final match in _variablePattern.allMatches(result)) {
-    final name = match.group(1)!;
+  for (final RegExpMatch match in _variablePattern.allMatches(result)) {
+    final String name = match.group(1)!;
     if (_bootPathBuiltins.contains(name)) {
       errors.add(
         '$label:${_lineOf(result, match.start)}: `{{$name}}` inlines the '
@@ -359,17 +358,13 @@ String _substituteVariable(
   Map<String, String> builtins,
   _TemplateSubstitution sub,
 ) {
-  final name = match.group(1)!;
+  final String name = match.group(1)!;
   if (sub.webDefines.containsKey(name)) {
     sub.usedDefines.add(name);
     return sub.webDefines[name]!;
   }
-  if (builtins.containsKey(name)) {
-    return builtins[name]!;
-  }
-  if (sub.keepPlaceholders.contains(name)) {
-    return match.group(0)!;
-  }
+  if (builtins.containsKey(name)) return builtins[name]!;
+  if (sub.keepPlaceholders.contains(name)) return match.group(0)!;
   if (_builtinNames.contains(name)) {
     // A build-supplied name, but not one this file is given. The only way
     // that happens is `{{flutter_bootstrap_js}}` in the bootstrap itself,
@@ -422,7 +417,7 @@ int _lineOf(String content, int offset) =>
 /// normalizing output paths so compilation is sandbox-confined and
 /// workspace-path-independent.
 void _runWebCompile(List<String> args) {
-  final subcommand = args.isNotEmpty ? args.first : '';
+  final String subcommand = args.isNotEmpty ? args.first : '';
   if (subcommand == 'wasm') {
     _runDart2Wasm(args.sublist(1));
   } else if (subcommand == 'js') {
@@ -434,7 +429,7 @@ void _runWebCompile(List<String> args) {
 }
 
 String _toAppSchemeRelPath(String path) {
-  final norm = path.replaceAll(r'\', '/');
+  final String norm = path.replaceAll(r'\', '/');
   return norm.replaceFirst(
     RegExp(r'^(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/'),
     '',
@@ -456,10 +451,10 @@ void _rewritePackageConfigForStage(
   String cwdPrefix,
   String outPath,
 ) {
-  final pkgFile = File(packagesPath).absolute;
+  final File pkgFile = File(packagesPath).absolute;
   final pkgJson =
       json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
-  final pkgs = (pkgJson['packages'] as List<dynamic>)
+  final List<Map<String, dynamic>> pkgs = (pkgJson['packages'] as List<dynamic>)
       .cast<Map<String, dynamic>>();
   for (final p in pkgs) {
     final rootUri = p['rootUri'] as String;
@@ -469,16 +464,12 @@ void _rewritePackageConfigForStage(
         rootUri.substring('org-dartlang-app:///'.length),
       );
     } else {
-      final resolved = pkgFile.uri.resolve(rootUri);
-      if (resolved.scheme != 'file') {
-        continue;
-      }
-      final fsPath = resolved.toFilePath().replaceAll(r'\', '/');
+      final Uri resolved = pkgFile.uri.resolve(rootUri);
+      if (resolved.scheme != 'file') continue;
+      final String fsPath = resolved.toFilePath().replaceAll(r'\', '/');
       if (fsPath.startsWith(cwdPrefix)) {
-        var r = fsPath.substring(cwdPrefix.length);
-        if (r.endsWith('/') && r.length > 1) {
-          r = r.substring(0, r.length - 1);
-        }
+        String r = fsPath.substring(cwdPrefix.length);
+        if (r.endsWith('/') && r.length > 1) r = r.substring(0, r.length - 1);
         rel = _toAppSchemeRelPath(r);
       } else if (fsPath == normCwd || fsPath == cwdPrefix) {
         rel = '';
@@ -508,21 +499,19 @@ void _rewritePackageConfig(
   String cwdPrefix,
   String outPath,
 ) {
-  final pkgFile = File(packagesPath).absolute;
+  final File pkgFile = File(packagesPath).absolute;
   final pkgJson =
       json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
-  final pkgs = (pkgJson['packages'] as List<dynamic>)
+  final List<Map<String, dynamic>> pkgs = (pkgJson['packages'] as List<dynamic>)
       .cast<Map<String, dynamic>>();
   for (final p in pkgs) {
     final rootUri = p['rootUri'] as String;
-    if (rootUri.startsWith('org-dartlang-app:///')) {
-      continue;
-    }
-    final resolved = pkgFile.uri.resolve(rootUri);
+    if (rootUri.startsWith('org-dartlang-app:///')) continue;
+    final Uri resolved = pkgFile.uri.resolve(rootUri);
     if (resolved.scheme == 'file') {
-      final fsPath = resolved.toFilePath().replaceAll(r'\', '/');
+      final String fsPath = resolved.toFilePath().replaceAll(r'\', '/');
       if (fsPath.startsWith(cwdPrefix)) {
-        var rel = fsPath.substring(cwdPrefix.length);
+        String rel = fsPath.substring(cwdPrefix.length);
         if (rel.endsWith('/') && rel.length > 1) {
           rel = rel.substring(0, rel.length - 1);
         }
@@ -544,13 +533,22 @@ void _rewritePackageConfig(
 
 void _runDart2Wasm(List<String> args) {
   final exeSuffix = Platform.isWindows ? '.exe' : '';
-  final sdkBin = File(Platform.resolvedExecutable).parent.path;
+  final String sdkBin = File(Platform.resolvedExecutable).parent.path;
   final dartaotruntime = '$sdkBin/dartaotruntime$exeSuffix';
 
-  final parsed = _parseDart2WasmArgs(args);
-  final packagesPath = parsed.packagesPath;
-  final outputWasm = parsed.outputWasm;
-  final mainDart = parsed.mainDart;
+  final ({
+    List<String> extraOptions,
+    List<String> forwardArgs,
+    String? mainDart,
+    String? multiRoot,
+    bool noSourceMaps,
+    String? outputWasm,
+    String? packagesPath,
+  })
+  parsed = _parseDart2WasmArgs(args);
+  final String? packagesPath = parsed.packagesPath;
+  final String? outputWasm = parsed.outputWasm;
+  final String? mainDart = parsed.mainDart;
   if (packagesPath == null || outputWasm == null || mainDart == null) {
     stderr.writeln(
       'web_template compile wasm: --packages, -o, and entrypoint are required',
@@ -593,7 +591,7 @@ _parseDart2WasmArgs(List<String> args) {
   final forwardArgs = <String>[];
 
   for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+    final String arg = args[i];
     if (arg.startsWith('--packages=')) {
       packagesPath = arg.substring('--packages='.length);
     } else if (arg.startsWith('--multi-root=')) {
@@ -673,13 +671,13 @@ void _compileWasm(_WebCompileRequest req) {
   final outWasmFile = File(req.outputWasm!)..parent.createSync(recursive: true);
   final tmpDir = Directory('${outWasmFile.parent.path}/_wasm_tmp')
     ..createSync(recursive: true);
-  final tmpAbsPath = tmpDir.absolute.path;
+  final String tmpAbsPath = tmpDir.absolute.path;
   try {
-    final cwdPath = Directory.current.absolute.path;
-    final rootDirPath = req.multiRoot != null
+    final String cwdPath = Directory.current.absolute.path;
+    final String rootDirPath = req.multiRoot != null
         ? Directory(req.multiRoot!).absolute.path
         : cwdPath;
-    final normCwd = cwdPath.replaceAll(r'\', '/');
+    final String normCwd = cwdPath.replaceAll(r'\', '/');
     final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
     final rewrittenPkgPath = '${tmpDir.path}/package_config.json';
     _rewritePackageConfig(
@@ -690,7 +688,7 @@ void _compileWasm(_WebCompileRequest req) {
     );
 
     final tmpWasm = '${tmpDir.path}/main.dart.wasm';
-    final normMainDart = req.multiRoot != null
+    final String normMainDart = req.multiRoot != null
         ? _toAppSchemeRelPath(req.mainDart!)
         : req.mainDart!.replaceAll(r'\', '/');
     final wasmArgs = <String>[
@@ -704,7 +702,7 @@ void _compileWasm(_WebCompileRequest req) {
       'org-dartlang-app:///$normMainDart',
       tmpWasm,
     ];
-    final res = Process.runSync(
+    final ProcessResult res = Process.runSync(
       req.dartaotruntime,
       wasmArgs,
       environment: {
@@ -722,9 +720,7 @@ void _compileWasm(_WebCompileRequest req) {
 
     _copyWasmOutputs(req.outputWasm!, tmpDir, req.noSourceMaps, tmpWasm);
   } finally {
-    if (tmpDir.existsSync()) {
-      tmpDir.deleteSync(recursive: true);
-    }
+    if (tmpDir.existsSync()) tmpDir.deleteSync(recursive: true);
   }
 }
 
@@ -745,17 +741,13 @@ void _copyWasmOutputs(
 
   if (!noSourceMaps) {
     final tmpMap = File('$tmpWasm.map');
-    if (tmpMap.existsSync()) {
-      tmpMap.copySync('$outputWasm.map');
-    }
+    if (tmpMap.existsSync()) tmpMap.copySync('$outputWasm.map');
   }
 }
 
 String _toAppSchemeUri(String path, String cwdPrefix) {
-  var norm = path.replaceAll(r'\', '/');
-  if (norm.startsWith(cwdPrefix)) {
-    norm = norm.substring(cwdPrefix.length);
-  }
+  String norm = path.replaceAll(r'\', '/');
+  if (norm.startsWith(cwdPrefix)) norm = norm.substring(cwdPrefix.length);
   return 'org-dartlang-app:///${_toAppSchemeRelPath(norm)}';
 }
 
@@ -779,7 +771,7 @@ void scrubDart2JsOutputs(
 }) {
   if (!outDir.existsSync()) return;
 
-  final entries = outDir.listSync(recursive: true)
+  final List<FileSystemEntity> entries = outDir.listSync(recursive: true)
     ..sort((a, b) => a.path.compareTo(b.path));
   for (final entity in entries) {
     if (entity is File &&
@@ -818,7 +810,7 @@ void scrubDart2JsFile(
   String? packagesPath,
   String? rewrittenPkgPath,
 }) {
-  final prefixes = _scrubPrefixesFor(
+  final _ScrubPrefixes prefixes = _scrubPrefixesFor(
     cwdPath: cwdPath,
     rootDirPath: rootDirPath,
     tmpDirPath: tmpDirPath,
@@ -831,9 +823,7 @@ void scrubDart2JsFile(
   _scrubSourcemapStageRefs(state, file, prefixes);
   _scrubInfoJson(state, file, prefixes);
   _scrubDepsFile(state, file);
-  if (state.changed) {
-    file.writeAsStringSync(state.content);
-  }
+  if (state.changed) file.writeAsStringSync(state.content);
 }
 
 /// The host-specific spellings `scrubDart2JsFile` normalizes away.
@@ -869,7 +859,7 @@ class _ScrubState {
 
   /// Replaces every [from] with [to], recording the change.
   void replace(Pattern from, String to) {
-    final next = content.replaceAll(from, to);
+    final String next = content.replaceAll(from, to);
     if (next != content) {
       content = next;
       changed = true;
@@ -886,9 +876,9 @@ _ScrubPrefixes _scrubPrefixesFor({
   required String? packagesPath,
   required String? rewrittenPkgPath,
 }) {
-  final normCwd = cwdPath.replaceAll(r'\', '/');
+  final String normCwd = cwdPath.replaceAll(r'\', '/');
   final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
-  final normRootDir = rootDirPath?.replaceAll(r'\', '/');
+  final String? normRootDir = rootDirPath?.replaceAll(r'\', '/');
   return _ScrubPrefixes(
     pkgAppUri: packagesPath != null
         ? _toAppSchemeUri(packagesPath, cwdPrefix)
@@ -915,9 +905,9 @@ _ScrubPrefixes _scrubPrefixesFor({
 
 /// The staging root's own directory name, for source-map relative spellings.
 String? _stageDirName(String rootDirPath) {
-  final segments = Directory(
-    rootDirPath,
-  ).uri.pathSegments.where((s) => s.isNotEmpty).toList();
+  final List<String> segments = Directory(rootDirPath).uri.pathSegments
+      .where((s) => s.isNotEmpty)
+      .toList();
   return segments.isNotEmpty ? segments.last : null;
 }
 
@@ -927,9 +917,7 @@ void _scrubPackageUris(_ScrubState state, _ScrubPrefixes p) {
     if (p.rewrittenPkgUri != null) {
       state.replace(p.rewrittenPkgUri!, p.pkgAppUri!);
     }
-    if (p.origPkgUri != null) {
-      state.replace(p.origPkgUri!, p.pkgAppUri!);
-    }
+    if (p.origPkgUri != null) state.replace(p.origPkgUri!, p.pkgAppUri!);
   }
 }
 
@@ -958,11 +946,7 @@ void _scrubDirectoryUris(_ScrubState state, _ScrubPrefixes p) {
 }
 
 /// Rewrites the staging directory's relative spellings in a source map.
-void _scrubSourcemapStageRefs(
-  _ScrubState state,
-  File file,
-  _ScrubPrefixes p,
-) {
+void _scrubSourcemapStageRefs(_ScrubState state, File file, _ScrubPrefixes p) {
   if (file.path.endsWith('.map') &&
       p.stageDirName != null &&
       p.stageDirName!.isNotEmpty) {
@@ -977,10 +961,7 @@ void _scrubSourcemapStageRefs(
 /// timestamps.
 void _scrubInfoJson(_ScrubState state, File file, _ScrubPrefixes p) {
   if (!file.path.endsWith('.info.json')) return;
-  state.replace(
-    RegExp(r'(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/'),
-    '',
-  );
+  state.replace(RegExp(r'(?:\./)?bazel-out/[^/]+/(?:bin|genfiles)/'), '');
   if (p.relStagePrefix != null &&
       p.relStagePrefix!.isNotEmpty &&
       state.content.contains('${p.relStagePrefix!}/')) {
@@ -1003,7 +984,7 @@ void _scrubInfoJson(_ScrubState state, File file, _ScrubPrefixes p) {
 /// Sorts, trims and dedupes a `.deps` depfile.
 void _scrubDepsFile(_ScrubState state, File file) {
   if (!file.path.endsWith('.deps')) return;
-  final lines =
+  final List<String> lines =
       state.content
           .split('\n')
           .map((l) => l.trimRight())
@@ -1048,9 +1029,9 @@ List<String> buildDart2JsSnapshotArgs({
 /// the Bazel action passes it exec-root-relative, so absolutize against the
 /// working directory; an already-absolute or `file:` spelling is honored.
 String stageRootUri(String multiRoot) {
-  final norm = multiRoot.replaceAll(r'\', '/');
+  final String norm = multiRoot.replaceAll(r'\', '/');
   if (norm.startsWith('file:')) {
-    final uri = Uri.parse(norm);
+    final Uri uri = Uri.parse(norm);
     return Uri.directory(uri.toFilePath()).toString();
   }
   return Uri.directory(Directory(multiRoot).absolute.path).toString();
@@ -1058,10 +1039,17 @@ String stageRootUri(String multiRoot) {
 
 void _runDart2Js(List<String> args) {
   final exeSuffix = Platform.isWindows ? '.exe' : '';
-  final sdkBin = File(Platform.resolvedExecutable).parent.path;
+  final String sdkBin = File(Platform.resolvedExecutable).parent.path;
   final dartaotruntime = '$sdkBin/dartaotruntime$exeSuffix';
 
-  final parsed = _parseDart2JsArgs(args);
+  final ({
+    List<String> forwardArgs,
+    String? mainDart,
+    String? multiRoot,
+    String? outJs,
+    String? packagesPath,
+  })
+  parsed = _parseDart2JsArgs(args);
 
   // `dart compile js --cfe-only` produces a kernel dill for const_finder
   // (the `app.dill` upstream runs icon tree-shaking on) rather than
@@ -1071,38 +1059,37 @@ void _runDart2Js(List<String> args) {
   // tree); two icon kernels compile concurrently into one `bin` dir, hence
   // the timestamp/pid suffix. JS scrubbing is skipped: there is no JS to
   // scrub, and the `.deps` sibling is normalized below.
-  final cfeOnly = parsed.forwardArgs.contains('--cfe-only');
+  final bool cfeOnly = parsed.forwardArgs.contains('--cfe-only');
 
-  final cwdPath = Directory.current.absolute.path;
-  final scratch = _dart2JsScratchDir(
+  final String cwdPath = Directory.current.absolute.path;
+  final ({String tmpAbsPath, Directory tmpDir}) scratch = _dart2JsScratchDir(
     outJs: parsed.outJs,
     cfeOnly: cfeOnly,
     cwdPath: cwdPath,
   );
-  final tmpDir = scratch.tmpDir;
-  final tmpAbsPath = scratch.tmpAbsPath;
+  final Directory tmpDir = scratch.tmpDir;
+  final String tmpAbsPath = scratch.tmpAbsPath;
   String? rootDirPath;
   String? rewrittenPkgPath;
   try {
-    final compiled = _compileDart2Js(
-      _WebCompileRequest(
-        dartaotruntime: dartaotruntime,
-        sdkBin: sdkBin,
-        tmpPath: tmpDir.path,
-        tmpAbsPath: tmpAbsPath,
-        multiRoot: parsed.multiRoot,
-        packagesPath: parsed.packagesPath,
-        mainDart: parsed.mainDart,
-        forwardArgs: parsed.forwardArgs,
-        cwdPath: cwdPath,
-      ),
-    );
+    final ({String? rewrittenPkgPath, String? rootDirPath}) compiled =
+        _compileDart2Js(
+          _WebCompileRequest(
+            dartaotruntime: dartaotruntime,
+            sdkBin: sdkBin,
+            tmpPath: tmpDir.path,
+            tmpAbsPath: tmpAbsPath,
+            multiRoot: parsed.multiRoot,
+            packagesPath: parsed.packagesPath,
+            mainDart: parsed.mainDart,
+            forwardArgs: parsed.forwardArgs,
+            cwdPath: cwdPath,
+          ),
+        );
     rootDirPath = compiled.rootDirPath;
     rewrittenPkgPath = compiled.rewrittenPkgPath;
   } finally {
-    if (tmpDir.existsSync()) {
-      tmpDir.deleteSync(recursive: true);
-    }
+    if (tmpDir.existsSync()) tmpDir.deleteSync(recursive: true);
   }
 
   _scrubDart2JsResults(
@@ -1133,7 +1120,7 @@ _parseDart2JsArgs(List<String> args) {
   String? mainDart;
   final forwardArgs = <String>[];
   for (var i = 0; i < args.length; i++) {
-    final arg = args[i];
+    final String arg = args[i];
     if (arg == '-o' && i + 1 < args.length) {
       outJs = args[++i];
       forwardArgs.addAll(['-o', outJs]);
@@ -1170,10 +1157,10 @@ _parseDart2JsArgs(List<String> args) {
   required bool cfeOnly,
   required String cwdPath,
 }) {
-  final baseTmpParent = (cfeOnly || outJs == null)
+  final String baseTmpParent = (cfeOnly || outJs == null)
       ? cwdPath
       : (File(outJs).parent..createSync(recursive: true)).path;
-  final cfeScratchParent = cfeOnly && outJs != null
+  final String cfeScratchParent = cfeOnly && outJs != null
       ? (File(outJs).parent..createSync(recursive: true)).path
       : baseTmpParent;
   final tmpDir = Directory(
@@ -1197,7 +1184,7 @@ _parseDart2JsArgs(List<String> args) {
       req.packagesPath != null &&
       req.mainDart != null) {
     rootDirPath = Uri.parse(stageRootUri(req.multiRoot!)).toFilePath();
-    final normCwd = req.cwdPath!.replaceAll(r'\', '/');
+    final String normCwd = req.cwdPath!.replaceAll(r'\', '/');
     final cwdPrefix = normCwd.endsWith('/') ? normCwd : '$normCwd/';
     rewrittenPkgPath = '${req.tmpPath!}/package_config.json';
     _rewritePackageConfigForStage(
@@ -1206,7 +1193,7 @@ _parseDart2JsArgs(List<String> args) {
       cwdPrefix,
       rewrittenPkgPath,
     );
-    final relMain = _toAppSchemeRelPath(req.mainDart!);
+    final String relMain = _toAppSchemeRelPath(req.mainDart!);
     jsArgs = buildDart2JsSnapshotArgs(
       forwardArgs: req.forwardArgs,
       rewrittenPkgPath: rewrittenPkgPath,
@@ -1220,7 +1207,7 @@ _parseDart2JsArgs(List<String> args) {
     ];
   }
 
-  final res = Process.runSync(
+  final ProcessResult res = Process.runSync(
     req.dartaotruntime,
     [
       '${req.sdkBin}/snapshots/dart2js_aot.dart.snapshot',

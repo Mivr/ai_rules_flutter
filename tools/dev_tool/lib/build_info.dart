@@ -110,7 +110,7 @@ class BuildInfo {
   /// mechanism exists to prevent. So it fails by name instead.
   factory fromJson(Map<String, dynamic> json) {
     T need<T>(String key) {
-      final value = json[key];
+      final dynamic value = json[key];
       if (value is! T) {
         throw DevToolException(
           'the app reported a $buildInfoExtension record with no usable '
@@ -191,7 +191,7 @@ Future<BuildInfo?> readBuildInfo(VmServiceClient client) async {
     // generic to the code — "Invalid params" for every refusal the agent makes
     // — so it is never the answer, and an error without `details` has no
     // answer in it at all.
-    final said = e.details;
+    final String? said = e.details;
     if (said == null) rethrow;
     throw DevToolException(said);
   }

@@ -1,6 +1,8 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
@@ -21,29 +23,29 @@ void main() {
     test(
       '--dart-define renders and survives hot reload',
       () async {
-        final ws = await editableWorkspace('macos_example');
-        final appMain = ws.file('lib/main.dart');
-        final appMainOrig = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('macos_example');
+        final File appMain = ws.file('lib/main.dart');
+        final String appMainOrig = appMain.readAsStringSync();
         expect(
           appMainOrig,
           contains(" v1'"),
           reason: 'fixture marker present in macos_example main.dart',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app',
           device: 'macos',
           extraArgs: ['--dart-define', 'E2E_MESSAGE=defines,live'],
         );
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(seconds: 240),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 60));
 
-        final ready = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'key': 'e2e_define_label',
           'timeoutMs': '15000',
@@ -55,7 +57,7 @@ void main() {
         );
 
         // Initial build: define flows bazel flag → kernel -D → runtime.
-        var label = await dt.httpCommand('app.getText', {
+        Map<String, dynamic> label = await dt.httpCommand('app.getText', {
           'appId': appId,
           'key': 'e2e_define_label',
         });
@@ -74,7 +76,7 @@ void main() {
         // the define. 'v2' proves the reload actually applied; the prefix
         // proves the frontend_server compiled with -DE2E_MESSAGE=defines,live.
         appMain.writeAsStringSync(appMainOrig.replaceFirst(" v1'", " v2'"));
-        final reload = await dt.sendCommand(
+        final Map<String, dynamic> reload = await dt.sendCommand(
           1,
           'app.hotReload',
           params: {'appId': appId},

@@ -18,6 +18,8 @@ import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 import 'package:path/path.dart' as p;
 
+typedef _Ext = ({String appPath, Directory dir});
+
 /// iOS Simulator device (via xcrun simctl).
 class IOSSimulatorDevice extends Device {
   /// The simulator every `simctl` command of this device addresses.
@@ -51,7 +53,7 @@ class IOSSimulatorDevice extends Device {
     ProcessRunSync? runProcess,
     ProcessStarter? startProcess,
   }) {
-    final run = runProcess ?? Process.run;
+    final ProcessRunSync run = runProcess ?? Process.run;
     return _IOSSimulatorDeviceBooted(
       runProcess: run,
       startProcess: startProcess ?? Process.start,
@@ -97,12 +99,12 @@ class IOSSimulatorDevice extends Device {
     // before it returned: terminate what it started first.
     if (_inFlightOwnsApp) {
       _inFlightOwnsApp = false;
-      final bundleId = _launchedBundleId ?? _bundleId;
+      final String? bundleId = _launchedBundleId ?? _bundleId;
       if (bundleId != null) {
         await _runProcess('xcrun', ['simctl', 'terminate', udid, bundleId]);
       }
     }
-    final helpers = [..._launchHelpers];
+    final List<Process> helpers = [..._launchHelpers];
     _launchHelpers.clear();
     await Future.wait(
       helpers.map((h) => stopProcess('iOS Simulator log', h, teardownBound)),
@@ -111,7 +113,7 @@ class IOSSimulatorDevice extends Device {
   }
 
   Future<Process> _startHelper(String executable, List<String> args) async {
-    final process = await _startProcess(executable, args);
+    final Process process = await _startProcess(executable, args);
     _launchHelpers.add(process);
     return process;
   }
@@ -122,7 +124,7 @@ class IOSSimulatorDevice extends Device {
   /// [watchHostPid]: injected there rather than read inline so tests can
   /// stand in for it.
   Future<bool> _isSimPidAlive(int pid) async {
-    final result = await _runProcess('ps', ['-p', '$pid']);
+    final ProcessResult result = await _runProcess('ps', ['-p', '$pid']);
     return result.exitCode == 0;
   }
 
@@ -132,7 +134,7 @@ class IOSSimulatorDevice extends Device {
   /// and the source holds announcements parsed before `simctl launch`
   /// answers until the launch reports its pid — see [SimDiscoverySource].
   Future<SimDiscoverySource> _startDiscoverySource() async {
-    final discoveryLog = await _startHelper('xcrun', [
+    final Process discoveryLog = await _startHelper('xcrun', [
       'simctl',
       'spawn',
       udid,
@@ -158,7 +160,7 @@ class IOSSimulatorDevice extends Device {
     String launchStdout, {
     required DateTime launchStarted,
   }) async {
-    final simPid = parseSimctlLaunchPid(launchStdout);
+    final int? simPid = parseSimctlLaunchPid(launchStdout);
     source.pid.complete(simPid);
     if (!buildMode.servesVmService) {
       await source.dispose();
@@ -202,9 +204,9 @@ class IOSSimulatorDevice extends Device {
     required String launchStdout,
     required DateTime launchStarted,
   }) async {
-    final config = discoveryConfig();
+    final VmDiscoveryConfig config = discoveryConfig();
     final stopWatch = Completer<void>();
-    final fallback = simPid == null
+    final SimLogFallback? fallback = simPid == null
         ? null
         : SimLogFallback(
             query: (udid: udid, pid: simPid, since: launchStarted),
@@ -224,7 +226,10 @@ class IOSSimulatorDevice extends Device {
         'launch_stdout': launchStdout,
       });
     }
-    final feeding = fallback?.feedAnnouncements(logs, stop: stopWatch.future);
+    final Future<void>? feeding = fallback?.feedAnnouncements(
+      logs,
+      stop: stopWatch.future,
+    );
     // The helper is this stream's live source, so a helper that dies takes
     // the stream with it; the fallback ends with the wait either way, so it
     // joins the close set rather than holding the stream open past discovery.
@@ -259,7 +264,7 @@ class IOSSimulatorDevice extends Device {
     // Extract .app from .ipa if needed — simctl install requires .app.
     String installPath = appPath;
     if (appPath.endsWith('.ipa')) {
-      final extracted = await extractAppFromIpa(appPath, _runProcess);
+      final _Ext extracted = await extractAppFromIpa(appPath, _runProcess);
       installPath = extracted.appPath;
       _scratch.hold(extracted.dir);
     }
@@ -268,7 +273,7 @@ class IOSSimulatorDevice extends Device {
     await _runProcess('xcrun', ['simctl', 'boot', udid]);
 
     // Install.
-    final installResult = await _runProcess('xcrun', [
+    final ProcessResult installResult = await _runProcess('xcrun', [
       'simctl',
       'install',
       udid,
@@ -292,10 +297,10 @@ class IOSSimulatorDevice extends Device {
     // all depend on — contingent on those exclusion clauses continuing to
     // spare the announcement. Two narrow streams fail independently and
     // visibly; one broad stream fails silently.
-    final discoverySource = await _startDiscoverySource();
+    final SimDiscoverySource discoverySource = await _startDiscoverySource();
 
-    final appName = p.basename(installPath).replaceAll('.app', '');
-    final outputLog = await _startHelper('xcrun', [
+    final String appName = p.basename(installPath).replaceAll('.app', '');
+    final Process outputLog = await _startHelper('xcrun', [
       'simctl',
       'spawn',
       udid,
@@ -309,7 +314,7 @@ class IOSSimulatorDevice extends Device {
 
     // Unified logging carries no stdout/stderr split, so nothing is flagged as
     // an error channel here.
-    final logs = startProcessLogs(
+    final AppLogStream logs = startProcessLogs(
       outputLog,
       onLog,
       stderrIsError: false,
@@ -317,7 +322,7 @@ class IOSSimulatorDevice extends Device {
     );
 
     // Launch app.
-    final bundleId = _launchedBundleId =
+    final String bundleId = _launchedBundleId =
         _bundleId ?? await extractBundleId(installPath, _runProcess);
     // Refuse before `simctl launch` puts an app on the simulator that nobody
     // will stop, rather than starting one only to terminate it below.
@@ -325,7 +330,7 @@ class IOSSimulatorDevice extends Device {
     // The persisted-log fallback hunts only entries logged at or after this
     // instant, so it is captured before the launch it bounds.
     final launchStarted = DateTime.now();
-    final launchResult = await _runProcess('xcrun', [
+    final ProcessResult launchResult = await _runProcess('xcrun', [
       'simctl', 'launch', udid, bundleId,
       // Anything after the bundle id is passed to the app as argv, which is
       // where the iOS embedder looks for engine switches.
@@ -339,7 +344,7 @@ class IOSSimulatorDevice extends Device {
     // Discover VM service URI from the dedicated discovery stream, with the
     // persisted log as fallback. A release build serves none, so there is
     // nothing to wait for — and no pid watch to start.
-    final discovery = await _waitForSimDiscovery(
+    final VmServiceDiscovery discovery = await _waitForSimDiscovery(
       discoverySource,
       launchResult.stdout as String,
       launchStarted: launchStarted,
@@ -365,7 +370,7 @@ class IOSSimulatorDevice extends Device {
     // Read into a local rather than null-asserting the field: whether the
     // field promotes across the check depends on the language version the
     // analyzer is given, and a local is what every version accepts.
-    final bundleId = _launchedBundleId ?? _bundleId;
+    final String? bundleId = _launchedBundleId ?? _bundleId;
     if (bundleId != null) {
       await _runProcess('xcrun', ['simctl', 'terminate', udid, bundleId]);
     }
@@ -385,10 +390,8 @@ class IOSSimulatorDevice extends Device {
     VmServiceClient? vmClient,
     String? window,
   }) async {
-    if (vmClient != null) {
-      await vmClient.waitForFirstFrame();
-    }
-    final result = await _runProcess('xcrun', [
+    if (vmClient != null) await vmClient.waitForFirstFrame();
+    final ProcessResult result = await _runProcess('xcrun', [
       'simctl',
       'io',
       udid,
@@ -421,7 +424,7 @@ class _IOSSimulatorDeviceBooted extends IOSSimulatorDevice {
 
   Future<String> _resolveBootedUdid() async {
     if (_resolvedUdid != null) return _resolvedUdid!;
-    final result = await _runProcess('xcrun', [
+    final ProcessResult result = await _runProcess('xcrun', [
       'simctl',
       'list',
       'devices',
@@ -430,7 +433,8 @@ class _IOSSimulatorDeviceBooted extends IOSSimulatorDevice {
     ]);
     if (result.exitCode == 0) {
       final output = result.stdout as String;
-      final match = RegExp(r'"udid"\s*:\s*"([^"]+)"').firstMatch(output);
+      final RegExpMatch? match = RegExp(r'"udid"\s*:\s*"([^"]+)"')
+          .firstMatch(output);
       if (match != null) {
         _resolvedUdid = match.group(1)!;
         return _resolvedUdid!;
@@ -502,10 +506,10 @@ final _unifiedLoggingEventMessage = RegExp(r'.*"eventMessage" : (".*")');
 /// meant to be shown. Mirrors flutter_tools'
 /// `_IOSSimulatorLogReader._onUnifiedLoggingLine`.
 String? parseUnifiedLoggingLine(String line) {
-  final match = _unifiedLoggingEventMessage.firstMatch(line);
+  final RegExpMatch? match = _unifiedLoggingEventMessage.firstMatch(line);
   if (match == null) return null;
   try {
-    final decoded = json.decode(match.group(1)!);
+    final dynamic decoded = json.decode(match.group(1)!);
     return decoded is String ? decoded : null;
   } on FormatException {
     return null;

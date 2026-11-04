@@ -20,6 +20,11 @@ import 'xtool_framework.dart'
         resolveFrameworkDirectories;
 import 'zip_writer.dart' show createDeterministicZipFromDirectory, getUint64LE;
 
+typedef _Type = FileSystemEntityType;
+
+typedef _Scan = ({Set<String> existingRpaths, int minPayloadOffset})?;
+typedef _Staged = ({Directory dir, String fileName, String name});
+
 /// Configuration for assembling an iOS or macOS application bundle and archive.
 class BundleConfig {
   final String platform; // 'ios', 'ios_sim', or 'macos'
@@ -93,15 +98,13 @@ Directory _allocateDeterministicStageSubdir(Directory base, String prefix) {
 ) {
   if (config.tempDirPath != null && config.tempDirPath!.isNotEmpty) {
     final base = Directory(config.tempDirPath!);
-    final existed = base.existsSync();
-    if (!existed) {
-      base.createSync(recursive: true);
-    }
-    final stage = _allocateDeterministicStageSubdir(base, 'stage');
+    final bool existed = base.existsSync();
+    if (!existed) base.createSync(recursive: true);
+    final Directory stage = _allocateDeterministicStageSubdir(base, 'stage');
     return (stage, existed ? null : base);
   }
 
-  final outputParentCandidates = [
+  final List<String> outputParentCandidates = [
     if (config.outputAppDirPath != null && config.outputAppDirPath!.isNotEmpty)
       Directory(config.outputAppDirPath!).parent.path,
     if (config.outputArchivePath != null &&
@@ -112,10 +115,8 @@ Directory _allocateDeterministicStageSubdir(Directory base, String prefix) {
   for (final candidate in outputParentCandidates) {
     if (candidate.isNotEmpty) {
       final base = Directory(candidate);
-      if (!base.existsSync()) {
-        base.createSync(recursive: true);
-      }
-      final stage = _allocateDeterministicStageSubdir(
+      if (!base.existsSync()) base.createSync(recursive: true);
+      final Directory stage = _allocateDeterministicStageSubdir(
         base,
         '.xtool_pack_stage',
       );
@@ -124,11 +125,12 @@ Directory _allocateDeterministicStageSubdir(Directory base, String prefix) {
   }
 
   final fallbackBase = Directory('.xtool_pack_tmp');
-  final existed = fallbackBase.existsSync();
-  if (!existed) {
-    fallbackBase.createSync(recursive: true);
-  }
-  final stage = _allocateDeterministicStageSubdir(fallbackBase, 'stage');
+  final bool existed = fallbackBase.existsSync();
+  if (!existed) fallbackBase.createSync(recursive: true);
+  final Directory stage = _allocateDeterministicStageSubdir(
+    fallbackBase,
+    'stage',
+  );
   return (stage, existed ? null : fallbackBase);
 }
 
@@ -139,15 +141,13 @@ void _collectRpathString(
   int cmdsize,
   Set<String> out,
 ) {
-  final strOff = bd.getUint32(pos + 8, Endian.little);
+  final int strOff = bd.getUint32(pos + 8, Endian.little);
   if (strOff >= cmdsize) return;
-  var end = pos + strOff;
+  int end = pos + strOff;
   while (end < pos + cmdsize && bytes[end] != 0) {
     end++;
   }
-  out.add(
-    utf8.decode(bytes.sublist(pos + strOff, end), allowMalformed: true),
-  );
+  out.add(utf8.decode(bytes.sublist(pos + strOff, end), allowMalformed: true));
 }
 
 int _sectionPayloadFloor(
@@ -157,11 +157,11 @@ int _sectionPayloadFloor(
   int nsects,
   int floor,
 ) {
-  var sectPos = pos + 72;
+  int sectPos = pos + 72;
   for (var s = 0; s < nsects; s++) {
     if (sectPos + 80 > pos + cmdsize) break;
-    final sectSize = getUint64LE(bd, sectPos + 40);
-    final sectOffset = bd.getUint32(sectPos + 48, Endian.little);
+    final int sectSize = getUint64LE(bd, sectPos + 40);
+    final int sectOffset = bd.getUint32(sectPos + 48, Endian.little);
     if (sectSize > 0 && sectOffset > 0 && sectOffset < floor) {
       floor = sectOffset;
     }
@@ -177,15 +177,15 @@ int _segmentPayloadFloor(
   int cmdsize,
   int floor,
 ) {
-  final segBytes = bytes.sublist(pos + 8, pos + 24);
-  final nul = segBytes.indexOf(0);
-  final segName = ascii.decode(
+  final Uint8List segBytes = bytes.sublist(pos + 8, pos + 24);
+  final int nul = segBytes.indexOf(0);
+  final String segName = ascii.decode(
     nul >= 0 ? segBytes.sublist(0, nul) : segBytes,
     allowInvalid: true,
   );
-  final fileoff = getUint64LE(bd, pos + 40);
-  final filesize = getUint64LE(bd, pos + 48);
-  final nsects = bd.getUint32(pos + 64, Endian.little);
+  final int fileoff = getUint64LE(bd, pos + 40);
+  final int filesize = getUint64LE(bd, pos + 48);
+  final int nsects = bd.getUint32(pos + 64, Endian.little);
   if (segName != '__TEXT' &&
       segName != '__PAGEZERO' &&
       filesize > 0 &&
@@ -198,19 +198,19 @@ int _segmentPayloadFloor(
 
 /// Scans Mach-O load commands for existing `LC_RPATH` entries and the lowest
 /// payload file offset, returning null when the binary must be left alone.
-({Set<String> existingRpaths, int minPayloadOffset})? _scanMachOLoadCommands(
+_Scan _scanMachOLoadCommands(
   Uint8List bytes,
   ByteData bd,
   int ncmds,
   int sizeofcmds,
 ) {
   final existingRpaths = <String>{};
-  var minPayloadOffset = bytes.length;
+  int minPayloadOffset = bytes.length;
   var pos = 32;
   for (var i = 0; i < ncmds; i++) {
     if (pos + 8 > 32 + sizeofcmds) return null;
-    final cmd = bd.getUint32(pos, Endian.little);
-    final cmdsize = bd.getUint32(pos + 4, Endian.little);
+    final int cmd = bd.getUint32(pos, Endian.little);
+    final int cmdsize = bd.getUint32(pos + 4, Endian.little);
     if (cmdsize < 8 || pos + cmdsize > 32 + sizeofcmds) return null;
     if (cmd == 0x8000001c && cmdsize >= 12) {
       _collectRpathString(bytes, bd, pos, cmdsize, existingRpaths);
@@ -230,10 +230,10 @@ int _segmentPayloadFloor(
 
 /// Encodes an `LC_RPATH` load command for [rpath]; shared with the stub runner generator.
 Uint8List encodeMachORpathCommand(String rpath) {
-  final pathBytes = utf8.encode(rpath);
+  final Uint8List pathBytes = utf8.encode(rpath);
   const headerSize = 12;
-  final unpadded = headerSize + pathBytes.length + 1;
-  final cmdSize = (unpadded + 7) & ~7;
+  final int unpadded = headerSize + pathBytes.length + 1;
+  final int cmdSize = (unpadded + 7) & ~7;
   final bytes = Uint8List(cmdSize);
   final bd = ByteData.sublistView(bytes);
   bd.setUint32(0, 0x8000001c, Endian.little); // LC_RPATH
@@ -251,17 +251,17 @@ void _appendMissingRpaths(
   int minPayloadOffset,
   List<Uint8List> missingRpaths,
 ) {
-  final addedSize = missingRpaths.fold<int>(0, (s, c) => s + c.length);
-  final newLoadCmdEnd = 32 + sizeofcmds + addedSize;
+  final int addedSize = missingRpaths.fold<int>(0, (s, c) => s + c.length);
+  final int newLoadCmdEnd = 32 + sizeofcmds + addedSize;
   if (newLoadCmdEnd > minPayloadOffset) return;
-  for (var i = 32 + sizeofcmds; i < newLoadCmdEnd; i++) {
+  for (int i = 32 + sizeofcmds; i < newLoadCmdEnd; i++) {
     if (bytes[i] != 0) return;
   }
   final out = Uint8List.fromList(bytes);
   final outBd = ByteData.sublistView(out);
   outBd.setUint32(16, ncmds + missingRpaths.length, Endian.little);
   outBd.setUint32(20, sizeofcmds + addedSize, Endian.little);
-  var writeOff = 32 + sizeofcmds;
+  int writeOff = 32 + sizeofcmds;
   for (final cmdBytes in missingRpaths) {
     out.setRange(writeOff, writeOff + cmdBytes.length, cmdBytes);
     writeOff += cmdBytes.length;
@@ -270,21 +270,21 @@ void _appendMissingRpaths(
 }
 
 void _ensureExecutableRpaths(File execFile, {required bool isMacOS}) {
-  final bytes = execFile.readAsBytesSync();
+  final Uint8List bytes = execFile.readAsBytesSync();
   if (bytes.length < 32) return;
   final bd = ByteData.sublistView(bytes);
   if (bd.getUint32(0, Endian.little) != 0xfeedfacf) return;
-  final ncmds = bd.getUint32(16, Endian.little);
-  final sizeofcmds = bd.getUint32(20, Endian.little);
+  final int ncmds = bd.getUint32(16, Endian.little);
+  final int sizeofcmds = bd.getUint32(20, Endian.little);
   if (32 + sizeofcmds > bytes.length) return;
 
-  final scan = _scanMachOLoadCommands(bytes, bd, ncmds, sizeofcmds);
+  final _Scan scan = _scanMachOLoadCommands(bytes, bd, ncmds, sizeofcmds);
   if (scan == null) return;
   final requiredRpaths = <String>[
     '@executable_path/Frameworks',
     if (isMacOS) '@executable_path/../Frameworks',
   ];
-  final missingRpaths = [
+  final List<Uint8List> missingRpaths = [
     for (final rp in requiredRpaths)
       if (!scan.existingRpaths.contains(rp)) encodeMachORpathCommand(rp),
   ];
@@ -330,14 +330,14 @@ Map<String, String> _readBundleVersionDefines(BundleConfig config) {
       'Version file does not exist: ${config.versionFilePath}',
     );
   }
-  final decoded = jsonDecode(versionFile.readAsStringSync());
+  final dynamic decoded = jsonDecode(versionFile.readAsStringSync());
   if (decoded is! Map) {
     throw FormatException(
       'Version file ${config.versionFilePath} must contain a JSON object.',
     );
   }
-  final buildVer = decoded['build_version'];
-  final shortVer = decoded['short_version_string'];
+  final dynamic buildVer = decoded['build_version'];
+  final dynamic shortVer = decoded['short_version_string'];
   if (buildVer is String && buildVer.isNotEmpty) {
     effectiveDefines.putIfAbsent('FLUTTER_BUILD_NUMBER', () => buildVer);
   }
@@ -349,8 +349,8 @@ Map<String, String> _readBundleVersionDefines(BundleConfig config) {
 
 void _stripCodeSignatures(Directory dir) {
   if (!dir.existsSync()) return;
-  for (final entity in dir.listSync(followLinks: false)) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+  for (final FileSystemEntity entity in dir.listSync(followLinks: false)) {
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     if (name == '_CodeSignature') {
       entity.deleteSync(recursive: true);
     } else if (entity is Directory) {
@@ -360,7 +360,7 @@ void _stripCodeSignatures(Directory dir) {
 }
 
 void _replaceWithSymlinkSync(String linkPath, String target) {
-  final type = FileSystemEntity.typeSync(linkPath, followLinks: false);
+  final _Type type = FileSystemEntity.typeSync(linkPath, followLinks: false);
   if (type == FileSystemEntityType.directory) {
     Directory(linkPath).deleteSync(recursive: true);
   } else if (type == FileSystemEntityType.link) {
@@ -487,10 +487,10 @@ class _BundleAssembly {
 
   void _writeBundleMetadata() {
     // 2. Merge and write Info.plist + PkgInfo.
-    final plistXmls = [
+    final List<String> plistXmls = [
       for (final p in config.infoPlistPaths) File(p).readAsStringSync(),
     ];
-    final mergedPlist = buildInfoPlist(
+    final String mergedPlist = buildInfoPlist(
       InfoPlistRequest(
         plistXmls: plistXmls,
         platform: config.platform,
@@ -507,12 +507,12 @@ class _BundleAssembly {
 
   void _copyBundleResources() {
     // 3. Copy resources.
-    for (final spec in config.resourceSpecs) {
+    for (final String spec in config.resourceSpecs) {
       copyResourceSpec(spec, resourcesDir);
     }
 
     // 3b. Copy additional_contents into their target bundle subdirectories.
-    for (final spec in config.additionalContentSpecs) {
+    for (final String spec in config.additionalContentSpecs) {
       copyAdditionalContentSpec(
         spec,
         contentsDir,
@@ -537,7 +537,7 @@ class _BundleAssembly {
 
   void _embedFrameworks() {
     // 5. Resolve and embed frameworks and native dynamic libraries.
-    for (final fwInput in config.frameworkPaths) {
+    for (final String fwInput in config.frameworkPaths) {
       final List<Directory> fwDirs;
       if (fwInput.endsWith('.framework.zip')) {
         // App.framework travels between actions as its deterministic archive
@@ -553,12 +553,12 @@ class _BundleAssembly {
     }
   }
 
-  ({Directory dir, String fileName, String name}) _stageFrameworkDir(
-    Directory fwDir,
-  ) {
+  _Staged _stageFrameworkDir(Directory fwDir) {
     frameworksDir.createSync(recursive: true);
-    final fwFileName = fwDir.uri.pathSegments.where((s) => s.isNotEmpty).last;
-    final fwName = fwFileName.substring(
+    final String fwFileName = fwDir.uri.pathSegments
+        .where((s) => s.isNotEmpty)
+        .last;
+    final String fwName = fwFileName.substring(
       0,
       fwFileName.length - '.framework'.length,
     );
@@ -568,10 +568,8 @@ class _BundleAssembly {
   }
 
   void _embedFrameworkDir(Directory fwDir) {
-    final staged = _stageFrameworkDir(fwDir);
-    if (isMacOS) {
-      _normalizeMacosVersionedFramework(staged.dir, staged.name);
-    }
+    final _Staged staged = _stageFrameworkDir(fwDir);
+    if (isMacOS) _normalizeMacosVersionedFramework(staged.dir, staged.name);
 
     // Mark framework binary executable in ZIP metadata.
     final fwRelPrefix = '$contentsRelPrefix/Frameworks/${staged.fileName}';
@@ -598,16 +596,14 @@ class _BundleAssembly {
   ) {
     final topBinary = File('${destFwDir.path}/$fwName');
     final versionedBinary = File('${destFwDir.path}/Versions/A/$fwName');
-    if (topBinary.existsSync()) {
-      executablePaths.add('$fwRelPrefix/$fwName');
-    }
+    if (topBinary.existsSync()) executablePaths.add('$fwRelPrefix/$fwName');
     if (versionedBinary.existsSync()) {
       executablePaths.add('$fwRelPrefix/Versions/A/$fwName');
     }
   }
 
   void _embedNativeLibs() {
-    for (final dylibPath in config.nativeLibPaths) {
+    for (final String dylibPath in config.nativeLibPaths) {
       if (FileSystemEntity.isDirectorySync(dylibPath)) {
         _embedNativeLibDir(dylibPath);
       } else if (FileSystemEntity.isFileSync(dylibPath)) {
@@ -619,8 +615,9 @@ class _BundleAssembly {
   }
 
   void _embedNativeLibDir(String dylibPath) {
-    final children = Directory(dylibPath).listSync(followLinks: true)
-      ..sort((a, b) => a.path.compareTo(b.path));
+    final List<FileSystemEntity> children = Directory(
+      dylibPath,
+    ).listSync(followLinks: true)..sort((a, b) => a.path.compareTo(b.path));
     for (final entity in children) {
       if (entity is File) {
         _embedNativeLibFile(entity);
@@ -632,13 +629,15 @@ class _BundleAssembly {
 
   void _embedNativeLibFile(File dylibFile) {
     frameworksDir.createSync(recursive: true);
-    final baseName = dylibFile.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final String baseName = dylibFile.uri.pathSegments
+        .where((s) => s.isNotEmpty)
+        .last;
     dylibFile.copySync('${frameworksDir.path}/$baseName');
     executablePaths.add('$contentsRelPrefix/Frameworks/$baseName');
   }
 
   void _embedNativeChildFramework(Directory entity) {
-    final staged = _stageFrameworkDir(entity);
+    final _Staged staged = _stageFrameworkDir(entity);
     final fwRelPrefix = '$contentsRelPrefix/Frameworks/${staged.fileName}';
     _markFrameworkExecutables(staged.dir, staged.name, fwRelPrefix);
   }
@@ -675,7 +674,7 @@ class _BundleAssembly {
         config.certificatePasswordEnv!.isEmpty) {
       return null;
     }
-    final pwEnvKey = config.certificatePasswordEnv!;
+    final String pwEnvKey = config.certificatePasswordEnv!;
     final String? envVal;
     if (pwEnvKey == 'TMPDIR' || pwEnvKey == 'TEST_TMPDIR') {
       envVal = config.environment != null
@@ -720,7 +719,7 @@ class _BundleAssembly {
     }
     zsignArgs.add(appDir.path);
     redactedArgs.add(appDir.path);
-    final result = Process.runSync(
+    final ProcessResult result = Process.runSync(
       config.zsignPath!,
       zsignArgs,
       environment: const {'PATH': '/usr/bin:/bin'},
@@ -741,9 +740,7 @@ class _BundleAssembly {
     if (config.outputAppDirPath != null &&
         config.outputAppDirPath!.isNotEmpty) {
       final outAppDir = Directory(config.outputAppDirPath!);
-      if (outAppDir.existsSync()) {
-        outAppDir.deleteSync(recursive: true);
-      }
+      if (outAppDir.existsSync()) outAppDir.deleteSync(recursive: true);
       copyDirectorySync(appDir, outAppDir, dereferenceSymlinks: false);
     }
   }
@@ -752,7 +749,7 @@ class _BundleAssembly {
     // 9. Emit --output-archive (.ipa or .app.zip) if requested.
     if (config.outputArchivePath != null &&
         config.outputArchivePath!.isNotEmpty) {
-      final zipBytes = createDeterministicZipFromDirectory(
+      final Uint8List zipBytes = createDeterministicZipFromDirectory(
         tempDir,
         executablePaths: executablePaths,
       );
@@ -768,14 +765,15 @@ class _BundleAssembly {
 void assembleBundle(BundleConfig config) {
   _checkBundlePlatform(config);
   _requireBundleExecutable(config);
-  final effectiveDefines = _readBundleVersionDefines(config);
-  final (tempDir, createdBaseDir) = _createStagingDirectory(config);
+  final Map<String, String> effectiveDefines = _readBundleVersionDefines(
+    config,
+  );
+  final (Directory tempDir, Directory? createdBaseDir) =
+      _createStagingDirectory(config);
   try {
     _BundleAssembly(config, tempDir, effectiveDefines).run();
   } finally {
-    if (tempDir.existsSync()) {
-      tempDir.deleteSync(recursive: true);
-    }
+    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
     if (createdBaseDir != null && createdBaseDir.existsSync()) {
       createdBaseDir.deleteSync(recursive: true);
     }

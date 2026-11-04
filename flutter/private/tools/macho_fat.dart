@@ -19,7 +19,7 @@ bool isMachO64(Uint8List bytes) {
 bool isMachO32(Uint8List bytes) {
   if (bytes.length < 4) return false;
   final bd = ByteData.sublistView(bytes);
-  final magic = bd.getUint32(0, Endian.little);
+  final int magic = bd.getUint32(0, Endian.little);
   return magic == mhMagic32 || magic == mhCigam32;
 }
 
@@ -28,14 +28,14 @@ bool isMachO32(Uint8List bytes) {
 bool isFatMachO(Uint8List bytes) {
   if (bytes.length < 8) return false;
   final bd = ByteData.sublistView(bytes);
-  final magicBE = bd.getUint32(0, Endian.big);
+  final int magicBE = bd.getUint32(0, Endian.big);
   if (magicBE == fatMagic || magicBE == fatMagic64) {
-    final nfat = bd.getUint32(4, Endian.big);
+    final int nfat = bd.getUint32(4, Endian.big);
     return nfat >= 1 && nfat <= 32;
   }
-  final magicLE = bd.getUint32(0, Endian.little);
+  final int magicLE = bd.getUint32(0, Endian.little);
   if (magicLE == fatMagic || magicLE == fatMagic64) {
-    final nfat = bd.getUint32(4, Endian.little);
+    final int nfat = bd.getUint32(4, Endian.little);
     return nfat >= 1 && nfat <= 32;
   }
   return false;
@@ -62,8 +62,8 @@ List<FatSlice> extractFatSlices(Uint8List bytes) {
     throw const FormatException('Not a universal (fat) Mach-O binary.');
   }
   final bd = ByteData.sublistView(bytes);
-  final magicBE = bd.getUint32(0, Endian.big);
-  final magicLE = bd.getUint32(0, Endian.little);
+  final int magicBE = bd.getUint32(0, Endian.big);
+  final int magicLE = bd.getUint32(0, Endian.little);
   late final Endian headerEndian;
   late final bool is64;
   if (magicBE == fatMagic) {
@@ -82,28 +82,28 @@ List<FatSlice> extractFatSlices(Uint8List bytes) {
     throw const FormatException('Not a universal (fat) Mach-O binary.');
   }
 
-  final nfatArch = bd.getUint32(4, headerEndian);
+  final int nfatArch = bd.getUint32(4, headerEndian);
   if (nfatArch == 0 || nfatArch > 32) {
     throw FormatException('Invalid fat Mach-O nfat_arch count: $nfatArch.');
   }
   final archEntrySize = is64 ? 32 : 20;
-  final tableEnd = 8 + nfatArch * archEntrySize;
+  final int tableEnd = 8 + nfatArch * archEntrySize;
   if (tableEnd > bytes.length) {
     throw const FormatException('Truncated fat Mach-O architecture table.');
   }
 
   final slices = <FatSlice>[];
   for (var i = 0; i < nfatArch; i++) {
-    final entryOff = 8 + i * archEntrySize;
-    final cputype = bd.getUint32(entryOff, headerEndian);
-    final cpusubtype = bd.getUint32(entryOff + 4, headerEndian);
-    final sliceOffset = is64
+    final int entryOff = 8 + i * archEntrySize;
+    final int cputype = bd.getUint32(entryOff, headerEndian);
+    final int cpusubtype = bd.getUint32(entryOff + 4, headerEndian);
+    final int sliceOffset = is64
         ? bd.getUint64(entryOff + 8, headerEndian)
         : bd.getUint32(entryOff + 8, headerEndian);
-    final sliceSize = is64
+    final int sliceSize = is64
         ? bd.getUint64(entryOff + 16, headerEndian)
         : bd.getUint32(entryOff + 12, headerEndian);
-    final align = is64
+    final int align = is64
         ? bd.getUint32(entryOff + 24, headerEndian)
         : bd.getUint32(entryOff + 16, headerEndian);
     if (sliceOffset < tableEnd ||
@@ -138,12 +138,12 @@ Uint8List buildFatMachO(List<FatSlice> slices, {bool fat64 = false}) {
     );
   }
   final archEntrySize = fat64 ? 32 : 20;
-  final headerAndTableSize = 8 + slices.length * archEntrySize;
+  final int headerAndTableSize = 8 + slices.length * archEntrySize;
   final sliceOffsets = <int>[];
   var currentOffset = headerAndTableSize;
   for (final s in slices) {
-    final effAlign = s.align.clamp(0, 20);
-    final alignment = 1 << effAlign;
+    final int effAlign = s.align.clamp(0, 20);
+    final int alignment = 1 << effAlign;
     currentOffset = (currentOffset + alignment - 1) & ~(alignment - 1);
     sliceOffsets.add(currentOffset);
     currentOffset += s.bytes.length;
@@ -154,9 +154,9 @@ Uint8List buildFatMachO(List<FatSlice> slices, {bool fat64 = false}) {
   bd.setUint32(0, fat64 ? fatMagic64 : fatMagic, Endian.big);
   bd.setUint32(4, slices.length, Endian.big);
   for (var i = 0; i < slices.length; i++) {
-    final s = slices[i];
-    final entryOff = 8 + i * archEntrySize;
-    final off = sliceOffsets[i];
+    final FatSlice s = slices[i];
+    final int entryOff = 8 + i * archEntrySize;
+    final int off = sliceOffsets[i];
     bd.setUint32(entryOff, s.cputype, Endian.big);
     bd.setUint32(entryOff + 4, s.cpusubtype, Endian.big);
     if (fat64) {
@@ -189,8 +189,8 @@ int cpuTypeForArch(String arch) {
 /// Extracts the single 64-bit Mach-O slice matching [arch] (`arm64` or `x86_64`)
 /// from a universal (fat) Mach-O binary.
 Uint8List thinFatMachO(Uint8List bytes, String arch) {
-  final targetCpuType = cpuTypeForArch(arch);
-  final slices = extractFatSlices(bytes);
+  final int targetCpuType = cpuTypeForArch(arch);
+  final List<FatSlice> slices = extractFatSlices(bytes);
   for (final s in slices) {
     if (s.cputype == targetCpuType) {
       if (isMachO32(s.bytes) || (s.cputype & cpuArchAbi64) == 0) {
@@ -206,7 +206,7 @@ Uint8List thinFatMachO(Uint8List bytes, String arch) {
       return s.bytes;
     }
   }
-  final has32Bit = slices.any(
+  final bool has32Bit = slices.any(
     (s) => isMachO32(s.bytes) || (s.cputype & cpuArchAbi64) == 0,
   );
   if (has32Bit) {
@@ -240,13 +240,13 @@ int parsePlatform(String name) {
 
 /// Encodes `"major[.minor[.patch]]"` into `(major << 16) | (minor << 8) | patch`.
 int parsePackedVersion(String version) {
-  final parts = version.split('.');
+  final List<String> parts = version.split('.');
   if (parts.isEmpty || parts.length > 3) {
     throw FormatException('Invalid version string "$version"');
   }
-  final major = int.parse(parts[0]);
-  final minor = parts.length > 1 ? int.parse(parts[1]) : 0;
-  final patch = parts.length > 2 ? int.parse(parts[2]) : 0;
+  final int major = int.parse(parts[0]);
+  final int minor = parts.length > 1 ? int.parse(parts[1]) : 0;
+  final int patch = parts.length > 2 ? int.parse(parts[2]) : 0;
   if (major < 0 ||
       major > 0xffff ||
       minor < 0 ||

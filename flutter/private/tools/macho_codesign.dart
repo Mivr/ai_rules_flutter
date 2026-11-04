@@ -16,7 +16,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'macho_constants.dart';
-import 'macho_parse.dart' show LoadCommand, fileRangesOf, parseLoadCommands;
+import 'macho_parse.dart'
+    show CommandRange, LoadCommand, fileRangesOf, parseLoadCommands;
 import 'macho_ranges.dart' show notePayloadRange, rangeWithinFile;
 import 'macho_stub.dart' show sha256;
 
@@ -39,7 +40,7 @@ const _codeLimit64Field = 56;
 /// Files without an `LC_CODE_SIGNATURE` come back unchanged. Corrupt or
 /// unrebuildable signatures throw [FormatException].
 Uint8List resignEmbeddedSignature(Uint8List bytes) {
-  final plan = _ResignPlan.parse(bytes);
+  final _ResignPlan? plan = _ResignPlan.parse(bytes);
   if (plan == null) return bytes;
   return plan.apply();
 }
@@ -90,7 +91,7 @@ class _ResignPlan {
   /// Throws [FormatException] on a duplicated, truncated or non-signature
   /// `LC_CODE_SIGNATURE`, or on a real CMS blob the rebuild cannot re-create.
   static _ResignPlan? parse(Uint8List bytes) {
-    final commands = parseLoadCommands(bytes);
+    final List<LoadCommand> commands = parseLoadCommands(bytes);
     var codeSigIndex = -1;
     for (var i = 0; i < commands.length; i++) {
       if (commands[i].cmd != lcCodeSignature) continue;
@@ -103,13 +104,13 @@ class _ResignPlan {
       codeSigIndex = i;
     }
     if (codeSigIndex < 0) return null;
-    final codeSig = commands[codeSigIndex];
+    final LoadCommand codeSig = commands[codeSigIndex];
     if (codeSig.bytes.length < 16) {
       throw const FormatException('Truncated LC_CODE_SIGNATURE command.');
     }
     final lcBd = ByteData.sublistView(codeSig.bytes);
-    final dataoff = lcBd.getUint32(8, Endian.little);
-    final datasize = lcBd.getUint32(12, Endian.little);
+    final int dataoff = lcBd.getUint32(8, Endian.little);
+    final int datasize = lcBd.getUint32(12, Endian.little);
     _checkSignatureRange(bytes.length, dataoff, datasize);
     _checkSuperBlob(bytes, dataoff, datasize);
     return _ResignPlan(
@@ -133,12 +134,15 @@ class _ResignPlan {
       bytes.sublist(dataoff, dataoff + datasize),
     );
     final rebuilt = <_RebuiltBlob>[];
-    for (final entry in _parseBlobIndex(sigBytes)) {
+    for (final _BlobEntry entry in _parseBlobIndex(sigBytes)) {
       final blob = Uint8List.fromList(
         sigBytes.sublist(entry.offset, entry.offset + entry.length),
       );
       if (_isCodeDirectory(blob)) {
-        final fresh = _rebuildCodeDirectory(blob, dataoff);
+        final ({Uint8List bytes, int pageSize}) fresh = _rebuildCodeDirectory(
+          blob,
+          dataoff,
+        );
         rebuilt.add(
           _RebuiltBlob(
             type: entry.type,
@@ -152,7 +156,7 @@ class _ResignPlan {
         );
       }
     }
-    final out = _spliceSignature(
+    final Uint8List out = _spliceSignature(
       _assembleSuperBlob(
         [for (final blob in rebuilt) blob.bytes],
         [for (final blob in rebuilt) blob.type],
@@ -165,7 +169,7 @@ class _ResignPlan {
   /// Splices [fresh] over the old blob, shifts trailing payloads when the
   /// size changed, and patches the load commands in the returned bytes.
   Uint8List _spliceSignature(Uint8List fresh) {
-    final tail = bytes.length - dataoff - datasize;
+    final int tail = bytes.length - dataoff - datasize;
     final out = Uint8List(dataoff + fresh.length + tail);
     out.setRange(0, dataoff, bytes);
     out.setRange(dataoff, dataoff + fresh.length, fresh);
@@ -178,11 +182,11 @@ class _ResignPlan {
   /// `datasize`, the `__LINKEDIT` sizes, and every table range at or past
   /// [oldSigEnd] shifted down by [shrink] bytes.
   void _patchCommands(Uint8List out, int oldSigEnd, int shrink) {
-    final freshSize = datasize - shrink;
-    var commandOff = mhHeaderSize64;
+    final int freshSize = datasize - shrink;
+    int commandOff = mhHeaderSize64;
     for (var i = 0; i < commands.length; i++) {
-      final lc = commands[i];
-      final patched = i == codeSigIndex
+      final LoadCommand lc = commands[i];
+      final Uint8List patched = i == codeSigIndex
           ? _withDatasize(lc, freshSize)
           : i == linkeditIndex
           ? _resizedLinkedit(lc, out.length)
@@ -223,7 +227,7 @@ void _checkSuperBlob(Uint8List bytes, int dataoff, int datasize) {
       'LC_CODE_SIGNATURE does not point at an embedded signature blob.',
     );
   }
-  final superLength = bd.getUint32(4, Endian.big);
+  final int superLength = bd.getUint32(4, Endian.big);
   if (superLength > datasize) {
     throw const FormatException('Truncated embedded signature blob.');
   }
@@ -235,7 +239,7 @@ void _checkSuperBlob(Uint8List bytes, int dataoff, int datasize) {
       );
     }
   }
-  for (final entry in _parseBlobIndex(view)) {
+  for (final _BlobEntry entry in _parseBlobIndex(view)) {
     if (entry.type == csSlotSignature && entry.length > 8) {
       throw const FormatException(
         'Cannot rebuild the embedded code signature: it carries a CMS '
@@ -248,9 +252,12 @@ void _checkSuperBlob(Uint8List bytes, int dataoff, int datasize) {
 /// Returns the `__LINKEDIT` segment position in [commands], or -1.
 int _findLinkeditIndex(List<LoadCommand> commands) {
   for (var i = 0; i < commands.length; i++) {
-    final lc = commands[i];
+    final LoadCommand lc = commands[i];
     if (lc.cmd != lcSegment64 || lc.bytes.length < 72) continue;
-    final name = ascii.decode(lc.bytes.sublist(8, 24)).split('\x00').first;
+    final String name = ascii
+        .decode(lc.bytes.sublist(8, 24))
+        .split('\x00')
+        .first;
     if (name == '__LINKEDIT') return i;
   }
   return -1;
@@ -262,18 +269,18 @@ List<_BlobEntry> _parseBlobIndex(Uint8List sigBytes) {
   if (sigBytes.length < 12) {
     throw const FormatException('Truncated embedded signature blob.');
   }
-  final count = bd.getUint32(8, Endian.big);
+  final int count = bd.getUint32(8, Endian.big);
   if (12 + count * 8 > sigBytes.length) {
     throw const FormatException('Truncated embedded signature index.');
   }
   final entries = <_BlobEntry>[];
   for (var i = 0; i < count; i++) {
-    final type = bd.getUint32(12 + i * 8, Endian.big);
-    final offset = bd.getUint32(12 + i * 8 + 4, Endian.big);
+    final int type = bd.getUint32(12 + i * 8, Endian.big);
+    final int offset = bd.getUint32(12 + i * 8 + 4, Endian.big);
     if (offset + 8 > sigBytes.length) {
       throw const FormatException('Truncated embedded signature blob.');
     }
-    final length = ByteData.sublistView(
+    final int length = ByteData.sublistView(
       sigBytes,
       offset,
       offset + 8,
@@ -296,7 +303,7 @@ bool _isCodeDirectory(Uint8List blob) {
 /// Reassembles a `CS_SuperBlob` from [blobs] with index [types], laid out
 /// contiguously in index order with fresh blob offsets.
 Uint8List _assembleSuperBlob(List<Uint8List> blobs, List<int> types) {
-  var size = 12 + blobs.length * 8;
+  int size = 12 + blobs.length * 8;
   for (final blob in blobs) {
     size += blob.length;
   }
@@ -305,7 +312,7 @@ Uint8List _assembleSuperBlob(List<Uint8List> blobs, List<int> types) {
   bd.setUint32(0, csMagicEmbeddedSignature, Endian.big);
   bd.setUint32(4, size, Endian.big);
   bd.setUint32(8, blobs.length, Endian.big);
-  var cursor = 12 + blobs.length * 8;
+  int cursor = 12 + blobs.length * 8;
   for (var i = 0; i < blobs.length; i++) {
     bd.setUint32(12 + i * 8, types[i], Endian.big);
     bd.setUint32(12 + i * 8 + 4, cursor, Endian.big);
@@ -336,24 +343,26 @@ class _RebuiltBlob {
 /// The hash writes land at or past `codeLimit` while every hashed page lies
 /// below it, so hashing [out] in place is sound.
 void _fillCodeHashes(Uint8List out, List<_RebuiltBlob> rebuilt) {
-  final commands = parseLoadCommands(out);
-  final codeSig = commands.singleWhere((c) => c.cmd == lcCodeSignature);
+  final List<LoadCommand> commands = parseLoadCommands(out);
+  final LoadCommand codeSig = commands.singleWhere(
+    (c) => c.cmd == lcCodeSignature,
+  );
   final sigBd = ByteData.sublistView(codeSig.bytes);
-  final dataoff = sigBd.getUint32(8, Endian.little);
-  final datasize = sigBd.getUint32(12, Endian.little);
+  final int dataoff = sigBd.getUint32(8, Endian.little);
+  final int datasize = sigBd.getUint32(12, Endian.little);
   final sigBytes = Uint8List.sublistView(out, dataoff, dataoff + datasize);
-  final entries = _parseBlobIndex(sigBytes);
+  final List<_BlobEntry> entries = _parseBlobIndex(sigBytes);
   if (entries.length != rebuilt.length) {
     throw const FormatException('Truncated embedded signature blob.');
   }
   for (var i = 0; i < entries.length; i++) {
-    final pageSize = rebuilt[i].pageSize;
+    final int? pageSize = rebuilt[i].pageSize;
     if (pageSize == null) continue;
-    final cdOff = dataoff + entries[i].offset;
+    final int cdOff = dataoff + entries[i].offset;
     final cdBd = ByteData.sublistView(out, cdOff, cdOff + 44);
-    final hashOffset = cdBd.getUint32(16, Endian.big);
-    final slots = cdBd.getUint32(28, Endian.big);
-    final freshHashes = _hashPages(out, dataoff, pageSize, slots);
+    final int hashOffset = cdBd.getUint32(16, Endian.big);
+    final int slots = cdBd.getUint32(28, Endian.big);
+    final Uint8List freshHashes = _hashPages(out, dataoff, pageSize, slots);
     out.setRange(
       cdOff + hashOffset,
       cdOff + hashOffset + freshHashes.length,
@@ -372,20 +381,20 @@ void _fillCodeHashes(Uint8List out, List<_RebuiltBlob> rebuilt) {
   Uint8List cd,
   int codeLimit,
 ) {
-  final dir = _ParsedCodeDirectory.read(cd);
-  final pageSize = dir.pageSizeFor(codeLimit);
+  final _ParsedCodeDirectory dir = _ParsedCodeDirectory.read(cd);
+  final int pageSize = dir.pageSizeFor(codeLimit);
   if (pageSize <= 0) {
     throw const FormatException(
       'Cannot rebuild the embedded code signature: invalid page size.',
     );
   }
-  final freshSlots = (codeLimit + pageSize - 1) ~/ pageSize;
-  final freshLength = cd.length + (freshSlots - dir.slots) * 32;
+  final int freshSlots = (codeLimit + pageSize - 1) ~/ pageSize;
+  final int freshLength = cd.length + (freshSlots - dir.slots) * 32;
   final out = Uint8List(freshLength);
   // Everything through slot 0 (header plus special slots) is kept
   // byte-identical; the code slots stay zero until [_fillCodeHashes].
   out.setRange(0, dir.hashOffset, cd);
-  final newHashesEnd = dir.hashOffset + freshSlots * 32;
+  final int newHashesEnd = dir.hashOffset + freshSlots * 32;
   out.setRange(newHashesEnd, freshLength, cd, dir.oldHashesEnd);
   final bd = ByteData.sublistView(out);
   bd.setUint32(4, freshLength, Endian.big);
@@ -404,8 +413,8 @@ Uint8List _hashPages(
 ) {
   final out = Uint8List(slots * 32);
   for (var slot = 0; slot < slots; slot++) {
-    final start = slot * pageSize;
-    var end = start + pageSize;
+    final int start = slot * pageSize;
+    int end = start + pageSize;
     if (end > codeLimit) end = codeLimit;
     if (start >= fileBytes.length || end > fileBytes.length || start >= end) {
       throw FormatException(
@@ -413,7 +422,9 @@ Uint8List _hashPages(
         'reaches past the end of the file.',
       );
     }
-    final digest = sha256(Uint8List.sublistView(fileBytes, start, end));
+    final Uint8List digest = sha256(
+      Uint8List.sublistView(fileBytes, start, end),
+    );
     out.setRange(slot * 32, (slot + 1) * 32, digest);
   }
   return out;
@@ -424,8 +435,8 @@ Uint8List _hashPages(
 Uint8List _resizedLinkedit(LoadCommand lc, int fileLength) {
   final patched = Uint8List.fromList(lc.bytes);
   final bd = ByteData.sublistView(patched);
-  final fileoff = bd.getUint64(40, Endian.little).toInt();
-  final size = fileLength - fileoff;
+  final int fileoff = bd.getUint64(40, Endian.little).toInt();
+  final int size = fileLength - fileoff;
   bd.setUint64(48, size, Endian.little);
   bd.setUint64(32, size, Endian.little);
   return patched;
@@ -449,7 +460,7 @@ Uint8List _shiftedRanges(
 ) {
   if (shrink == 0) return lc.bytes;
   if (lc.cmd == lcNote) return _shiftedNote(lc, oldSigEnd, shrink, fileLength);
-  final refs = fileRangesOf(lc);
+  final List<CommandRange> refs = fileRangesOf(lc);
   var dirty = false;
   for (final ref in refs) {
     if (ref.size != 0 && ref.offset >= oldSigEnd) dirty = true;
@@ -477,7 +488,7 @@ Uint8List _shiftedNote(
   int fileLength,
 ) {
   if (lc.bytes.length < 40) return lc.bytes;
-  final range = notePayloadRange(lc);
+  final CommandRange range = notePayloadRange(lc);
   if (range.size == 0 || range.offset < oldSigEnd) return lc.bytes;
   if (!rangeWithinFile(range.offset, range.size, fileLength)) return lc.bytes;
   final patched = Uint8List.fromList(lc.bytes);
@@ -548,23 +559,23 @@ class _ParsedCodeDirectory {
       throw const FormatException('Truncated CodeDirectory blob.');
     }
     final bd = ByteData.sublistView(cd);
-    final version = bd.getUint32(8, Endian.big);
-    final hashOffset = bd.getUint32(16, Endian.big);
-    final identOffset = bd.getUint32(20, Endian.big);
-    final specials = bd.getUint32(24, Endian.big);
-    final slots = bd.getUint32(28, Endian.big);
+    final int version = bd.getUint32(8, Endian.big);
+    final int hashOffset = bd.getUint32(16, Endian.big);
+    final int identOffset = bd.getUint32(20, Endian.big);
+    final int specials = bd.getUint32(24, Endian.big);
+    final int slots = bd.getUint32(28, Endian.big);
     if (bd.getUint8(36) != 32 || bd.getUint8(37) != csHashTypeSha256) {
       throw const FormatException(
         'Cannot rebuild the embedded code signature: unsupported '
         'CodeDirectory hash type.',
       );
     }
-    final hashesStart = hashOffset - specials * 32;
-    final oldHashesEnd = hashOffset + slots * 32;
+    final int hashesStart = hashOffset - specials * 32;
+    final int oldHashesEnd = hashOffset + slots * 32;
     if (hashesStart < 0 || hashOffset > cd.length || oldHashesEnd > cd.length) {
       throw const FormatException('Truncated CodeDirectory hash array.');
     }
-    final identEnd = _identEnd(cd, identOffset, hashesStart);
+    final int identEnd = _identEnd(cd, identOffset, hashesStart);
     final headerExtent = identOffset < hashesStart ? identOffset : hashesStart;
     _checkAuxOffset(
       _presentOffset(bd, cd.length, headerExtent, 44, version, 0x20100),

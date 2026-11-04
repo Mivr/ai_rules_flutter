@@ -39,7 +39,7 @@ enum KeyModifier {
   final int cdpBit;
 
   static KeyModifier? forKey(String key) {
-    for (final m in values) {
+    for (final KeyModifier m in values) {
       if (m.key == key) return m;
     }
     return null;
@@ -137,7 +137,7 @@ class KeyStroke {
   /// browser would have attached — see [macEditingCommandsFor] — and are
   /// empty off a Mac.
   Map<String, Object> cdpParams({List<String> macCommands = const []}) {
-    final d = description;
+    final KeyDescription d = description;
     if (!down) {
       return {
         'type': 'keyUp',
@@ -199,19 +199,19 @@ class KeyChord {
         'app.pressKey needs a key to press. $_vocabulary',
       );
     }
-    final tokens = _split(spec);
+    final List<String> tokens = _split(spec);
     final resolved = <KeyDescription>[];
     for (final token in tokens) {
       final name = token == 'ControlOrMeta'
           ? (controlOrMetaIsMeta ? 'Meta' : 'Control')
           : token;
-      final description = _usKeyboard[name];
+      final KeyDescription? description = _usKeyboard[name];
       if (description == null) {
         throw KeyChordException(_unknown(token, spec));
       }
       resolved.add(description);
     }
-    final held = resolved.sublist(0, resolved.length - 1);
+    final List<KeyDescription> held = resolved.sublist(0, resolved.length - 1);
     for (final (i, k) in held.indexed) {
       if (k.modifier == null) {
         throw KeyChordException(
@@ -231,8 +231,8 @@ class KeyChord {
     final pressed = <KeyModifier>{};
     final out = <KeyStroke>[];
     void stroke(KeyDescription base, {required bool down}) {
-      final d = _asPressed(base, pressed);
-      final m = d.modifier;
+      final KeyDescription d = _asPressed(base, pressed);
+      final KeyModifier? m = d.modifier;
       if (m != null) {
         if (down) {
           pressed.add(m);
@@ -240,17 +240,15 @@ class KeyChord {
           pressed.remove(m);
         }
       }
-      out.add(
-        KeyStroke(down: down, description: d, modifiers: {...pressed}),
-      );
+      out.add(KeyStroke(down: down, description: d, modifiers: {...pressed}));
     }
 
-    for (final k in held) {
+    for (final KeyDescription k in held) {
       stroke(k, down: true);
     }
     stroke(key, down: true);
     stroke(key, down: false);
-    for (final k in held.reversed) {
+    for (final KeyDescription k in held.reversed) {
       stroke(k, down: false);
     }
     return out;
@@ -272,9 +270,10 @@ class KeyChord {
 /// other than Shift means the key types nothing: `Control+A` is a shortcut,
 /// not an `a`.
 KeyDescription _asPressed(KeyDescription base, Set<KeyModifier> pressed) {
-  final shift = pressed.contains(KeyModifier.shift);
-  final d = shift && base.shifted != null ? base.shifted! : base;
-  final typesNothing = pressed.length > 1 || (pressed.length == 1 && !shift);
+  final bool shift = pressed.contains(KeyModifier.shift);
+  final KeyDescription d = shift && base.shifted != null ? base.shifted! : base;
+  final bool typesNothing =
+      pressed.length > 1 || (pressed.length == 1 && !shift);
   return typesNothing ? d._copyWith(text: '') : d;
 }
 
@@ -283,7 +282,7 @@ KeyDescription _asPressed(KeyDescription base, Set<KeyModifier> pressed) {
 List<String> _split(String spec) {
   final keys = <String>[];
   final building = StringBuffer();
-  for (final char in spec.split('')) {
+  for (final String char in spec.split('')) {
     if (char == '+' && building.isNotEmpty) {
       keys.add(building.toString());
       building.clear();
@@ -311,7 +310,7 @@ List<String> _split(String spec) {
 /// with the key's `"\r"` rather than instead of it.
 List<String> macEditingCommandsFor(KeyStroke stroke) {
   if (!stroke.down) return const [];
-  final parts = [
+  final List<String> parts = [
     for (final m in const [
       KeyModifier.shift,
       KeyModifier.control,
@@ -321,7 +320,8 @@ List<String> macEditingCommandsFor(KeyStroke stroke) {
       if (stroke.modifiers.contains(m)) m.key,
     stroke.description.code,
   ];
-  final commands = _macEditingCommands[parts.join('+')] ?? const [];
+  final List<String> commands =
+      _macEditingCommands[parts.join('+')] ?? const [];
   return [
     for (final c in commands)
       if (!c.startsWith('insert') || c == 'insertNewline:')
@@ -362,10 +362,10 @@ const _misspellings = {
 };
 
 String _unknown(String token, String spec) {
-  final lower = token.toLowerCase();
+  final String lower = token.toLowerCase();
   String? suggestion = _misspellings[lower];
   if (suggestion == null && token.length > 1) {
-    for (final name in _usKeyboard.keys) {
+    for (final String name in _usKeyboard.keys) {
       if (name.length > 1 && name.toLowerCase() == lower) {
         suggestion = name;
         break;
@@ -470,13 +470,7 @@ const _usLayout = <_KeyDef>[
   _KeyDef('Enter', 13, 'Enter', text: '\r'),
 
   // Third row
-  _KeyDef(
-    'ShiftLeft',
-    160,
-    'Shift',
-    keyCodeWithoutLocation: 16,
-    location: 1,
-  ),
+  _KeyDef('ShiftLeft', 160, 'Shift', keyCodeWithoutLocation: 16, location: 1),
   _KeyDef('KeyZ', 90, 'z', shiftKey: 'Z'),
   _KeyDef('KeyX', 88, 'x', shiftKey: 'X'),
   _KeyDef('KeyC', 67, 'c', shiftKey: 'C'),
@@ -487,13 +481,7 @@ const _usLayout = <_KeyDef>[
   _KeyDef('Comma', 188, ',', shiftKey: '<'),
   _KeyDef('Period', 190, '.', shiftKey: '>'),
   _KeyDef('Slash', 191, '/', shiftKey: '?'),
-  _KeyDef(
-    'ShiftRight',
-    161,
-    'Shift',
-    keyCodeWithoutLocation: 16,
-    location: 2,
-  ),
+  _KeyDef('ShiftRight', 161, 'Shift', keyCodeWithoutLocation: 16, location: 2),
 
   // Last row
   _KeyDef(
@@ -548,14 +536,7 @@ const _usLayout = <_KeyDef>[
   _KeyDef('NumpadDivide', 111, '/', location: 3),
   _KeyDef('NumpadMultiply', 106, '*', location: 3),
   _KeyDef('NumpadSubtract', 109, '-', location: 3),
-  _KeyDef(
-    'Numpad7',
-    36,
-    'Home',
-    shiftKeyCode: 103,
-    shiftKey: '7',
-    location: 3,
-  ),
+  _KeyDef('Numpad7', 36, 'Home', shiftKeyCode: 103, shiftKey: '7', location: 3),
   _KeyDef(
     'Numpad8',
     38,
@@ -597,14 +578,7 @@ const _usLayout = <_KeyDef>[
     location: 3,
   ),
   _KeyDef('NumpadAdd', 107, '+', location: 3),
-  _KeyDef(
-    'Numpad1',
-    35,
-    'End',
-    shiftKeyCode: 97,
-    shiftKey: '1',
-    location: 3,
-  ),
+  _KeyDef('Numpad1', 35, 'End', shiftKeyCode: 97, shiftKey: '1', location: 3),
   _KeyDef(
     'Numpad2',
     40,
@@ -655,8 +629,8 @@ const _aliases = {
 /// `buildLayoutClosure`.
 final Map<String, KeyDescription> _usKeyboard = () {
   final result = <String, KeyDescription>{};
-  for (final def in _usLayout) {
-    final text = def.key.length == 1 ? def.key : (def.text ?? '');
+  for (final _KeyDef def in _usLayout) {
+    final String text = def.key.length == 1 ? def.key : (def.text ?? '');
     final base = KeyDescription(
       code: def.code,
       key: def.key,
@@ -664,8 +638,8 @@ final Map<String, KeyDescription> _usKeyboard = () {
       text: text,
       location: def.location,
     );
-    final shiftKey = def.shiftKey;
-    final shifted = shiftKey == null
+    final String? shiftKey = def.shiftKey;
+    final KeyDescription? shifted = shiftKey == null
         ? null
         : base._copyWith(
             key: shiftKey,
@@ -680,7 +654,7 @@ final Map<String, KeyDescription> _usKeyboard = () {
       location: base.location,
       shifted: shifted,
     );
-    for (final alias in _aliases[def.code] ?? const <String>[]) {
+    for (final String alias in _aliases[def.code] ?? const <String>[]) {
       result[alias] = base;
     }
     // The numpad is reached by code only: "1" is the digit row, not Numpad1.

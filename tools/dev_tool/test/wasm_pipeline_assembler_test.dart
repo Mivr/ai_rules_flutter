@@ -59,7 +59,10 @@ void main() {
     test('is refused, and the refusal is legible as a failure', () async {
       assemble();
 
-      final reply = await host.commandRunner.run('app.hotReload', {});
+      final Map<String, dynamic> reply = await host.commandRunner.run(
+        'app.hotReload',
+        {},
+      );
 
       // `error` is what a client reads, and its absence reads as success;
       // `succeeded` says the same thing outright so the two cannot drift;
@@ -76,7 +79,10 @@ void main() {
         registerPipelineHandlers();
         assemble();
 
-        final reply = await host.commandRunner.run('app.hotReload', {});
+        final Map<String, dynamic> reply = await host.commandRunner.run(
+          'app.hotReload',
+          {},
+        );
 
         // Load-bearing for every route in, not just a machine client: a keypress
         // and the file watcher both dispatch through `commandRunner.run`.
@@ -94,7 +100,10 @@ void main() {
     test('answers with the strategy\'s own verdict on the reload', () async {
       assemble();
 
-      final reply = await host.commandRunner.run('app.restart', {});
+      final Map<String, dynamic> reply = await host.commandRunner.run(
+        'app.restart',
+        {},
+      );
 
       // Not a refusal and not a hand-built map: the rebuild is attempted and
       // falls over, and what the reply carries is what the strategy says about
@@ -112,7 +121,10 @@ void main() {
         registerPipelineHandlers();
         assemble();
 
-        final reply = await host.commandRunner.run('app.restart', {});
+        final Map<String, dynamic> reply = await host.commandRunner.run(
+          'app.restart',
+          {},
+        );
 
         expect(reply['error'], isNot(contains(_pipelineSentinel)));
         expect(reply['error'], contains('WASM hot restart failed'));

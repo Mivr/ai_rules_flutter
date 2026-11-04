@@ -42,9 +42,9 @@ final _logger = Logger('dev_tool.cdp_console');
 /// tab has not navigated and the caller should poll, see
 /// [ChromeSession.resolveAppPage].
 String? pickCdpPageTarget(List<dynamic> targets, {required String appUrl}) {
-  final wanted = originOf(appUrl);
+  final String? wanted = originOf(appUrl);
   if (wanted == null) return null;
-  final page = targets.whereType<Map>().firstWhere(
+  final Map<dynamic, dynamic> page = targets.whereType<Map>().firstWhere(
     (t) => t['type'] == 'page' && originOf(t['url'] as String? ?? '') == wanted,
     orElse: () => const {},
   );
@@ -58,7 +58,7 @@ String? pickCdpPageTarget(List<dynamic> targets, {required String appUrl}) {
 /// is the answer for "not a page on any origin", which is exactly what those
 /// are.
 String? originOf(String url) {
-  final uri = Uri.tryParse(url);
+  final Uri? uri = Uri.tryParse(url);
   if (uri == null) return null;
   if (uri.scheme != 'http' && uri.scheme != 'https') return null;
   if (uri.host.isEmpty) return null;
@@ -69,11 +69,11 @@ String? originOf(String url) {
 Future<List<dynamic>> fetchCdpTargets(int cdpPort) async {
   final client = HttpClient();
   try {
-    final req = await client.getUrl(
+    final HttpClientRequest req = await client.getUrl(
       Uri.parse('http://127.0.0.1:$cdpPort/json'),
     );
-    final resp = await req.close();
-    final body = await resp.transform(utf8.decoder).join();
+    final HttpClientResponse resp = await req.close();
+    final String body = await resp.transform(utf8.decoder).join();
     return json.decode(body) as List<dynamic>;
   } finally {
     client.close();
@@ -122,8 +122,8 @@ Future<String> resolveCdpPageTarget(
   final stopwatch = Stopwatch()..start();
   var delay = pollInterval;
   while (true) {
-    final targets = await fetchCdpTargets(cdpPort);
-    final ws = pickCdpPageTarget(targets, appUrl: appUrl);
+    final List<dynamic> targets = await fetchCdpTargets(cdpPort);
+    final String? ws = pickCdpPageTarget(targets, appUrl: appUrl);
     if (ws != null) return ws;
     if (stopwatch.elapsed >= timeout) {
       throw StateError(
@@ -133,7 +133,7 @@ Future<String> resolveCdpPageTarget(
       );
     }
     await Future<void>.delayed(delay);
-    final doubled = delay * 2;
+    final Duration doubled = delay * 2;
     delay = doubled > maxCdpPollInterval ? maxCdpPollInterval : doubled;
   }
 }
@@ -150,7 +150,7 @@ String describeCdpTargets(List<dynamic> targets) => targets.isEmpty
 /// Render one CDP `RemoteObject` argument the way a console would show it.
 String _renderArg(Map arg) {
   if (arg.containsKey('value')) return '${arg['value']}';
-  final description = arg['description'];
+  final dynamic description = arg['description'];
   if (description is String) return description;
   return arg['type'] as String? ?? '';
 }
@@ -170,7 +170,7 @@ const _errorConsoleTypes = {'error', 'warning', 'assert'};
 void handleCdpConsoleMessage(Map<String, dynamic> message, AppLogStream logs) {
   void addLines(String text, {required bool isError}) {
     if (text.isEmpty) return;
-    for (final line in const LineSplitter().convert(text)) {
+    for (final String line in const LineSplitter().convert(text)) {
       logs.add(line, isError: isError);
     }
   }
@@ -179,10 +179,10 @@ void handleCdpConsoleMessage(Map<String, dynamic> message, AppLogStream logs) {
     switch (message['method']) {
       case 'Runtime.consoleAPICalled':
         final params = message['params'] as Map?;
-        final args = params?['args'];
+        final dynamic args = params?['args'];
         if (args is! List || args.isEmpty) return;
-        final type = params?['type'] as String? ?? 'log';
-        final text = args.whereType<Map>().map(_renderArg).join(' ');
+        final String type = params?['type'] as String? ?? 'log';
+        final String text = args.whereType<Map>().map(_renderArg).join(' ');
         addLines(text, isError: _errorConsoleTypes.contains(type));
 
       case 'Runtime.exceptionThrown':
@@ -302,7 +302,7 @@ class CdpConsoleClient {
 
   Future<void> _connect() async {
     if (_closed) return;
-    final socket = await _open(cdpPort, appUrl);
+    final WebSocket socket = await _open(cdpPort, appUrl);
     if (_closed) {
       await socket.close();
       return;
@@ -340,9 +340,9 @@ class CdpConsoleClient {
       _giveUp();
       return;
     }
-    final delay = _nextDelay;
+    final Duration delay = _nextDelay;
     _waited += delay;
-    final doubled = delay * 2;
+    final Duration doubled = delay * 2;
     _nextDelay = doubled > maxReconnectDelay ? maxReconnectDelay : doubled;
     // Held so [close] can cancel it: a pending timer keeps the isolate alive
     // until it fires, and a reconnect racing teardown would reopen a socket
@@ -377,7 +377,7 @@ class CdpConsoleClient {
     _closed = true;
     _reconnect?.cancel();
     _reconnect = null;
-    final socket = _socket;
+    final WebSocket? socket = _socket;
     _socket = null;
     await socket?.close();
   }

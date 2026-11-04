@@ -19,12 +19,12 @@ import 'package:test/test.dart';
 /// like the rules_flutter checkout. Throws instead of passing silently when
 /// neither the anchor nor the root resolves.
 String _findRoot() {
-  final anchor = Platform.environment['FLOOR_GUARD_ANCHOR'];
-  final srcdir = Platform.environment['TEST_SRCDIR'];
+  final String? anchor = Platform.environment['FLOOR_GUARD_ANCHOR'];
+  final String? srcdir = Platform.environment['TEST_SRCDIR'];
   if (anchor == null || anchor.isEmpty || srcdir == null) {
     throw StateError('FLOOR_GUARD_ANCHOR or TEST_SRCDIR is unset');
   }
-  var dir = Directory(
+  Directory dir = Directory(
     File('$srcdir/$anchor').resolveSymbolicLinksSync(),
   ).parent;
   for (var i = 0; i < 8; i++) {
@@ -39,15 +39,15 @@ String _findRoot() {
 
 void main() {
   test('rules_dart floor matches MODULE.bazel', () {
-    final root = _findRoot();
-    final module = File('$root/MODULE.bazel').readAsStringSync();
-    final floorSrc = File(
+    final String root = _findRoot();
+    final String module = File('$root/MODULE.bazel').readAsStringSync();
+    final String floorSrc = File(
       '$root/flutter/private/rules_dart_floor.bzl',
     ).readAsStringSync();
-    final dep = RegExp(
+    final String? dep = RegExp(
       'bazel_dep\\(name = "ai_rules_dart", version = "([^"]+)"',
     ).firstMatch(module)?.group(1);
-    final pin = RegExp(
+    final String? pin = RegExp(
       'RULES_DART_FLOOR = "([^"]+)"',
     ).firstMatch(floorSrc)?.group(1);
     expect(dep, isNotNull, reason: 'ai_rules_dart bazel_dep missing');

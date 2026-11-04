@@ -72,7 +72,7 @@ class TestSelection {
   /// tag entry that is not a boolean selector, or shard numbers that are not
   /// numbers: a run that guessed would report a selection that never happened.
   factory fromEnvironment(Map<String, String> env) {
-    final pattern = env['TESTBRIDGE_TEST_ONLY'];
+    final String? pattern = env['TESTBRIDGE_TEST_ONLY'];
     RegExp? filter;
     if (pattern != null && pattern.isNotEmpty) {
       try {
@@ -83,9 +83,11 @@ class TestSelection {
         );
       }
     }
-    final include = _tagSelection(env, 'FLUTTER_TEST_TAGS');
-    final exclude = _tagSelection(env, 'FLUTTER_TEST_EXCLUDE_TAGS');
-    final total = env['TEST_TOTAL_SHARDS'];
+    final ({bool fromAttribute, List<BooleanSelector> selectors}) include =
+        _tagSelection(env, 'FLUTTER_TEST_TAGS');
+    final ({bool fromAttribute, List<BooleanSelector> selectors}) exclude =
+        _tagSelection(env, 'FLUTTER_TEST_EXCLUDE_TAGS');
+    final String? total = env['TEST_TOTAL_SHARDS'];
     if (total == null) {
       return TestSelection(
         filter: filter,
@@ -94,8 +96,8 @@ class TestSelection {
         includeFromAttribute: include.fromAttribute,
       );
     }
-    final totalShards = int.tryParse(total);
-    final shardIndex = int.tryParse(env['TEST_SHARD_INDEX'] ?? '');
+    final int? totalShards = int.tryParse(total);
+    final int? shardIndex = int.tryParse(env['TEST_SHARD_INDEX'] ?? '');
     if (totalShards == null || shardIndex == null) {
       throw FormatException(
         'TEST_TOTAL_SHARDS "$total" and TEST_SHARD_INDEX '
@@ -154,7 +156,7 @@ class TestSelection {
   Map<String, dynamic>? select(Map<String, dynamic> root) {
     final found = <_Candidate>[];
     _collect(root, const {}, found);
-    final matching = [
+    final List<Map<Object?, Object?>> matching = [
       for (final candidate in found)
         if (_keptByTags(candidate.tags) &&
             (filter?.hasMatch(candidate.test['name'] as String? ?? '') ?? true))
@@ -168,9 +170,9 @@ class TestSelection {
         'matches no test in this suite; check the tag spelling',
       );
     }
-    final share = matching.length / totalShards;
-    final start = (share * shardIndex).round();
-    final end = (share * (shardIndex + 1)).round();
+    final double share = matching.length / totalShards;
+    final int start = (share * shardIndex).round();
+    final int end = (share * (shardIndex + 1)).round();
     // By identity, and over the entries as decoded: a `cast` view is a new
     // object each time, so two walks would never find each other's.
     final chosen = Set<Map<Object?, Object?>>.identity()
@@ -204,8 +206,8 @@ class TestSelection {
   static List<BooleanSelector> _parseTagSelectors(String? raw, String key) {
     if (raw == null || raw.isEmpty) return const [];
     final selectors = <BooleanSelector>[];
-    for (final part in raw.split(',')) {
-      final expression = part.trim();
+    for (final String part in raw.split(',')) {
+      final String expression = part.trim();
       if (expression.isEmpty) continue;
       try {
         selectors.add(BooleanSelector.parse(expression));
@@ -232,7 +234,10 @@ class TestSelection {
         fromAttribute: false,
       );
     }
-    final selectors = _parseTagSelectors(env['${key}_ATTR'], key);
+    final List<BooleanSelector> selectors = _parseTagSelectors(
+      env['${key}_ATTR'],
+      key,
+    );
     return (selectors: selectors, fromAttribute: selectors.isNotEmpty);
   }
 
@@ -240,9 +245,9 @@ class TestSelection {
   /// the entry carries none. Groups and tests alike carry them; the caller
   /// unions them down the tree.
   static Set<String> _tagsOf(Map<Object?, Object?> entry) {
-    final metadata = entry['metadata'];
+    final Object? metadata = entry['metadata'];
     if (metadata is! Map) return const {};
-    final tags = metadata['tags'];
+    final dynamic tags = metadata['tags'];
     if (tags is! List) return const {};
     return {
       for (final tag in tags)
@@ -255,9 +260,10 @@ class TestSelection {
     Set<String> inherited,
     List<_Candidate> into,
   ) {
-    final own = {...inherited, ..._tagsOf(group)};
-    for (final entry in group['entries'] as List? ?? const []) {
-      final m = entry as Map<Object?, Object?>;
+    final Set<String> own = {...inherited, ..._tagsOf(group)};
+    for (final Map<Object?, Object?> m
+        in (group['entries'] as List? ?? const [])
+            .cast<Map<Object?, Object?>>()) {
       if (m['type'] == 'group') {
         _collect(m, own, into);
       } else {
@@ -271,10 +277,11 @@ class TestSelection {
     Set<Map<Object?, Object?>> chosen,
   ) {
     final kept = <Object?>[];
-    for (final entry in group['entries'] as List? ?? const []) {
-      final m = entry as Map<Object?, Object?>;
+    for (final Map<Object?, Object?> m
+        in (group['entries'] as List? ?? const [])
+            .cast<Map<Object?, Object?>>()) {
       if (m['type'] == 'group') {
-        final child = _prune(m, chosen);
+        final Map<String, dynamic>? child = _prune(m, chosen);
         if (child != null) kept.add(child);
       } else if (chosen.contains(m)) {
         kept.add(m);
@@ -308,7 +315,7 @@ Set<String> readLibraryTags(
   Map<String, String> env,
   String Function(String) rlocation,
 ) {
-  final key = env['FLUTTER_TEST_LIBRARY_TAGS'];
+  final String? key = env['FLUTTER_TEST_LIBRARY_TAGS'];
   if (key == null || key.isEmpty) return const {};
   final file = File(rlocation(key));
   if (!file.existsSync()) {
@@ -316,7 +323,7 @@ Set<String> readLibraryTags(
       'FLUTTER_TEST_LIBRARY_TAGS names "$key", which is not in runfiles',
     );
   }
-  final decoded = json.decode(file.readAsStringSync());
+  final dynamic decoded = json.decode(file.readAsStringSync());
   if (decoded is! Map || decoded['tags'] is! List) {
     throw FormatException(
       'FLUTTER_TEST_LIBRARY_TAGS names "$key", which does not hold '
@@ -364,7 +371,7 @@ TestRunfiles resolveTestRunfiles(
   bool Function(String) exists,
 ) {
   String requiredFile(String variable) {
-    final key = env[variable];
+    final String? key = env[variable];
     if (key == null || key.isEmpty) {
       throw FormatException(
         '$variable must be set; the flutter_test rule always sets it',
@@ -373,8 +380,8 @@ TestRunfiles resolveTestRunfiles(
     return _existingRunfile(variable, key, rlocation, exists);
   }
 
-  final baseDillKey = env['FLUTTER_TEST_BASE_DILL'];
-  final assetsKey = env['FLUTTER_TEST_ASSETS'];
+  final String? baseDillKey = env['FLUTTER_TEST_BASE_DILL'];
+  final String? assetsKey = env['FLUTTER_TEST_ASSETS'];
   return (
     tester: requiredFile('FLUTTER_TEST_TESTER'),
     icu: requiredFile('FLUTTER_TEST_ICU'),
@@ -409,7 +416,7 @@ String _existingRunfile(
   String Function(String) rlocation,
   bool Function(String) exists,
 ) {
-  final path = rlocation(key);
+  final String path = rlocation(key);
   if (!exists(path)) {
     throw FormatException(
       '$variable names "$key", which resolved to "$path", '
@@ -462,10 +469,14 @@ String junitXml(List<TestCaseResult> cases, {required String suiteName}) {
   String seconds(Duration d) =>
       (d.inMicroseconds / Duration.microsecondsPerSecond).toStringAsFixed(3);
   bool isFailure(TestCaseResult c) => c.failureType == 'TestFailure';
-  final failures = cases.where((c) => c.failureType != null && isFailure(c));
-  final errors = cases.where((c) => c.failureType != null && !isFailure(c));
-  final skipped = cases.where((c) => c.skipped);
-  final total = cases.fold(Duration.zero, (sum, c) => sum + c.elapsed);
+  final Iterable<TestCaseResult> failures = cases.where(
+    (c) => c.failureType != null && isFailure(c),
+  );
+  final Iterable<TestCaseResult> errors = cases.where(
+    (c) => c.failureType != null && !isFailure(c),
+  );
+  final Iterable<TestCaseResult> skipped = cases.where((c) => c.skipped);
+  final Duration total = cases.fold(Duration.zero, (sum, c) => sum + c.elapsed);
 
   final out = StringBuffer()
     ..writeln('<?xml version="1.0" encoding="UTF-8"?>')

@@ -14,8 +14,8 @@ import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
 /// root-owned files in the output base.
 Future<Never> executeTunnelCommand() async {
   // Check for root privileges.
-  final uidResult = Process.runSync('id', ['-u']);
-  final uid = (uidResult.stdout as String).trim();
+  final ProcessResult uidResult = Process.runSync('id', ['-u']);
+  final String uid = (uidResult.stdout as String).trim();
   if (uid != '0') {
     // The path this process was started from, rather than a `bazel run` line.
     // `sudo bazel run` is the reading people take from "sudo flutter_bazel",
@@ -33,7 +33,7 @@ Future<Never> executeTunnelCommand() async {
     exit(1);
   }
 
-  final resolved = resolveRunfileWithManifest(
+  final ResolvedRunfile? resolved = resolveRunfileWithManifest(
     'rules_flutter/tools/ios_screenshot/tunneld',
   );
   if (resolved == null) {
@@ -51,7 +51,7 @@ Future<Never> executeTunnelCommand() async {
   // write `__pycache__` next to the user's installed pymobiledevice3, owned by
   // root. Nothing of ours lives in the runfiles tree any more, so the old
   // root-owned-output-base failure is gone either way.
-  final process = await Process.start(
+  final Process process = await Process.start(
     resolved.path,
     [],
     mode: ProcessStartMode.inheritStdio,

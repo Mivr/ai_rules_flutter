@@ -32,7 +32,7 @@ class BundleRebuild {
   new(this._build, this._command);
 
   Future<bool> run() async {
-    final command = _command();
+    final int command = _command();
     if (command == _builtFor) return _result;
     _result = await _build();
     _builtFor = command;

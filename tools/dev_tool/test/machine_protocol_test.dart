@@ -35,7 +35,10 @@ void main() {
         inputLines: const Stream<String>.empty(),
       ).startListening();
 
-      final connected = eventsOf(sink, 'daemon.connected').single;
+      final Map<String, dynamic> connected = eventsOf(
+        sink,
+        'daemon.connected',
+      ).single;
       final params = connected['params'] as Map<String, dynamic>;
       expect(params['protocolVersion'], MachineProtocol.protocolVersion);
       expect(params['commands'], [
@@ -120,7 +123,7 @@ void main() {
     test('sendEvent emits JSON-wrapped event', () {
       final protocol = MachineProtocol(enabled: true, output: sink);
       protocol.sendEvent('app.start', {'appId': 'test'});
-      final lines = sink.lines;
+      final List<String> lines = sink.lines;
       expect(lines, hasLength(1));
       final decoded = json.decode(lines.first) as List;
       expect(decoded, hasLength(1));
@@ -207,7 +210,7 @@ void main() {
 
     test('appDebugPort includes wsUri, conditionally baseUri', () {
       final protocol = MachineProtocol(enabled: true, output: sink);
-      final wsUri = Uri.parse('ws://127.0.0.1:8181/abc/ws');
+      final Uri wsUri = Uri.parse('ws://127.0.0.1:8181/abc/ws');
 
       protocol.appDebugPort('myapp', wsUri, null);
       var decoded = json.decode(sink.lines.first) as List;
@@ -218,7 +221,7 @@ void main() {
       expect(params.containsKey('baseUri'), isFalse);
 
       sink.buffer.clear();
-      final baseUri = Uri.parse('http://127.0.0.1:8181/abc/');
+      final Uri baseUri = Uri.parse('http://127.0.0.1:8181/abc/');
       protocol.appDebugPort('myapp', wsUri, baseUri);
       decoded = json.decode(sink.lines.first) as List;
       params =
@@ -308,7 +311,7 @@ void main() {
       final protocol = MachineProtocol(enabled: true, output: sink);
       protocol.appProgress('myapp', 'Building...');
       protocol.appProgress('myapp', 'Installing...');
-      final lines = sink.lines;
+      final List<String> lines = sink.lines;
       final id0 =
           ((json.decode(lines[0]) as List).first
                   as Map<String, dynamic>)['params']['id']
@@ -394,10 +397,10 @@ void main() {
       // Give the async listener time to process.
       await Future.delayed(Duration(milliseconds: 50));
 
-      final lines = sink.lines;
+      final List<String> lines = sink.lines;
       expect(lines, isNotEmpty);
       // Skip daemon.connected event, find the command response.
-      final responseLine = lines.firstWhere((line) {
+      final String responseLine = lines.firstWhere((line) {
         final decoded = json.decode(line) as List;
         final msg = decoded.first as Map<String, dynamic>;
         return msg.containsKey('id') && msg['id'] == 1;
@@ -431,7 +434,7 @@ void main() {
       await Future.delayed(Duration(milliseconds: 50));
 
       // Skip daemon.connected event, find the error response.
-      final errorLine = sink.lines.firstWhere((line) {
+      final String errorLine = sink.lines.firstWhere((line) {
         final decoded = json.decode(line) as List;
         final msg = decoded.first as Map<String, dynamic>;
         return msg.containsKey('id') && msg['id'] == 2;
@@ -462,7 +465,7 @@ void main() {
       await Future.delayed(Duration(milliseconds: 50));
 
       // Should have daemon.connected + parse error response.
-      final errorLine = sink.lines.firstWhere((line) {
+      final String errorLine = sink.lines.firstWhere((line) {
         final decoded = json.decode(line) as List;
         final msg = decoded.first as Map<String, dynamic>;
         return msg.containsKey('error') &&
@@ -502,7 +505,7 @@ void main() {
 
         await Future.delayed(Duration(milliseconds: 50));
 
-        final errorLine = sink.lines.firstWhere((line) {
+        final String errorLine = sink.lines.firstWhere((line) {
           final decoded = json.decode(line) as List;
           final msg = decoded.first as Map<String, dynamic>;
           return msg.containsKey('id') && msg['id'] == 3;

@@ -38,11 +38,11 @@ String? _machOUuid(Uint8List bytes) {
   if (bytes.length < 32) return null;
   final data = ByteData.sublistView(bytes);
   if (data.getUint32(0, Endian.little) != _machOMagic64) return null;
-  final commands = data.getUint32(16, Endian.little);
+  final int commands = data.getUint32(16, Endian.little);
   var at = 32;
   for (var i = 0; i < commands && at + 8 <= bytes.length; i++) {
-    final command = data.getUint32(at, Endian.little);
-    final size = data.getUint32(at + 4, Endian.little);
+    final int command = data.getUint32(at, Endian.little);
+    final int size = data.getUint32(at + 4, Endian.little);
     if (command == _lcUuid && at + 24 <= bytes.length) {
       return 'uuid:${_hex(Uint8List.sublistView(bytes, at + 8, at + 24))}';
     }
@@ -71,16 +71,16 @@ String? _elfBuildId(Uint8List bytes) {
       ? data.getUint64(at, Endian.little)
       : data.getUint32(at, Endian.little);
 
-  final headersAt = word(wide ? 0x20 : 0x1c);
-  final headerSize = data.getUint16(wide ? 0x36 : 0x2a, Endian.little);
-  final headerCount = data.getUint16(wide ? 0x38 : 0x2c, Endian.little);
+  final int headersAt = word(wide ? 0x20 : 0x1c);
+  final int headerSize = data.getUint16(wide ? 0x36 : 0x2a, Endian.little);
+  final int headerCount = data.getUint16(wide ? 0x38 : 0x2c, Endian.little);
   for (var i = 0; i < headerCount; i++) {
-    final header = headersAt + i * headerSize;
+    final int header = headersAt + i * headerSize;
     if (header + headerSize > bytes.length) return null;
     if (data.getUint32(header, Endian.little) != _ptNote) continue;
-    final offset = word(header + (wide ? 0x08 : 0x04));
-    final size = word(header + (wide ? 0x20 : 0x10));
-    final id = _buildIdNote(bytes, offset, size);
+    final int offset = word(header + (wide ? 0x08 : 0x04));
+    final int size = word(header + (wide ? 0x20 : 0x10));
+    final String? id = _buildIdNote(bytes, offset, size);
     if (id != null) return id;
   }
   return null;
@@ -88,17 +88,17 @@ String? _elfBuildId(Uint8List bytes) {
 
 String? _buildIdNote(Uint8List bytes, int offset, int size) {
   final data = ByteData.sublistView(bytes);
-  final end = offset + size;
+  final int end = offset + size;
   var at = offset;
   int aligned(int n) => (n + 3) & ~3;
   while (at + 12 <= end && end <= bytes.length) {
-    final nameSize = data.getUint32(at, Endian.little);
-    final descSize = data.getUint32(at + 4, Endian.little);
-    final type = data.getUint32(at + 8, Endian.little);
-    final nameAt = at + 12;
-    final descAt = nameAt + aligned(nameSize);
+    final int nameSize = data.getUint32(at, Endian.little);
+    final int descSize = data.getUint32(at + 4, Endian.little);
+    final int type = data.getUint32(at + 8, Endian.little);
+    final int nameAt = at + 12;
+    final int descAt = nameAt + aligned(nameSize);
     if (descAt + descSize > end) return null;
-    final isGnu =
+    final bool isGnu =
         nameSize == 4 &&
         bytes[nameAt] == 0x47 &&
         bytes[nameAt + 1] == 0x4e &&
@@ -126,15 +126,15 @@ const _centralDirSignature = 0x02014b50;
 const _localHeaderSignature = 0x04034b50;
 
 Future<Uint8List> _readZipMember(String zipPath, String member) async {
-  final raf = await File(zipPath).open();
+  final RandomAccessFile raf = await File(zipPath).open();
   try {
-    final length = await raf.length();
+    final int length = await raf.length();
     final tailLength = length < 65558 ? length : 65558;
     await raf.setPosition(length - tailLength);
-    final tail = await raf.read(tailLength);
+    final Uint8List tail = await raf.read(tailLength);
     final tailData = ByteData.sublistView(tail);
     var eocd = -1;
-    for (var i = tail.length - 22; i >= 0; i--) {
+    for (int i = tail.length - 22; i >= 0; i--) {
       if (tailData.getUint32(i, Endian.little) == _eocdSignature) {
         eocd = i;
         break;
@@ -143,23 +143,23 @@ Future<Uint8List> _readZipMember(String zipPath, String member) async {
     if (eocd < 0) {
       throw FormatException('No zip end-of-central-directory in $zipPath');
     }
-    final entries = tailData.getUint16(eocd + 10, Endian.little);
-    final directorySize = tailData.getUint32(eocd + 12, Endian.little);
-    final directoryOffset = tailData.getUint32(eocd + 16, Endian.little);
+    final int entries = tailData.getUint16(eocd + 10, Endian.little);
+    final int directorySize = tailData.getUint32(eocd + 12, Endian.little);
+    final int directoryOffset = tailData.getUint32(eocd + 16, Endian.little);
     await raf.setPosition(directoryOffset);
-    final directory = await raf.read(directorySize);
+    final Uint8List directory = await raf.read(directorySize);
     final data = ByteData.sublistView(directory);
     var at = 0;
     for (var i = 0; i < entries; i++) {
       if (data.getUint32(at, Endian.little) != _centralDirSignature) {
         throw FormatException('Corrupt zip central directory in $zipPath');
       }
-      final method = data.getUint16(at + 10, Endian.little);
-      final compressedSize = data.getUint32(at + 20, Endian.little);
-      final nameLength = data.getUint16(at + 28, Endian.little);
-      final extraLength = data.getUint16(at + 30, Endian.little);
-      final commentLength = data.getUint16(at + 32, Endian.little);
-      final localOffset = data.getUint32(at + 42, Endian.little);
+      final int method = data.getUint16(at + 10, Endian.little);
+      final int compressedSize = data.getUint32(at + 20, Endian.little);
+      final int nameLength = data.getUint16(at + 28, Endian.little);
+      final int extraLength = data.getUint16(at + 30, Endian.little);
+      final int commentLength = data.getUint16(at + 32, Endian.little);
+      final int localOffset = data.getUint32(at + 42, Endian.little);
       final name = String.fromCharCodes(
         directory.sublist(at + 46, at + 46 + nameLength),
       );
@@ -167,18 +167,18 @@ Future<Uint8List> _readZipMember(String zipPath, String member) async {
       if (name != member) continue;
 
       await raf.setPosition(localOffset);
-      final local = await raf.read(30);
+      final Uint8List local = await raf.read(30);
       final localData = ByteData.sublistView(local);
       if (localData.getUint32(0, Endian.little) != _localHeaderSignature) {
         throw FormatException(
           'Corrupt zip local header for $member in $zipPath',
         );
       }
-      final skip =
+      final int skip =
           localData.getUint16(26, Endian.little) +
           localData.getUint16(28, Endian.little);
       await raf.setPosition(localOffset + 30 + skip);
-      final stored = await raf.read(compressedSize);
+      final Uint8List stored = await raf.read(compressedSize);
       return switch (method) {
         0 => stored,
         8 => Uint8List.fromList(ZLibDecoder(raw: true).convert(stored)),

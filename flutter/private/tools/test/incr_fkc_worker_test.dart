@@ -6,6 +6,7 @@
 @Tags(['runfiles'])
 library;
 
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
@@ -46,10 +47,7 @@ void main() {
         incrementalFlagIndex(['vm', '--x=1', 'fs.snapshot', '--y', 'e.dart']),
         2,
       );
-      expect(
-        incrementalFlagIndex(['vm', 'script.dart', '--y', 'e.dart']),
-        1,
-      );
+      expect(incrementalFlagIndex(['vm', 'script.dart', '--y', 'e.dart']), 1);
     });
   });
 
@@ -228,7 +226,7 @@ void main() {
     late Harness h;
     late List<FakeSession> sessions;
     late IncrWorker worker;
-    late Directory savedCwd;
+    late _Dir savedCwd;
 
     SessionFactory factoryFor(List<CompileResult> Function() scriptOf) {
       // One script shared by every server: a restarted server continues the
@@ -292,7 +290,7 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok()]),
       );
-      final result = await worker.handleRequest(h.argv, h.inputs);
+      final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
       expect(result.exitCode, 0, reason: result.output);
       expect(result.output, isEmpty);
       expect(sessions, hasLength(1));
@@ -312,7 +310,7 @@ void main() {
           cwd: h.cwd,
           sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
         );
-        var result = await worker.handleRequest(h.argv, h.inputs);
+        IncrResult result = await worker.handleRequest(h.argv, h.inputs);
         expect(result.exitCode, 0, reason: result.output);
         h.write('stage/lib/a.dart', 'int get answer => 43;\n');
         h.write('lib/a.dart', 'int get answer => 43;\n');
@@ -394,7 +392,7 @@ void main() {
           cwd: h.cwd,
           sessions: factoryFor(() => [readOk(), readOk(), readOk(), readOk()]),
         );
-        var result = await worker.handleRequest(argv, inputs);
+        IncrResult result = await worker.handleRequest(argv, inputs);
         expect(result.exitCode, 0, reason: result.output);
         // Only the in-place source changes: there is no staged twin to edit.
         h.write('lib/a.dart', 'int get answer => 43;\n');
@@ -424,9 +422,9 @@ void main() {
           cwd: h.cwd,
           sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
         );
-        var result = await worker.handleRequest(h.argv, h.inputs);
+        IncrResult result = await worker.handleRequest(h.argv, h.inputs);
         expect(result.exitCode, 0, reason: result.output);
-        final argv2 = [
+        final List<String> argv2 = [
           for (final a in h.argv) a == 'out/app.dill' ? 'out/other.dill' : a,
         ];
         result = await worker.handleRequest(argv2, h.inputs);
@@ -448,7 +446,7 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
-      var result = await worker.handleRequest(h.argv, h.inputs);
+      IncrResult result = await worker.handleRequest(h.argv, h.inputs);
       expect(result.exitCode, 0, reason: result.output);
       h.write('stage/lib/a.dart', '// a comment\nint get answer => 42;\n');
       h.write('lib/a.dart', '// a comment\nint get answer => 42;\n');
@@ -595,7 +593,7 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
-      var result = await worker.handleRequest(h.argv, h.inputs);
+      IncrResult result = await worker.handleRequest(h.argv, h.inputs);
       expect(result.exitCode, 0, reason: result.output);
       h.write('pkg_config.json', '{"v":2}\n');
       result = await worker.handleRequest(h.argv, h.inputs);
@@ -621,7 +619,7 @@ void main() {
             ],
           ),
         );
-        var result = await worker.handleRequest(h.argv, h.inputs);
+        IncrResult result = await worker.handleRequest(h.argv, h.inputs);
         expect(result.exitCode, 0, reason: result.output);
         h.write('stage/lib/a.dart', 'broken syntax (((');
         h.write('lib/a.dart', 'broken syntax (((');
@@ -659,11 +657,11 @@ void main() {
           ],
         ),
       );
-      final result = await worker.handleRequest(h.argv, h.inputs);
+      final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
       expect(result.exitCode, 1);
       expect(result.output, contains('reset blew up'));
       expect(sessions.single.closed, isTrue);
-      final retry = await worker.handleRequest(h.argv, h.inputs);
+      final IncrResult retry = await worker.handleRequest(h.argv, h.inputs);
       expect(retry.exitCode, 0, reason: retry.output);
       expect(sessions, hasLength(2));
     });
@@ -674,7 +672,7 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
-      var result = await worker.handleRequest(h.argv, h.inputs);
+      IncrResult result = await worker.handleRequest(h.argv, h.inputs);
       expect(result.exitCode, 0, reason: result.output);
       sessions.single.dead = true;
       result = await worker.handleRequest(h.argv, h.inputs);
@@ -687,7 +685,7 @@ void main() {
     late Harness h;
     late List<FakeSession> sessions;
     late IncrWorker worker;
-    late Directory savedCwd;
+    late _Dir savedCwd;
 
     setUp(() {
       savedCwd = Directory.current;
@@ -720,7 +718,7 @@ void main() {
     test('a disallowed directive fails before the compiler runs', () async {
       h.write('lib/main.dart', "import 'file:///etc/hostname';\n");
       h.write('stage/lib/main.dart', "import 'file:///etc/hostname';\n");
-      final result = await worker.handleRequest(h.argv, h.inputs);
+      final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
       expect(result.exitCode, 1);
       expect(result.output, contains('lib/main.dart'));
       expect(result.output, contains('is not a declared input'));
@@ -771,7 +769,7 @@ void main() {
           return s;
         },
       );
-      final result = await worker.handleRequest(h.argv, h.inputs);
+      final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
       expect(result.exitCode, 1);
       expect(
         result.output,
@@ -780,23 +778,46 @@ void main() {
       expect(File('${h.cwd}/out/app.dill').existsSync(), isFalse);
     });
 
-    test(
-      'a read under a root that only the argv names is refused',
-      () async {
-        // The argv mounts the mirror via `--filesystem-root`, but the
-        // manifest names no such read: allowances come only from the
-        // manifest, so the mount buys the compile no read.
-        final mirrorDir = Directory.systemTemp.createTempSync('incr_mirror_');
-        addTearDown(() => mirrorDir.deleteSync(recursive: true));
-        final mirror = mirrorDir.path;
-        for (final rel in ['lib/main.dart', 'lib/a.dart', 'lib/new.dart']) {
-          File('$mirror/$rel')
-            ..createSync(recursive: true)
-            ..writeAsStringSync('int get fresh => 7;\n');
-        }
-        for (final rel in ['lib/main.dart', 'lib/a.dart']) {
-          File('$mirror/$rel').writeAsStringSync(
-            File('${h.cwd}/$rel').readAsStringSync(),
+    test('a read under a root that only the argv names is refused', () async {
+      // The argv mounts the mirror via `--filesystem-root`, but the
+      // manifest names no such read: allowances come only from the
+      // manifest, so the mount buys the compile no read.
+      final _Dir mirrorDir = Directory.systemTemp.createTempSync(
+        'incr_mirror_',
+      );
+      addTearDown(() => mirrorDir.deleteSync(recursive: true));
+      final String mirror = mirrorDir.path;
+      for (final rel in ['lib/main.dart', 'lib/a.dart', 'lib/new.dart']) {
+        File('$mirror/$rel')
+          ..createSync(recursive: true)
+          ..writeAsStringSync('int get fresh => 7;\n');
+      }
+      for (final rel in ['lib/main.dart', 'lib/a.dart']) {
+        File('$mirror/$rel')
+            .writeAsStringSync(File('${h.cwd}/$rel').readAsStringSync());
+      }
+      // lib/new.dart is a created library: mirrored like the build would
+      // stage it, but declared in no manifest section.
+      final mirrorReads = [
+        '+file://$mirror/lib/main.dart',
+        '+file://$mirror/lib/a.dart',
+        '+file://$mirror/lib/new.dart',
+        '+file://${h.cwd}/lib/main.dart',
+        '+file://${h.cwd}/lib/a.dart',
+        '+file://${h.cwd}/pkg_config.json',
+        '+file://${h.cwd}/platform.dill',
+      ];
+      worker = IncrWorker(
+        cwd: h.cwd,
+        tempParent: h.cwd,
+        sessions: (fs, full, inc, cwd) async {
+          final s = FakeSession(
+            fullDill: full,
+            dillBytes: utf8.encode('dill'),
+            script: [
+              (errors: 0, diagnostics: const [], depLines: mirrorReads),
+              (errors: 0, diagnostics: const [], depLines: mirrorReads),
+            ],
           );
         }
         // lib/new.dart is a created library: mirrored like the build would
@@ -862,7 +883,7 @@ void main() {
             return s;
           },
         );
-        var result = await worker.handleRequest(h.argv, h.inputs);
+        IncrResult result = await worker.handleRequest(h.argv, h.inputs);
         expect(result.exitCode, 0, reason: result.output);
         h.write('stage/lib/a.dart', 'int get answer => 45;\n');
         h.write('lib/a.dart', 'int get answer => 45;\n');
@@ -892,7 +913,7 @@ void main() {
           return s;
         },
       );
-      final result = await worker.handleRequest(h.argv, h.inputs);
+      final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
       expect(result.exitCode, 1);
       expect(result.output, contains(noDependencyReadsMessage()));
     });
@@ -900,7 +921,7 @@ void main() {
 
   group('server LRU', () {
     test('evicts the least recently used server over the cap', () async {
-      final savedCwd = Directory.current;
+      final _Dir savedCwd = Directory.current;
       final h = Harness(Directory.systemTemp.createTempSync('incr_lru_'));
       Directory.current = h.cwd;
       addTearDown(() => h.dir.deleteSync(recursive: true));
@@ -922,14 +943,14 @@ void main() {
         },
       );
       addTearDown(worker.closeAll);
-      final other = [
+      final List<String> other = [
         ...h.argv.sublist(0, h.argv.indexOf('--packages')),
         '--packages',
         'other_config.json',
         'package:app/main.dart',
       ];
       h.write('other_config.json', '{}\n');
-      var result = await worker.handleRequest(h.argv, [...h.inputs]);
+      IncrResult result = await worker.handleRequest(h.argv, [...h.inputs]);
       expect(result.exitCode, 0, reason: result.output);
       result = await worker.handleRequest(other, [
         ...h.inputs,
@@ -945,7 +966,7 @@ void main() {
 
   group('worker temp cleanup on every exit path', () {
     late Harness h;
-    late Directory savedCwd;
+    late _Dir savedCwd;
 
     SessionFactory oneScript(List<CompileResult> Function() scriptOf) {
       return (fs, full, inc, cwd, {devIncremental = false}) async =>
@@ -970,7 +991,7 @@ void main() {
     });
 
     test('a one-shot success leaves no incr_fkc_ dir', () async {
-      final code = await runOneShotWorker(
+      final int code = await runOneShotWorker(
         h.argv,
         createWorker: () => IncrWorker(
           cwd: h.cwd,
@@ -985,18 +1006,14 @@ void main() {
 
     test('a one-shot failure leaves no incr_fkc_ dir', () async {
       const error = 'lib/a.dart:1:5: Error: Expected `;`.';
-      final code = await runOneShotWorker(
+      final int code = await runOneShotWorker(
         h.argv,
         createWorker: () => IncrWorker(
           cwd: h.cwd,
           tempParent: h.cwd,
           sessions: oneScript(
             () => [
-              (
-                errors: 1,
-                diagnostics: [error],
-                depLines: const [],
-              ),
+              (errors: 1, diagnostics: [error], depLines: const []),
             ],
           ),
         ),
@@ -1007,7 +1024,7 @@ void main() {
     });
 
     test('persistent stdin EOF deletes the temp dir', () async {
-      final request = jsonEncode({
+      final String request = jsonEncode({
         'requestId': 7,
         'arguments': h.argv,
         'inputs': [
@@ -1024,7 +1041,7 @@ void main() {
         stdinBytes: Stream.value(utf8.encode('$request\n')),
         responseSink: responses,
       );
-      final lines = responses
+      final List<String> lines = responses
           .toString()
           .split('\n')
           .where((l) => l.trim().isNotEmpty)
@@ -1050,7 +1067,7 @@ void main() {
       // dir to delete.
       final worker = IncrWorker(cwd: h.cwd, tempParent: h.cwd);
       final statuses = <int>[];
-      final subs = watchWorkerSignals(
+      final List<StreamSubscription<ProcessSignal>> subs = watchWorkerSignals(
         worker,
         onSignal: statuses.add,
         signals: [(signal: ProcessSignal.sigusr1, status: 999)],
@@ -1073,7 +1090,7 @@ void main() {
     test(
       'round-trips compile, recompile, accept, reject against a fake',
       () async {
-        final dir = Directory.systemTemp.createTempSync('incr_proto_');
+        final _Dir dir = Directory.systemTemp.createTempSync('incr_proto_');
         addTearDown(() => dir.deleteSync(recursive: true));
         const uuid = '11111111-2222-3333-4444-555555555555';
         File('${dir.path}/fake_server.dart').writeAsStringSync('''
@@ -1112,7 +1129,7 @@ void main() async {
   }
 }
 ''');
-        final session = await FrontendServerSession.start(
+        final FrontendServerSession session = await FrontendServerSession.start(
           [
             Platform.resolvedExecutable,
             '${dir.path}/fake_server.dart',
@@ -1125,16 +1142,19 @@ void main() async {
           cwd: dir.path,
         );
         addTearDown(session.close);
-        final compiled = await session.compile('package:app/main.dart');
+        final CompileResult compiled = await session.compile(
+          'package:app/main.dart',
+        );
         expect(compiled.errors, 0);
         expect(compiled.depLines, hasLength(1));
         await session.accept();
-        final delta = await session.recompile('package:app/main.dart', [
-          'org-dartlang-app:///lib/a.dart',
-        ]);
+        final CompileResult delta = await session.recompile(
+          'package:app/main.dart',
+          ['org-dartlang-app:///lib/a.dart'],
+        );
         expect(delta.errors, 0);
         await session.accept();
-        final reset = await session.recompile(
+        final CompileResult reset = await session.recompile(
           'package:app/main.dart',
           [],
           resetFirst: true,

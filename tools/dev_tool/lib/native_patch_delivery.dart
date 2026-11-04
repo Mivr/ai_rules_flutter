@@ -63,7 +63,7 @@ Future<ProcessResult> _require(
   String executable,
   List<String> arguments,
 ) async {
-  final result = await run(executable, arguments);
+  final ProcessResult result = await run(executable, arguments);
   if (result.exitCode != 0) {
     throw NativePatchDeliveryException(
       'Could not $what: `$executable ${arguments.join(' ')}` exited '
@@ -92,7 +92,7 @@ class MacOSPatchDelivery extends NativePatchDelivery {
     required String appDirectory,
     required String name,
   }) async {
-    final destination = p.join(appDirectory, name);
+    final String destination = p.join(appDirectory, name);
     await File(localFile).copy(destination);
     return destination;
   }
@@ -114,7 +114,7 @@ String iosFrameworkName(String libraryFileName) {
 }
 
 String _iosLoadPath(String libraryFileName) {
-  final framework = iosFrameworkName(libraryFileName);
+  final String framework = iosFrameworkName(libraryFileName);
   return '@executable_path/Frameworks/$framework.framework/$framework';
 }
 
@@ -135,7 +135,7 @@ class IOSSimulatorPatchDelivery extends NativePatchDelivery {
     required String appDirectory,
     required String name,
   }) async {
-    final destination = p.join(appDirectory, name);
+    final String destination = p.join(appDirectory, name);
     await File(localFile).copy(destination);
     await _require(_run, 'sign the patch for the simulator', 'codesign', [
       '--force',
@@ -179,10 +179,10 @@ class IOSDevicePatchDelivery extends NativePatchDelivery {
     required String appDirectory,
     required String name,
   }) async {
-    final relative = containerRelative(appDirectory);
-    final identity = _identity ??= await _signingIdentity();
+    final String relative = containerRelative(appDirectory);
+    final String identity = _identity ??= await _signingIdentity();
     return withTempDir('flutter_ios_patch_', (dir) async {
-      final signed = p.join(dir.path, name);
+      final String signed = p.join(dir.path, name);
       await File(localFile).copy(signed);
       await _require(
         _run,
@@ -218,7 +218,7 @@ class IOSDevicePatchDelivery extends NativePatchDelivery {
   /// [appDirectory] relative to the app's data container, which is what
   /// devicectl addresses a copy by.
   static String containerRelative(String appDirectory) {
-    final match = RegExp(
+    final RegExpMatch? match = RegExp(
       r'/Containers/Data/Application/[^/]+/(.+)$',
     ).firstMatch(appDirectory);
     if (match == null) {
@@ -238,7 +238,7 @@ class IOSDevicePatchDelivery extends NativePatchDelivery {
   Future<String> _signingIdentity() => withTempDir('flutter_ios_cert_', (
     dir,
   ) async {
-    final prefix = p.join(dir.path, 'cert');
+    final String prefix = p.join(dir.path, 'cert');
     await _require(_run, 'read the app\'s signing certificate', 'codesign', [
       '--display',
       '--extract-certificates=$prefix',
@@ -251,7 +251,7 @@ class IOSDevicePatchDelivery extends NativePatchDelivery {
         'sign a patch with, and the device would refuse an unsigned one.',
       );
     }
-    final digest = await _require(
+    final ProcessResult digest = await _require(
       _run,
       'hash the app\'s signing certificate',
       'shasum',

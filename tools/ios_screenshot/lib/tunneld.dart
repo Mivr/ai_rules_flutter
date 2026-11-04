@@ -53,12 +53,12 @@ Future<void> main(List<String> args) async {
     stderr.writeln('Run with sudo.');
     exit(1);
   }
-  final python = findHostPython();
+  final String? python = findHostPython();
   if (python == null) {
     stderr.writeln(missingPythonMessage(purpose: 'the iOS tunnel daemon'));
     exit(2);
   }
-  final exitCode = await runPythonProgramInteractive(
+  final int exitCode = await runPythonProgramInteractive(
     python,
     _tunneldProgram,
     args,

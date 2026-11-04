@@ -37,14 +37,14 @@ void main(List<String> args) async {
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show help.');
 
   try {
-    final results = parser.parse(args);
+    final ArgResults results = parser.parse(args);
 
     if (results['help'] as bool || results.command == null) {
       _printUsage(parser);
       exit(0);
     }
 
-    final command = results.command!;
+    final ArgResults command = results.command!;
     if (command['help'] as bool? ?? false) {
       _printCommandHelp(command.name!, parser);
       exit(0);
@@ -83,7 +83,7 @@ void main(List<String> args) async {
 }
 
 void _printCommandHelp(String commandName, ArgParser parser) {
-  final commandParser = parser.commands[commandName]!;
+  final ArgParser commandParser = parser.commands[commandName]!;
   stdout.writeln('Usage: flutter_bazel $commandName [options]');
   stdout.writeln();
   stdout.writeln(commandParser.usage);

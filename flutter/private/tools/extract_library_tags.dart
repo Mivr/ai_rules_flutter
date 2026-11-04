@@ -30,7 +30,7 @@ void main(List<String> args) {
     stderr.writeln('extract_library_tags: ${args[0]}:${e.line}: ${e.message}');
     exit(1);
   }
-  final sorted = tags.toList()..sort();
+  final List<String> sorted = tags.toList()..sort();
   File(args[1]).writeAsStringSync('${json.encode({'tags': sorted})}\n');
 }
 
@@ -71,14 +71,14 @@ Set<String> extractLibraryTags(String source) {
   // scanner skips it before the first directive, so this scan does too.
   var i = 0;
   if (source.startsWith('#!')) {
-    final newline = source.indexOf('\n');
+    final int newline = source.indexOf('\n');
     i = newline < 0 ? source.length : newline + 1;
   }
   // The annotations before the first directive: the only ones upstream reads.
   // Their arguments stay unparsed here — whether `@p.Tags` counts depends on
   // the imports below, which textually follow — so each is only skipped over.
   final candidates = <int>[];
-  var directivesStart = source.length;
+  int directivesStart = source.length;
   while (true) {
     i = _skipTrivia(source, i);
     if (i >= source.length) return const {};
@@ -94,11 +94,14 @@ Set<String> extractLibraryTags(String source) {
       return const {};
     }
   }
-  final testPrefixes = _testImportPrefixes(source, directivesStart);
+  final Set<String> testPrefixes = _testImportPrefixes(source, directivesStart);
   final found = <String>[];
   var seenTags = false;
   for (final at in candidates) {
-    final name = _parseDottedName(source, at + 1);
+    final ({int end, List<String> segments}) name = _parseDottedName(
+      source,
+      at + 1,
+    );
     if (name.segments.isEmpty || name.segments.last != 'Tags') continue;
     if (name.segments.length == 1) {
       // A bare `@Tags`, as upstream resolves it with no import check.
@@ -129,7 +132,7 @@ Set<String> extractLibraryTags(String source) {
 /// argument list cannot compile, so it is skipped, not reported): the caller
 /// resolves the name first, and only a resolvable `Tags` is parsed.
 List<String> _parseTagsAnnotation(String source, int at, int nameEnd) {
-  var j = _skipTrivia(source, nameEnd);
+  int j = _skipTrivia(source, nameEnd);
   if (j < source.length && source[j] == '<') {
     j = _skipTrivia(source, _skipTypeArguments(source, j));
   }
@@ -145,7 +148,7 @@ List<String> _parseTagsAnnotation(String source, int at, int nameEnd) {
 /// upstream's wording where upstream has words for it (`Expected a List.`,
 /// `Expected only literal elements.`, `Expected a String literal.`).
 ({int end, List<String> tags}) _parseTagsArgument(String source, int i) {
-  var j = _openTagList(source, i);
+  int j = _openTagList(source, i);
   final tags = <String>[];
   while (true) {
     j = _skipTrivia(source, j);
@@ -155,9 +158,9 @@ List<String> _parseTagsAnnotation(String source, int at, int nameEnd) {
         'Unterminated list in @Tags.',
       );
     }
-    final closed = _closeTagList(source, j);
+    final int? closed = _closeTagList(source, j);
     if (closed != null) return (end: closed, tags: tags);
-    final element = _readTagElement(source, j);
+    final ({int end, String value}) element = _readTagElement(source, j);
     tags.add(element.value);
     j = element.end;
   }
@@ -170,7 +173,7 @@ List<String> _parseTagsAnnotation(String source, int at, int nameEnd) {
 /// (`Expected a List.`), as `@Tags(<String>['a'])` is still a `ListLiteral`
 /// upstream.
 int _openTagList(String source, int i) {
-  var j = _skipTrivia(source, i + 1);
+  int j = _skipTrivia(source, i + 1);
   if (_readsKeyword(source, j, 'const')) j = _skipTrivia(source, j + 5);
   if (j < source.length && source[j] == '<') {
     j = _skipTypeArguments(source, j);
@@ -185,7 +188,7 @@ int _openTagList(String source, int i) {
 /// not open the close.
 int? _closeTagList(String source, int j) {
   if (source[j] != ']') return null;
-  final after = _skipTrivia(source, j + 1);
+  final int after = _skipTrivia(source, j + 1);
   if (after >= source.length || source[after] != ')') {
     throw TagsParseException(
       _lineOf(source, after),
@@ -205,7 +208,11 @@ int? _closeTagList(String source, int j) {
 ({int end, String value}) _readTagElement(String source, int j) {
   if (_readsKeyword(source, j, 'const')) j = _skipTrivia(source, j + 5);
   final literalStart = j;
-  final literal = _parseString(source, j, strict: true);
+  final ({int end, String value})? literal = _parseString(
+    source,
+    j,
+    strict: true,
+  );
   if (literal == null) {
     if (source.startsWith('...', j) ||
         _readsKeyword(source, j, 'if') ||
@@ -246,7 +253,7 @@ int? _closeTagList(String source, int j) {
 /// helper keeps the one copy. An opener whose literal never closes steps past
 /// the opener: the file does not compile, so no tags are ever read from it.
 int? _skipTriviaOrString(String source, int j) {
-  final c = source[j];
+  final String c = source[j];
   if (c == '/' &&
       j + 1 < source.length &&
       (source[j + 1] == '/' || source[j + 1] == '*')) {
@@ -257,7 +264,7 @@ int? _skipTriviaOrString(String source, int j) {
       (c == 'r' &&
           j + 1 < source.length &&
           (source[j + 1] == "'" || source[j + 1] == '"'))) {
-    final literal = _parseString(source, j);
+    final ({int end, String value})? literal = _parseString(source, j);
     return literal == null ? j + 1 : literal.end;
   }
   return null;
@@ -270,7 +277,7 @@ int _skipTypeArguments(String source, int i) {
   var depth = 0;
   var j = i;
   while (j < source.length) {
-    final c = source[j];
+    final String c = source[j];
     if (c == '<') {
       depth++;
       j++;
@@ -309,7 +316,7 @@ final _tagName = RegExp(r'^[a-zA-Z_-][a-zA-Z0-9_-]*$');
 /// The 1-based line number of [offset] in [source], for error messages.
 int _lineOf(String source, int offset) {
   var line = 1;
-  final end = offset < source.length ? offset : source.length;
+  final int end = offset < source.length ? offset : source.length;
   for (var k = 0; k < end; k++) {
     if (source[k] == '\n') line++;
   }
@@ -323,7 +330,7 @@ int _lineOf(String source, int offset) {
 bool _isDirective(String source, int i) {
   for (final keyword in const ['library', 'import', 'export', 'part']) {
     if (!_readsKeyword(source, i, keyword)) continue;
-    var j = _skipTrivia(source, i + keyword.length);
+    int j = _skipTrivia(source, i + keyword.length);
     if (keyword == 'part') {
       // `part of ...;` or `part '...';`; `part(` is a declaration.
       if (_readsKeyword(source, j, 'of')) return true;
@@ -342,7 +349,7 @@ bool _isDirective(String source, int i) {
 bool _readsKeyword(String source, int i, String word) {
   if (i > 0 && _isIdentifierChar(source[i - 1])) return false;
   if (!source.startsWith(word, i)) return false;
-  final after = i + word.length;
+  final int after = i + word.length;
   return after >= source.length || !_isIdentifierChar(source[after]);
 }
 
@@ -361,7 +368,7 @@ bool _isIdentifierChar(String c) {
 /// `Tag/*c*/s` stays two words, not one segment.
 ({int end, List<String> segments}) _parseDottedName(String source, int i) {
   final segments = <String>[];
-  var j = _skipTrivia(source, i);
+  int j = _skipTrivia(source, i);
   var end = j;
   while (true) {
     final start = j;
@@ -371,9 +378,9 @@ bool _isIdentifierChar(String c) {
     if (j == start) break;
     segments.add(source.substring(start, j));
     end = j;
-    final dot = _skipTrivia(source, j);
+    final int dot = _skipTrivia(source, j);
     if (dot >= source.length || source[dot] != '.') break;
-    final next = _skipTrivia(source, dot + 1);
+    final int next = _skipTrivia(source, dot + 1);
     if (next >= source.length || !_isIdentifierChar(source[next])) break;
     j = next;
   }
@@ -385,8 +392,11 @@ bool _isIdentifierChar(String c) {
 /// skipping pass, and a malformed non-`Tags` annotation must not fail the
 /// scan; the compiler rejects the file with better words.
 int _skipAnnotationTail(String source, int i) {
-  final name = _parseDottedName(source, i + 1);
-  var j = _skipTrivia(source, name.end);
+  final ({int end, List<String> segments}) name = _parseDottedName(
+    source,
+    i + 1,
+  );
+  int j = _skipTrivia(source, name.end);
   while (j < source.length) {
     if (source[j] == '<') {
       // Type arguments, as on a generic annotation (`@Foo<int>(...)`): the
@@ -402,7 +412,7 @@ int _skipAnnotationTail(String source, int i) {
     } else if (source[j] == '.') {
       // A dotted continuation after type arguments (`@C<T>.named(...)`),
       // with trivia around the dot as the analyzer allows.
-      final next = _skipTrivia(source, j + 1);
+      final int next = _skipTrivia(source, j + 1);
       if (next >= source.length || !_isIdentifierChar(source[next])) break;
       j = next;
       while (j < source.length && _isIdentifierChar(source[j])) {
@@ -433,7 +443,7 @@ Set<String> _testImportPrefixes(String source, int i) {
       i = _skipAnnotationTail(source, i);
     } else if (_isDirective(source, i)) {
       if (_readsKeyword(source, i, 'import')) {
-        final prefix = _testImportPrefix(source, i);
+        final String? prefix = _testImportPrefix(source, i);
         if (prefix != null) prefixes.add(prefix);
       }
       i = _skipDirective(source, i);
@@ -453,16 +463,16 @@ Set<String> _testImportPrefixes(String source, int i) {
 /// and would not count it; nobody writes that import, so the scanner trades
 /// the case for staying a scanner.
 String? _testImportPrefix(String source, int i) {
-  var j = _skipTrivia(source, i + 'import'.length);
+  int j = _skipTrivia(source, i + 'import'.length);
   if (j >= source.length) return null;
   // The URI in its own variable: `parsed` is reassigned in the loop below,
   // which would un-promote a record local read after it.
-  var parsed = _parseString(source, j);
+  ({int end, String value})? parsed = _parseString(source, j);
   if (parsed == null) return null;
-  var uri = parsed.value;
+  String uri = parsed.value;
   j = _skipTrivia(source, parsed.end);
   while (_readsKeyword(source, j, 'if')) {
-    var k = _skipTrivia(source, j + 2);
+    int k = _skipTrivia(source, j + 2);
     if (k >= source.length || source[k] != '(') return null;
     j = _skipTrivia(source, _skipBalanced(source, k, '(', ')'));
     if (j >= source.length) return null;
@@ -485,7 +495,7 @@ String? _testImportPrefix(String source, int i) {
 /// Whether [uri] is an import of `package:test` or `package:flutter_test`.
 bool _isTestUri(String uri) {
   if (!uri.startsWith('package:')) return false;
-  final first = uri.substring('package:'.length).split('/').first;
+  final String first = uri.substring('package:'.length).split('/').first;
   return first == 'test' || first == 'flutter_test';
 }
 
@@ -495,7 +505,7 @@ int _skipBalanced(String source, int i, String open, String close) {
   var depth = 0;
   var j = i;
   while (j < source.length) {
-    final c = source[j];
+    final String c = source[j];
     if (c == open) {
       depth++;
       j++;
@@ -516,7 +526,7 @@ int _skipDirective(String source, int i) {
   var depth = 0;
   var j = i;
   while (j < source.length) {
-    final c = source[j];
+    final String c = source[j];
     if (c == '(' || c == '[' || c == '{') {
       depth++;
       j++;
@@ -552,7 +562,7 @@ int _skipDirective(String source, int i) {
   if (j >= source.length || (source[j] != "'" && source[j] != '"')) {
     return null;
   }
-  final quote = source[j];
+  final String quote = source[j];
   var triple = false;
   if (source.startsWith(quote * 3, j)) {
     triple = true;
@@ -560,7 +570,7 @@ int _skipDirective(String source, int i) {
   } else {
     j++;
   }
-  final close = triple ? quote * 3 : quote;
+  final String close = triple ? quote * 3 : quote;
   final value = StringBuffer();
   while (j < source.length) {
     if (source.startsWith(close, j)) {
@@ -569,17 +579,25 @@ int _skipDirective(String source, int i) {
       // them. The recursive call already folds longer chains, so the string
       // is complete here: returning, not continuing, is what keeps a comma
       // or a following annotation out of the value.
-      final next = _skipTrivia(source, j);
-      final continued = _parseString(source, next, strict: strict);
+      final int next = _skipTrivia(source, j);
+      final ({int end, String value})? continued = _parseString(
+        source,
+        next,
+        strict: strict,
+      );
       if (continued != null) {
         value.write(continued.value);
         return (end: continued.end, value: value.toString());
       }
       return (end: j, value: value.toString());
     }
-    final c = source[j];
+    final String c = source[j];
     if (!raw && c == r'\') {
-      final escape = _parseEscape(source, j, strict: strict);
+      final ({int end, String value}) escape = _parseEscape(
+        source,
+        j,
+        strict: strict,
+      );
       value.write(escape.value);
       j = escape.end;
     } else if (!raw && c == r'$') {
@@ -589,7 +607,7 @@ int _skipDirective(String source, int i) {
           'Expected a String literal.',
         );
       }
-      final interpolation = _skipInterpolation(source, j);
+      final int interpolation = _skipInterpolation(source, j);
       // A placeholder no tag can equal: the file does not compile, so this
       // value is never compared against a selection.
       value.write('\u{0}');
@@ -615,9 +633,9 @@ int _skipDirective(String source, int i) {
   int i, {
   bool strict = false,
 }) {
-  final j = i + 1;
+  final int j = i + 1;
   if (j >= source.length) return (end: j, value: r'\');
-  final c = source[j];
+  final String c = source[j];
   switch (c) {
     case 'n':
       return (end: j + 1, value: '\n');
@@ -634,17 +652,17 @@ int _skipDirective(String source, int i) {
     case '0':
       return (end: j + 1, value: '\0');
     case 'x':
-      final hex = _parseHex(source, j + 1, 2);
+      final ({int end, String value}) hex = _parseHex(source, j + 1, 2);
       return (end: hex.end, value: hex.value);
     case 'u':
       if (j + 1 < source.length && source[j + 1] == '{') {
-        final end = source.indexOf('}', j + 2);
+        final int end = source.indexOf('}', j + 2);
         if (end < 0) return (end: j + 1, value: 'u');
-        final code = int.tryParse(source.substring(j + 2, end), radix: 16);
+        final int? code = int.tryParse(source.substring(j + 2, end), radix: 16);
         if (code == null) return (end: j + 1, value: 'u');
         return (end: end + 1, value: String.fromCharCode(code));
       }
-      final hex = _parseHex(source, j + 1, 4);
+      final ({int end, String value}) hex = _parseHex(source, j + 1, 4);
       return (end: hex.end, value: hex.value);
     default:
       if (strict) {
@@ -660,9 +678,9 @@ int _skipDirective(String source, int i) {
 /// Up to [digits] hex digits at [i] as the character they encode, or a literal
 /// read when none follow.
 ({int end, String value}) _parseHex(String source, int i, int digits) {
-  final hex = RegExp(r'^[0-9a-fA-F]+').stringMatch(source.substring(i));
+  final String? hex = RegExp(r'^[0-9a-fA-F]+').stringMatch(source.substring(i));
   if (hex == null || hex.isEmpty) return (end: i, value: '');
-  final take = hex.length < digits ? hex.length : digits;
+  final int take = hex.length < digits ? hex.length : digits;
   return (
     end: i + take,
     value: String.fromCharCode(int.parse(hex.substring(0, take), radix: 16)),
@@ -675,7 +693,7 @@ int _skipInterpolation(String source, int i) {
   if (i + 1 < source.length && source[i + 1] == '{') {
     return _skipBalanced(source, i + 1, '{', '}');
   }
-  var j = i + 1;
+  int j = i + 1;
   while (j < source.length && _isIdentifierChar(source[j])) {
     j++;
   }
@@ -688,11 +706,11 @@ int _skipInterpolation(String source, int i) {
 int _skipTrivia(String source, int i) {
   var j = i;
   while (j < source.length) {
-    final c = source[j];
+    final String c = source[j];
     if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f') {
       j++;
     } else if (c == '/' && j + 1 < source.length && source[j + 1] == '/') {
-      final end = source.indexOf('\n', j + 2);
+      final int end = source.indexOf('\n', j + 2);
       j = end < 0 ? source.length : end + 1;
     } else if (c == '/' && j + 1 < source.length && source[j + 1] == '*') {
       j = _skipNestedComment(source, j);
@@ -707,7 +725,7 @@ int _skipTrivia(String source, int i) {
 /// Comment text is opaque — a quote or `//` inside one opens nothing — so
 /// only `/*` and `*/` move the scan. Past the end when unterminated.
 int _skipNestedComment(String source, int i) {
-  var j = i + 2;
+  int j = i + 2;
   var depth = 1;
   while (j < source.length && depth > 0) {
     if (source[j] == '/' && j + 1 < source.length && source[j + 1] == '*') {

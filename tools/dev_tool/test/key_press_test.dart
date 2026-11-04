@@ -7,7 +7,7 @@ KeyChord parse(String spec, {bool controlOrMetaIsMeta = true}) =>
 /// The message [spec] is refused with.
 String refusal(String spec) {
   try {
-    final chord = parse(spec);
+    final KeyChord chord = parse(spec);
     fail('expected "$spec" to be refused, got ${chord.strokes}');
   } on KeyChordException catch (e) {
     return e.message;
@@ -39,17 +39,17 @@ void main() {
     });
 
     test('a character is case-sensitive, as Playwright\'s is', () {
-      final lower = parse('a').pressedKey;
+      final KeyDescription lower = parse('a').pressedKey;
       expect((lower.code, lower.key, lower.text), ('KeyA', 'a', 'a'));
-      final upper = parse('A').pressedKey;
+      final KeyDescription upper = parse('A').pressedKey;
       expect((upper.code, upper.key, upper.text), ('KeyA', 'A', 'A'));
-      final bang = parse('!').pressedKey;
+      final KeyDescription bang = parse('!').pressedKey;
       expect((bang.code, bang.key, bang.text), ('Digit1', '!', '!'));
       expect(parse(' ').pressedKey.code, 'Space');
     });
 
     test('Shift picks the shifted character of a key named by code', () {
-      final chord = parse('Shift+KeyA');
+      final KeyChord chord = parse('Shift+KeyA');
       expect(chord.held.single.code, 'ShiftLeft');
       expect(chord.pressedKey.key, 'A');
       expect(chord.pressedKey.text, 'A');
@@ -84,7 +84,7 @@ void main() {
 
     test('"+" is a key where it cannot be a separator', () {
       expect(parse('+').pressedKey.key, '+');
-      final chord = parse('Control++');
+      final KeyChord chord = parse('Control++');
       expect(chord.held.single.code, 'ControlLeft');
       expect(chord.key.code, 'Equal');
       expect(chord.pressedKey.key, '+');
@@ -99,13 +99,13 @@ void main() {
     });
 
     test('an unknown key is refused by name, with the spelling it meant', () {
-      final ctrl = refusal('Ctrl+K');
+      final String ctrl = refusal('Ctrl+K');
       expect(ctrl, contains('Unknown key "Ctrl" in "Ctrl+K"'));
       expect(ctrl, contains('Did you mean "Control"?'));
       expect(refusal('enter'), contains('Did you mean "Enter"?'));
       expect(refusal('Cmd+A'), contains('Did you mean "Meta"?'));
       expect(refusal('Down'), contains('Did you mean "ArrowDown"?'));
-      final nonsense = refusal('Hyper');
+      final String nonsense = refusal('Hyper');
       expect(nonsense, contains('Unknown key "Hyper"'));
       expect(nonsense, isNot(contains('Did you mean')));
       expect(nonsense, contains('Control+K'), reason: 'names the vocabulary');
@@ -153,7 +153,7 @@ void main() {
 
   group('KeyChord.strokes', () {
     test('holds the modifiers around the key, releasing in reverse', () {
-      final strokes = parse('Control+Shift+Tab').strokes;
+      final List<KeyStroke> strokes = parse('Control+Shift+Tab').strokes;
       expect(
         strokes.map((s) => '${s.down ? 'v' : '^'}${s.description.code}'),
         [
@@ -169,7 +169,8 @@ void main() {
 
     test('reports the modifiers as a browser does: a modifier counts '
         'from its own down to its own up', () {
-      final masks = parse('Control+K').strokes.map((s) => s.cdpModifiers);
+      final Iterable<int> masks = parse('Control+K').strokes
+          .map((s) => s.cdpModifiers);
       // Control is 2 in CDP's mask.
       expect(masks, [2, 2, 2, 0]);
     });
@@ -177,7 +178,7 @@ void main() {
 
   group('cdpParams', () {
     test('a key that types is a keyDown carrying its text', () {
-      final events = cdp('a');
+      final List<Map<String, Object>> events = cdp('a');
       expect(events[0], {
         'type': 'keyDown',
         'modifiers': 0,
@@ -203,7 +204,7 @@ void main() {
 
     test('Enter is a keyDown with "\\r" and virtual key 13, which is what '
         'submits a field', () {
-      final down = cdp('Enter').first;
+      final Map<String, Object> down = cdp('Enter').first;
       expect(down['type'], 'keyDown');
       expect(down['text'], '\r');
       expect(down['windowsVirtualKeyCode'], 13);
@@ -211,14 +212,15 @@ void main() {
 
     test('a key that types nothing is a rawKeyDown', () {
       for (final spec in const ['ArrowDown', 'Backspace', 'Control+K']) {
-        final down = cdp(spec).lastWhere((e) => e['type'] != 'keyUp');
+        final Map<String, Object> down = cdp(spec)
+            .lastWhere((e) => e['type'] != 'keyUp');
         expect(down['type'], 'rawKeyDown', reason: spec);
         expect(down['text'], isEmpty, reason: spec);
       }
     });
 
     test('a modifier reports its location and the unsided virtual key', () {
-      final control = cdp('Control+K').first;
+      final Map<String, Object> control = cdp('Control+K').first;
       expect(control['code'], 'ControlLeft');
       expect(control['key'], 'Control');
       expect(control['windowsVirtualKeyCode'], 17);
@@ -259,13 +261,13 @@ void main() {
 
     test('a key with no binding, and every key up, carries none', () {
       expect(commandsFor('a'), isEmpty);
-      for (final e in cdp('Control+K', mac: true)) {
+      for (final Map<String, Object> e in cdp('Control+K', mac: true)) {
         if (e['type'] == 'keyUp') expect(e.containsKey('commands'), isFalse);
       }
     });
 
     test('off a Mac nothing is attached', () {
-      for (final e in cdp('Control+K')) {
+      for (final Map<String, Object> e in cdp('Control+K')) {
         if (e['type'] != 'keyUp') expect(e['commands'], isEmpty);
       }
     });

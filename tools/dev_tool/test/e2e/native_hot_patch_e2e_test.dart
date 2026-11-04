@@ -46,18 +46,18 @@ void main() {
       'a C edit reaches the running app on a hot reload, and a contract edit '
       'is answered by the builder',
       () async {
-        final ws = await editableWorkspace('ffi_example');
-        final mulSource = ws.file('native/mul.c');
-        final mulHeader = ws.file('native/mul.h');
-        final sourceOriginal = mulSource.readAsStringSync();
-        final headerOriginal = mulHeader.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('ffi_example');
+        final File mulSource = ws.file('native/mul.c');
+        final File mulHeader = ws.file('native/mul.h');
+        final String sourceOriginal = mulSource.readAsStringSync();
+        final String headerOriginal = mulHeader.readAsStringSync();
         expect(
           sourceOriginal,
           contains('return a * b;'),
           reason: 'fixture marker',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':ffi_macos',
           device: 'macos',
@@ -75,7 +75,7 @@ void main() {
             '${dt.nonProtocolStdoutLines.join('\n')}',
           );
         }
-        final appId = dt.appId!;
+        final String appId = dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 120));
         // Armed before edited: the snapshot is taken at assembly, and an edit
         // inside that window would become the baseline.
@@ -93,7 +93,7 @@ void main() {
         mulSource.writeAsStringSync(
           sourceOriginal.replaceFirst('return a * b;', 'return a * b + 1000;'),
         );
-        final patched = await _reload(dt, appId);
+        final Map<String, dynamic> patched = await _reload(dt, appId);
         expect(patched['succeeded'], isTrue, reason: '$patched');
         expect(patched['runningCode'], 'updated', reason: '$patched');
         expect(patched['nativePatched'], {
@@ -102,10 +102,13 @@ void main() {
         await _expectRendered(dt, appId, 'live 3 × 4 = 1012');
         // Computed once in `main`, before the patch: still there, because this
         // was not a restart.
-        final tree = await dt.httpCommand('app.dumpWidgetTree', {
-          'appId': appId,
-        });
-        final sqlite = RegExp(
+        final Map<String, dynamic> tree = await dt.httpCommand(
+          'app.dumpWidgetTree',
+          {
+            'appId': appId,
+          },
+        );
+        final RegExpMatch? sqlite = RegExp(
           r'sqlite3 ([0-9.]+)',
         ).firstMatch(tree['result'].toString());
         expect(
@@ -120,7 +123,7 @@ void main() {
         );
 
         // A reload with nothing new is free again, and says nothing native.
-        final quiet = await _reload(dt, appId);
+        final Map<String, dynamic> quiet = await _reload(dt, appId);
         expect(quiet['nativePatched'], isNull, reason: '$quiet');
 
         // ---- 4: a new callable, withheld -------------------------------------
@@ -137,7 +140,7 @@ void main() {
                 'FFI_EXAMPLE_EXPORT int32_t mul_twice(int32_t a);',
           ),
         );
-        final withheld = await _reload(dt, appId);
+        final Map<String, dynamic> withheld = await _reload(dt, appId);
         expect(withheld['succeeded'], isFalse, reason: '$withheld');
         expect(withheld['runningCode'], 'unchanged', reason: '$withheld');
         expect(withheld['message'], contains('withheld'));
@@ -166,7 +169,7 @@ void main() {
         mulSource.writeAsStringSync(
           sourceOriginal.replaceFirst('return a * b;', 'return a * b + 7;'),
         );
-        final served = await _reload(dt, appId);
+        final Map<String, dynamic> served = await _reload(dt, appId);
         expect(served['succeeded'], isTrue, reason: '$served');
         expect(served['runningCode'], 'updated', reason: '$served');
         expect(served['nativePatched'], {
@@ -177,23 +180,23 @@ void main() {
         // And the contract the patch served is settled: the next reload reads
         // the same moved bytes, and must not withhold over an image that caught
         // up an edit ago.
-        final after = await _reload(dt, appId);
+        final Map<String, dynamic> after = await _reload(dt, appId);
         expect(after['succeeded'], isTrue, reason: '$after');
         expect(after['nativePatched'], isNull, reason: '$after');
         mulHeader.writeAsStringSync(headerOriginal);
 
         // ---- 5: the edit undone ----------------------------------------------
         mulSource.writeAsStringSync(sourceOriginal);
-        final reverted = await _reload(dt, appId);
+        final Map<String, dynamic> reverted = await _reload(dt, appId);
         expect(reverted['succeeded'], isTrue, reason: '$reverted');
         expect(reverted['nativeReverted'], ['libmul.dylib']);
         await _expectRendered(dt, appId, 'live 3 × 4 = 12');
 
         // ---- 6: a library nothing can patch -----------------------------------
-        final addSource = ws.file('native/add.c');
-        final addOriginal = addSource.readAsStringSync();
+        final File addSource = ws.file('native/add.c');
+        final String addOriginal = addSource.readAsStringSync();
         addSource.writeAsStringSync('$addOriginal// edited\n');
-        final unverifiable = await _reload(dt, appId);
+        final Map<String, dynamic> unverifiable = await _reload(dt, appId);
         expect(unverifiable['succeeded'], isFalse, reason: '$unverifiable');
         expect(unverifiable['runningCode'], 'unchanged');
         expect(
@@ -212,7 +215,9 @@ void main() {
 }
 
 Future<Map<String, dynamic>> _reload(DevToolProcess dt, String appId) async {
-  final response = await dt.httpCommand('app.hotReload', {'appId': appId});
+  final Map<String, dynamic> response = await dt.httpCommand('app.hotReload', {
+    'appId': appId,
+  });
   final result = response['result'] as Map<String, dynamic>?;
   expect(result, isNotNull, reason: 'app.hotReload: ${response['error']}');
   return result!;
@@ -224,7 +229,7 @@ Future<void> _expectRendered(
   String appId,
   String text,
 ) async {
-  final found = await dt.httpCommand('app.waitFor', {
+  final Map<String, dynamic> found = await dt.httpCommand('app.waitFor', {
     'appId': appId,
     'text': text,
     'timeoutMs': '20000',

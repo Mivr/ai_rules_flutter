@@ -64,9 +64,9 @@ String? _readBuildEmbedLabel(
   if (stableStatusPath != null &&
       stableStatusPath.isNotEmpty &&
       File(stableStatusPath).existsSync()) {
-    for (final line in File(stableStatusPath).readAsLinesSync()) {
+    for (final String line in File(stableStatusPath).readAsLinesSync()) {
       if (line.startsWith('BUILD_EMBED_LABEL ')) {
-        final val = line.substring('BUILD_EMBED_LABEL '.length).trim();
+        final String val = line.substring('BUILD_EMBED_LABEL '.length).trim();
         if (val.isNotEmpty) {
           embedLabel = val;
         }
@@ -89,11 +89,11 @@ Map<String, String> _matchLabelGroups(
   String embedLabel,
 ) {
   final groupNames = <String>[];
-  final regexPattern = buildLabelPattern.replaceAllMapped(
+  final String regexPattern = buildLabelPattern.replaceAllMapped(
     RegExp(r'\{([A-Za-z0-9_]+)\}'),
     (m) {
-      final name = m.group(1)!;
-      final groupRegex = captureGroups[name];
+      final String name = m.group(1)!;
+      final String? groupRegex = captureGroups[name];
       if (groupRegex == null) {
         throw ArgumentError(
           'Placeholder "{$name}" in build_label_pattern is not present in capture_groups.',
@@ -103,7 +103,7 @@ Map<String, String> _matchLabelGroups(
       return '($groupRegex)';
     },
   );
-  final match = RegExp('^$regexPattern\$').firstMatch(embedLabel);
+  final RegExpMatch? match = RegExp('^$regexPattern\$').firstMatch(embedLabel);
   if (match == null) {
     throw ArgumentError(
       'Build label "$embedLabel" did not match build_label_pattern "$buildLabelPattern".',
@@ -118,7 +118,7 @@ Map<String, String> _matchLabelGroups(
 
 String _substituteLabelGroups(String template, Map<String, String> values) {
   return template.replaceAllMapped(RegExp(r'\{([A-Za-z0-9_]+)\}'), (m) {
-    final name = m.group(1)!;
+    final String name = m.group(1)!;
     return values[name] ?? m.group(0)!;
   });
 }
@@ -164,20 +164,20 @@ class BundleVersionRequest {
 /// label) and the request's build-label pattern / capture groups, writing
 /// JSON to the request's output path.
 void resolveBundleVersion(BundleVersionRequest request) {
-  final buildVersion = request.buildVersion;
-  final buildLabelPattern = request.buildLabelPattern;
-  var resolvedShort = request.shortVersionString.isNotEmpty
+  final String buildVersion = request.buildVersion;
+  final String buildLabelPattern = request.buildLabelPattern;
+  String resolvedShort = request.shortVersionString.isNotEmpty
       ? request.shortVersionString
       : buildVersion;
   var resolvedBuild = buildVersion;
 
   if (buildLabelPattern.isNotEmpty) {
-    final embedLabel = _readBuildEmbedLabel(
+    final String? embedLabel = _readBuildEmbedLabel(
       request.stableStatusPath,
       request.fallbackBuildLabel,
     );
     if (embedLabel != null && embedLabel.isNotEmpty) {
-      final values = _matchLabelGroups(
+      final Map<String, String> values = _matchLabelGroups(
         buildLabelPattern,
         request.captureGroups,
         embedLabel,
@@ -240,7 +240,7 @@ class _ResolveVersionArgState {
   String? outputPath;
 
   int apply(List<String> args, int i) {
-    final arg = args[i];
+    final String arg = args[i];
     String nextVal() {
       if (i + 1 >= args.length) {
         _usageError('Missing value for $arg.');
@@ -272,7 +272,7 @@ class _ResolveVersionArgState {
   }
 
   void _applyControlFile(String controlPath) {
-    final decoded = jsonDecode(File(controlPath).readAsStringSync());
+    final dynamic decoded = jsonDecode(File(controlPath).readAsStringSync());
     if (decoded is! Map) {
       _usageError('Control file $controlPath must contain a JSON object.');
     }
@@ -287,16 +287,16 @@ class _ResolveVersionArgState {
         (decoded['fallback_build_label'] as String?) ?? fallbackBuildLabel;
     stableStatusPath =
         (decoded['build_info_path'] as String?) ?? stableStatusPath;
-    final cg = decoded['capture_groups'];
+    final dynamic cg = decoded['capture_groups'];
     if (cg is Map) {
-      for (final entry in cg.entries) {
+      for (final MapEntry<dynamic, dynamic> entry in cg.entries) {
         captureGroups[entry.key.toString()] = entry.value.toString();
       }
     }
   }
 
   void _applyCaptureGroup(String kv) {
-    final eq = kv.indexOf('=');
+    final int eq = kv.indexOf('=');
     if (eq == -1) {
       _usageError('Expected KEY=REGEX for --capture-group, got "$kv".');
     }
@@ -309,7 +309,7 @@ void _runResolveVersionCli(List<String> args) {
   for (var i = 0; i < args.length; i++) {
     i = state.apply(args, i);
   }
-  final outputPath = state.outputPath;
+  final String? outputPath = state.outputPath;
   if (outputPath == null) {
     _usageError('Required flag for resolve-version: --output.');
   }
@@ -351,7 +351,7 @@ class _CompileRunnerArgState {
   String? outputPath;
 
   int apply(List<String> args, int i) {
-    final arg = args[i];
+    final String arg = args[i];
     String nextVal() {
       if (i + 1 >= args.length) {
         _usageError('Missing value for $arg.');
@@ -464,7 +464,7 @@ class _BundleArgState {
   String? outputAppDirPath;
 
   int apply(List<String> args, int i) {
-    final arg = args[i];
+    final String arg = args[i];
     if (arg == '--certificate-password' ||
         arg.startsWith('--certificate-password=')) {
       throw ArgumentError(
@@ -486,8 +486,8 @@ class _BundleArgState {
     if (_applySigningFlag(arg, nextVal)) return i;
     switch (arg) {
       case '--define':
-        final kv = nextVal();
-        final eq = kv.indexOf('=');
+        final String kv = nextVal();
+        final int eq = kv.indexOf('=');
         if (eq == -1) {
           throw ArgumentError('Expected KEY=VALUE for --define, got "$kv".');
         }
@@ -563,9 +563,9 @@ class _BundleArgState {
   Map<String, String> _buildResolvedEnv() {
     final resolvedEnv = <String, String>{};
     if (isolatedEnv) {
-      for (final key in declaredEnvVars) {
+      for (final String key in declaredEnvVars) {
         if (key == 'TMPDIR' || key == 'TEST_TMPDIR') continue;
-        final val = Platform.environment[key];
+        final String? val = Platform.environment[key];
         if (val != null) {
           resolvedEnv[key] = val;
         }
@@ -576,7 +576,7 @@ class _BundleArgState {
       }
       return resolvedEnv;
     }
-    for (final entry in Platform.environment.entries) {
+    for (final MapEntry<String, String> entry in Platform.environment.entries) {
       if (ambientHostEnvVars.contains(entry.key) &&
           !declaredEnvVars.contains(entry.key)) {
         continue;
@@ -649,7 +649,7 @@ void main(List<String> args) {
     );
   }
 
-  final subcommand = args.first;
+  final String subcommand = args.first;
   if (subcommand == 'compile-runner') {
     _runCompileRunnerCli(args.sublist(1));
     return;

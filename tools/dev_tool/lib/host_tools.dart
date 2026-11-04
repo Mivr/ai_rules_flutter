@@ -57,7 +57,7 @@ class HostTool {
 
   /// The path to run, or null when this machine does not have the tool.
   String? find() {
-    for (final candidate in [...candidates, ..._pathCandidates()]) {
+    for (final String candidate in [...candidates, ..._pathCandidates()]) {
       if (FileSystemEntity.isFileSync(candidate)) return candidate;
     }
     return null;
@@ -65,7 +65,7 @@ class HostTool {
 
   /// The path to run. Throws [MissingHostToolException] when there is none.
   String require() {
-    final found = find();
+    final String? found = find();
     if (found != null) return found;
     throw MissingHostToolException(
       'Could not find $name, which is needed to $purpose.\n'
@@ -78,7 +78,7 @@ class HostTool {
   /// then PATH as a whole. Enumerating every PATH entry would bury the
   /// specific locations, which are the actual hint.
   String get _tried {
-    final entries = _pathEntries();
+    final List<String> entries = _pathEntries();
     return [
       for (final candidate in candidates) '  $candidate',
       if (pathNames.isNotEmpty)
@@ -90,7 +90,7 @@ class HostTool {
   List<String> _pathEntries() {
     // Windows environment lookups are case-insensitive; a `Map` handed in by a
     // test is not, so both spellings are read.
-    final path = _environment['PATH'] ?? _environment['Path'] ?? '';
+    final String path = _environment['PATH'] ?? _environment['Path'] ?? '';
     return [
       for (final entry in path.split(Platform.isWindows ? ';' : ':'))
         if (entry.isNotEmpty) entry,
@@ -105,7 +105,7 @@ class HostTool {
 
 /// The `adb` that installs the APK, starts the activity and carries logcat.
 HostTool adbTool({Map<String, String>? environment}) {
-  final env = environment ?? Platform.environment;
+  final Map<String, String> env = environment ?? Platform.environment;
   return HostTool(
     name: 'adb',
     purpose:
@@ -130,7 +130,7 @@ HostTool adbTool({Map<String, String>? environment}) {
 /// the right one to read a current APK with, and naming them all makes the
 /// diagnostic show what is actually installed rather than what was expected.
 HostTool aapt2Tool({Map<String, String>? environment}) {
-  final env = environment ?? Platform.environment;
+  final Map<String, String> env = environment ?? Platform.environment;
   return HostTool(
     name: 'aapt2',
     purpose: 'read the package name and launchable activity out of the APK',
@@ -174,8 +174,8 @@ HostTool iproxyTool({Map<String, String>? environment}) => HostTool(
 
 /// The browser a web run opens the app in.
 HostTool chromeTool({Map<String, String>? environment}) {
-  final env = environment ?? Platform.environment;
-  final override = env['CHROME_EXECUTABLE'];
+  final Map<String, String> env = environment ?? Platform.environment;
+  final String? override = env['CHROME_EXECUTABLE'];
   return HostTool(
     name: 'Chrome',
     purpose: 'run the app in a browser',
@@ -211,10 +211,10 @@ HostTool chromeTool({Map<String, String>? environment}) {
 List<String> androidSdkRoots(Map<String, String> environment) {
   final roots = <String>[];
   for (final key in const ['ANDROID_HOME', 'ANDROID_SDK_ROOT']) {
-    final value = environment[key];
+    final String? value = environment[key];
     if (value != null && value.isNotEmpty) roots.add(value);
   }
-  final home = environment['HOME'];
+  final String? home = environment['HOME'];
   if (Platform.isMacOS && home != null && home.isNotEmpty) {
     roots.add(p.join(home, 'Library', 'Android', 'sdk'));
   }
@@ -229,7 +229,7 @@ List<String> androidSdkRoots(Map<String, String> environment) {
 List<String> buildToolsVersions(String sdkRoot) {
   final dir = Directory(p.join(sdkRoot, 'build-tools'));
   if (!dir.existsSync()) return const [];
-  final versions =
+  final List<String> versions =
       dir
           .listSync()
           .whereType<Directory>()
@@ -240,11 +240,11 @@ List<String> buildToolsVersions(String sdkRoot) {
 }
 
 int _compareVersions(String a, String b) {
-  final left = _versionSegments(a);
-  final right = _versionSegments(b);
+  final List<int> left = _versionSegments(a);
+  final List<int> right = _versionSegments(b);
   for (var i = 0; i < left.length || i < right.length; i++) {
-    final l = i < left.length ? left[i] : 0;
-    final r = i < right.length ? right[i] : 0;
+    final int l = i < left.length ? left[i] : 0;
+    final int r = i < right.length ? right[i] : 0;
     if (l != r) return l.compareTo(r);
   }
   // Same numbers: `34.0.0-rc1` is not `34.0.0`, and a stable name sorts first
@@ -261,7 +261,7 @@ String _androidSdkRemedy(
   required String component,
   required String sdkmanagerPackage,
 }) {
-  final roots = androidSdkRoots(environment);
+  final List<String> roots = androidSdkRoots(environment);
   if (roots.isEmpty) {
     return 'Neither ANDROID_HOME nor ANDROID_SDK_ROOT is set. Point one at '
         'your Android SDK root (Android Studio installs it at '

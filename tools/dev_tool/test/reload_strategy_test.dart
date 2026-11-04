@@ -21,7 +21,47 @@ import 'package:vm_service/vm_service.dart';
 
 import 'fakes.dart';
 
-DeviceSession _sessionWithoutVmClient() => DeviceSession(
+typedef _Dir = Directory;
+typedef _Names = List<String>;
+typedef _Outcome = StrategyOutcome;
+typedef _Session = DeviceSession;
+typedef _Fake = FakeVmService;
+typedef _Client = VmServiceClient;
+typedef _S = DwdsReloadStrategy;
+
+typedef _Wire = Map<String, dynamic>;
+
+typedef _Sub = StreamSubscription<logging.LogRecord>;
+
+typedef _Recorder = ({
+  List<Map<String, dynamic>> announced,
+  List<String> logged,
+});
+
+typedef _Logged = ({_Outcome outcome, List<String> messages});
+
+/// Runs [operation] with the root logger at `ALL`, and returns its outcome
+/// with the message of every `dev_tool.reload` record logged meanwhile.
+Future<_Logged> _logged(Future<_Outcome> Function() operation) async {
+  final records = <logging.LogRecord>[];
+  final logging.Level rootLevel = logging.Logger.root.level;
+  logging.Logger.root.level = logging.Level.ALL;
+  final _Sub sub = logging.Logger.root.onRecord.listen(records.add);
+  try {
+    return (
+      outcome: await operation(),
+      messages: [
+        for (final r in records)
+          if (r.loggerName == 'dev_tool.reload') '${r.message}',
+      ],
+    );
+  } finally {
+    await sub.cancel();
+    logging.Logger.root.level = rootLevel;
+  }
+}
+
+_Session _sessionWithoutVmClient() => DeviceSession(
   device: MacOSDevice(),
   appInstance: AppInstance(process: FakeProcess()),
   vmClient: null,
@@ -38,17 +78,17 @@ DeviceSession _sessionWithoutVmClient() => DeviceSession(
 CompileResult writeCompile(Directory dir) {
   final dillPath = '${dir.path}/out.dill';
   const code = 'main module code';
-  final metadata = json.encode({'name': 'main', 'libraries': <Object>[]});
+  final String meta = json.encode({'name': 'main', 'libraries': <Object>[]});
   File('$dillPath.json').writeAsStringSync(
     json.encode({
       '/main.lib.js': {
         'code': [0, code.length],
-        'metadata': [0, metadata.length],
+        'metadata': [0, meta.length],
       },
     }),
   );
   File('$dillPath.sources').writeAsStringSync(code);
-  File('$dillPath.metadata').writeAsStringSync(metadata);
+  File('$dillPath.metadata').writeAsStringSync(meta);
   // The kernel itself: the native verbs upload this file into the VM's devFS,
   // and one that is not there is refused before any of them reaches the VM.
   File(dillPath).writeAsBytesSync([1, 2, 3]);
@@ -58,7 +98,7 @@ CompileResult writeCompile(Directory dir) {
 void main() {
   late CompileResult compiled;
   setUp(() {
-    final dir = Directory.systemTemp.createTempSync('reload_strategy_');
+    final _Dir dir = Directory.systemTemp.createTempSync('reload_strategy_');
     addTearDown(() => dir.deleteSync(recursive: true));
     compiled = writeCompile(dir);
   });
@@ -69,9 +109,10 @@ void main() {
     // be reloaded would report success, telling the user an edit is live when
     // no process received it.
     test('reports unsupported when no session has a VM service', () async {
-      final outcome = await VmServiceReloadStrategy().applyReload(compiled, [
-        _sessionWithoutVmClient(),
-      ]);
+      final _Outcome outcome = await VmServiceReloadStrategy().applyReload(
+        compiled,
+        [_sessionWithoutVmClient()],
+      );
 
       expect(outcome, isA<StrategyUnsupported>());
       expect(outcome.isSuccess, isFalse);
@@ -79,46 +120,48 @@ void main() {
     });
 
     test('reports unsupported for restart on the same grounds', () async {
-      final outcome = await VmServiceReloadStrategy().applyRestart(compiled, [
-        _sessionWithoutVmClient(),
-      ]);
+      final _Outcome outcome = await VmServiceReloadStrategy().applyRestart(
+        compiled,
+        [_sessionWithoutVmClient()],
+      );
 
       expect(outcome, isA<StrategyUnsupported>());
       expect(outcome.isSuccess, isFalse);
     });
 
-    test(
-      'an app that took the kernel and then threw is not a success',
-      () async {
-        // This path keeps no compiler baseline per app, so "applied, then threw"
-        // has nothing to change here — but it must still not read as applied:
-        // the user's edit is live and the app is broken.
-        final fake = FakeVmService(
-          isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
-          emitFlutterErrorOnReload: true,
-        );
-        final client = VmServiceClient(connector: (_) async => fake);
-        await client.connect(Uri.parse('http://127.0.0.1:8181/'));
-        final session = DeviceSession(
-          device: MacOSDevice(),
-          appInstance: AppInstance(process: FakeProcess()),
-          vmClient: client,
-          appId: 'app',
-        );
+    test('an app that took the kernel and then threw is not a success', () async {
+      // This path keeps no compiler baseline per app, so "applied, then threw"
+      // has nothing to change here — but it must still not read as applied:
+      // the user's edit is live and the app is broken.
+      final fake = FakeVmService(
+        isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
+        emitFlutterErrorOnReload: true,
+      );
+      final client = VmServiceClient(connector: (_) async => fake);
+      await client.connect(Uri.parse('http://127.0.0.1:8181/'));
+      final session = DeviceSession(
+        device: MacOSDevice(),
+        appInstance: AppInstance(process: FakeProcess()),
+        vmClient: client,
+        appId: 'app',
+      );
 
-        final outcome = await VmServiceReloadStrategy().applyReload(compiled, [
-          session,
-        ]);
+      final _Outcome outcome = await VmServiceReloadStrategy().applyReload(
+        compiled,
+        [session],
+      );
 
-        expect(outcome.isSuccess, isFalse);
-        expect(outcome, isA<StrategyRejected>());
-        expect((outcome as StrategyRejected).refused, ['app']);
-      },
-    );
+      expect(outcome.isSuccess, isFalse);
+      expect(outcome, isA<StrategyRejected>());
+      expect((outcome as StrategyRejected).refused, ['app']);
+    });
 
     // An empty device list is the same shape of lie, reached a different way.
     test('reports unsupported when there are no sessions at all', () async {
-      final outcome = await VmServiceReloadStrategy().applyReload(compiled, []);
+      final _Outcome outcome = await VmServiceReloadStrategy().applyReload(
+        compiled,
+        [],
+      );
 
       expect(outcome, isA<StrategyUnsupported>());
       expect(outcome.isSuccess, isFalse);
@@ -129,7 +172,7 @@ void main() {
     // Same lie as the reload and restart arms: `[].every(...)` is true, so a
     // run where nothing could receive the assets would report them applied.
     test('reports unsupported when no session has a VM service', () async {
-      final outcome = await VmServiceReloadStrategy().applyAssets(
+      final _Outcome outcome = await VmServiceReloadStrategy().applyAssets(
         {'assets/logo.png'},
         [_sessionWithoutVmClient()],
       );
@@ -199,16 +242,15 @@ void main() {
     test(
       'an app that never answers an asset push is timed out, not refused',
       () async {
-        final (session, fake, client) = await wedgeable();
+        final (_Session session, _Fake fake, _Client client) =
+            await wedgeable();
         final gate = Completer<void>();
         fake.callServiceExtensionGate = gate;
 
-        final outcome = await bounded().applyAssets(
+        final rejected = (await bounded().applyAssets(
           {'assets/gone.png'},
           [session],
-        );
-
-        final rejected = outcome as StrategyRejected;
+        )) as StrategyRejected;
         // "Refused" claims the app answered no. It never answered, and what it
         // is showing is unknown — the direct analog of ApplyTimedOut being its
         // own type rather than an ApplyFailed.
@@ -231,17 +273,17 @@ void main() {
     test(
       'a changed shader is reinitialized before the app reassembles',
       () async {
-        final (session, fake, _) = await wedgeable();
+        final (_Session session, _Fake fake, _) = await wedgeable();
         const glow = 'packages/pkg/shaders/glow.frag';
 
-        final outcome = await VmServiceReloadStrategy().applyAssets(
+        final _Outcome outcome = await VmServiceReloadStrategy().applyAssets(
           {glow, 'assets/logo.png'},
           [session],
           shaders: {glow},
         );
 
         expect(outcome.isSuccess, isTrue, reason: '$outcome');
-        final calls = [for (final c in fake.extensionCalls) c.method];
+        final _Names calls = [for (final c in fake.extensionCalls) c.method];
         expect(
           calls.where((m) => m == 'ext.ui.window.reinitializeShader'),
           hasLength(1),
@@ -260,11 +302,11 @@ void main() {
     );
 
     test('the same bound covers a hung hot reload', () async {
-      final (session, fake, client) = await wedgeable();
+      final (_Session session, _Fake fake, _Client client) = await wedgeable();
       final gate = Completer<void>();
       fake.reloadSourcesGate = gate;
 
-      final outcome = await bounded().applyReload(compiled, [session]);
+      final _Outcome outcome = await bounded().applyReload(compiled, [session]);
 
       expect((outcome as StrategyRejected).timedOut, ['app']);
       expect(client.isConnected, isFalse);
@@ -273,11 +315,13 @@ void main() {
     });
 
     test('the same bound covers a hung hot restart', () async {
-      final (session, fake, client) = await wedgeable();
+      final (_Session session, _Fake fake, _Client client) = await wedgeable();
       final gate = Completer<void>();
       fake.callMethodGate = gate;
 
-      final outcome = await bounded().applyRestart(compiled, [session]);
+      final _Outcome outcome = await bounded().applyRestart(compiled, [
+        session,
+      ]);
 
       expect((outcome as StrategyRejected).timedOut, ['app']);
       expect(client.isConnected, isFalse);
@@ -285,29 +329,24 @@ void main() {
       await release(fake, gate);
     });
 
-    test(
-      'a device that answered and one that did not are counted apart',
-      () async {
-        final (hung, hungFake, _) = await wedgeable(appId: 'hung');
-        final (live, _, __) = await wedgeable(appId: 'live');
-        final gate = Completer<void>();
-        hungFake.callServiceExtensionGate = gate;
+    test('a device that answered and one that did not are counted apart', () async {
+      final (_Session hung, _Fake hungFake, _) = await wedgeable(appId: 'hung');
+      final (_Session live, _, _Client __) = await wedgeable(appId: 'live');
+      final gate = Completer<void>();
+      hungFake.callServiceExtensionGate = gate;
 
-        final outcome = await bounded().applyAssets(
-          {'assets/gone.png'},
-          [live, hung],
-        );
+      final rejected = (await bounded().applyAssets(
+        {'assets/gone.png'},
+        [live, hung],
+      )) as StrategyRejected;
+      expect(rejected.applied, ['live']);
+      expect(rejected.timedOut, ['hung']);
+      // The count is over every device, not over the refused-plus-applied pair
+      // a timeout is missing from.
+      expect(rejected.message, contains('1 of 2 device(s)'));
 
-        final rejected = outcome as StrategyRejected;
-        expect(rejected.applied, ['live']);
-        expect(rejected.timedOut, ['hung']);
-        // The count is over every device, not over the refused-plus-applied pair
-        // a timeout is missing from.
-        expect(rejected.message, contains('1 of 2 device(s)'));
-
-        await release(hungFake, gate);
-      },
-    );
+      await release(hungFake, gate);
+    });
 
     // The failure-coupled path: a dropped connection sends the next command
     // through `_withReconnect` into `connect`, which has to be timed — a
@@ -336,13 +375,12 @@ void main() {
 
       // Deliberately far longer than the connect budget: the bound that has to
       // save this one is the client's, not the strategy's.
-      final outcome = await VmServiceReloadStrategy(
-        rpcTimeout: const Duration(seconds: 30),
-      ).applyAssets({'assets/gone.png'}, [session]);
 
       // Refused is the true verdict here: a connect that timed out ran no part
       // of the apply, so nothing landed.
-      final rejected = outcome as StrategyRejected;
+      final rejected = (await VmServiceReloadStrategy(
+        rpcTimeout: const Duration(seconds: 30),
+      ).applyAssets({'assets/gone.png'}, [session])) as StrategyRejected;
       expect(rejected.refused, ['app']);
       expect(rejected.timedOut, isEmpty);
       expect(dials, 2);
@@ -386,7 +424,7 @@ void main() {
       bool programAlreadyServed = true,
       Future<void> Function()? loadFirstProgram,
     }) {
-      final server = stubServer();
+      final WebModuleServer server = stubServer();
       if (programAlreadyServed)
         server.updateModules(compiled.dillPath, full: true);
       return (
@@ -422,11 +460,11 @@ void main() {
         // landing and the browser connecting. Navigating there re-loads a
         // page that was loading anyway.
         var navigations = 0;
-        final (:strategy, server: _) = dwds(
+        final (:_S strategy, server: _) = dwds(
           loadFirstProgram: () async => navigations++,
         );
 
-        final outcome = await strategy.applyRestart(compiled, []);
+        final _Outcome outcome = await strategy.applyRestart(compiled, []);
 
         expect(outcome, isA<StrategyApplied>());
         expect(navigations, 1);
@@ -438,7 +476,7 @@ void main() {
       () async {
         // Delegating to applyRestart for a CDP page reload would only recurse
         // into the same null check, since restart needs a VM service too.
-        final outcome = await strategy().applyReload(compiled, []);
+        final _Outcome outcome = await strategy().applyReload(compiled, []);
 
         expect(outcome, isA<StrategyUnsupported>());
         expect(outcome.message, contains('no browser client connected yet'));
@@ -447,27 +485,15 @@ void main() {
 
     test('a failed DWDS reload is rejected and logged', () async {
       final service = FakeVmService(isolates: [isolate])..throwOnReload = true;
-      final s = strategy();
+      final _S s = strategy();
       await s.attachVmService(service);
 
-      final records = <logging.LogRecord>[];
-      final rootLevel = logging.Logger.root.level;
-      logging.Logger.root.level = logging.Level.ALL;
-      final sub = logging.Logger.root.onRecord.listen(records.add);
-      StrategyOutcome outcome;
-      try {
-        outcome = await s.applyReload(compiled, []);
-      } finally {
-        await sub.cancel();
-        logging.Logger.root.level = rootLevel;
-      }
+      final _Logged logged = await _logged(() => s.applyReload(compiled, []));
 
-      expect(outcome, isA<StrategyRejected>());
-      expect(outcome.message, contains('DWDS hot reload failed'));
+      expect(logged.outcome, isA<StrategyRejected>());
+      expect(logged.outcome.message, contains('DWDS hot reload failed'));
       expect(
-        records
-            .where((r) => r.loggerName == 'dev_tool.reload')
-            .map((r) => '${r.message}'),
+        logged.messages,
         contains(contains('dwds_hot_reload_failed')),
       );
     });
@@ -481,7 +507,7 @@ void main() {
       () async {
         final service = FakeVmService(isolates: [isolate])
           ..extensionRPCs = const [];
-        final s = strategy();
+        final _S s = strategy();
         await s.attachVmService(service);
         final client = VmServiceClient(connector: (_) async => service);
         await client.connect(
@@ -496,7 +522,10 @@ void main() {
           appId: 'web',
         );
 
-        final outcome = await s.applyAssets({'assets/a.png'}, [session]);
+        final _Outcome outcome = await s.applyAssets(
+          {'assets/a.png'},
+          [session],
+        );
 
         expect(outcome, isA<StrategyUnsupported>());
         expect(outcome.message, contains('ext.flutter.evict'));
@@ -512,10 +541,10 @@ void main() {
 
     test('a successful restart is applied', () async {
       final service = FakeVmService(isolates: [isolate]);
-      final s = strategy();
+      final _S s = strategy();
       await s.attachVmService(service);
 
-      final outcome = await s.applyRestart(compiled, []);
+      final _Outcome outcome = await s.applyRestart(compiled, []);
 
       expect(outcome, isA<StrategyApplied>());
       expect(service.hotRestartMethod, 'hotRestart');
@@ -529,7 +558,7 @@ void main() {
     // would call reloadSources on the isolate DWDS just replaced.
     test('a reload after a restart re-discovers the new isolate', () async {
       final service = FakeVmService(isolates: [isolate]);
-      final s = strategy();
+      final _S s = strategy();
       await s.attachVmService(service);
 
       // Prime the cache the way a pre-restart reload would.
@@ -543,7 +572,7 @@ void main() {
         ..clear()
         ..add(IsolateRef(id: 'isolates/2', name: 'main', number: '2'));
 
-      final outcome = await s.applyReload(compiled, []);
+      final _Outcome outcome = await s.applyReload(compiled, []);
 
       expect(outcome, isA<StrategyApplied>());
       expect(service.lastIsolateId, 'isolates/2');
@@ -551,7 +580,7 @@ void main() {
 
     test('the DDS-namespaced alias is the name actually called', () async {
       final service = FakeVmService(isolates: [isolate]);
-      final s = strategy();
+      final _S s = strategy();
       await s.attachVmService(service);
       service.emitServiceRegistered('hotRestart', 's0.hotRestart');
       await pumpEventQueue();
@@ -564,7 +593,7 @@ void main() {
 
     test('an unregistered service falls back to the bare name', () async {
       final service = FakeVmService(isolates: [isolate]);
-      final s = strategy();
+      final _S s = strategy();
       await s.attachVmService(service);
       service.emitServiceRegistered('hotRestart', 's0.hotRestart');
       await pumpEventQueue();
@@ -583,10 +612,10 @@ void main() {
       test('RPCError $code means no client, not a rejection', () async {
         final service = FakeVmService(isolates: [isolate])
           ..hotRestartError = RPCError('hotRestart', code, 'no clients');
-        final s = strategy();
+        final _S s = strategy();
         await s.attachVmService(service);
 
-        final outcome = await s.applyRestart(compiled, []);
+        final _Outcome outcome = await s.applyRestart(compiled, []);
 
         expect(outcome, isA<StrategyUnsupported>());
         // The page WENT AWAY, as this group's own comment says — a different
@@ -608,10 +637,10 @@ void main() {
           -32601,
           'Method not found: hotRestart',
         );
-      final s = strategy();
+      final _S s = strategy();
       await s.attachVmService(service);
 
-      final outcome = await s.applyRestart(compiled, []);
+      final _Outcome outcome = await s.applyRestart(compiled, []);
 
       expect(outcome, isA<StrategyRejected>());
       expect(outcome.message, contains('Method not found'));
@@ -625,10 +654,10 @@ void main() {
         final gate = Completer<void>();
         final service = FakeVmService(isolates: [isolate])
           ..hotRestartGate = gate;
-        final s = strategy(restartTimeout: const Duration(milliseconds: 50));
+        final _S s = strategy(restartTimeout: const Duration(milliseconds: 50));
         await s.attachVmService(service);
 
-        final outcome = await s.applyRestart(compiled, []);
+        final _Outcome outcome = await s.applyRestart(compiled, []);
 
         expect(outcome, isA<StrategyRejected>());
         expect(outcome.message, contains('did not report a restarted isolate'));
@@ -641,10 +670,13 @@ void main() {
       // tree per request, so the new bytes are already reachable. What is
       // left is the page's own caches.
       final service = FakeVmService(isolates: [isolate]);
-      final s = strategy();
+      final _S s = strategy();
       await s.attachVmService(service);
 
-      final outcome = await s.applyAssets({'assets/a.png', 'assets/b.png'}, []);
+      final _Outcome outcome = await s.applyAssets({
+        'assets/a.png',
+        'assets/b.png',
+      }, []);
 
       expect(outcome, isA<StrategyApplied>());
       expect(
@@ -666,49 +698,41 @@ void main() {
           ..extensionErrors['ext.flutter.evict'] = StateError(
             'connection reset',
           );
-        final s = strategy();
+        final _S s = strategy();
         await s.attachVmService(service);
 
-        final records = <logging.LogRecord>[];
-        final rootLevel = logging.Logger.root.level;
-        logging.Logger.root.level = logging.Level.ALL;
-        final sub = logging.Logger.root.onRecord.listen(records.add);
-        StrategyOutcome outcome;
-        try {
-          outcome = await s.applyAssets({'assets/a.png'}, []);
-        } finally {
-          await sub.cancel();
-          logging.Logger.root.level = rootLevel;
-        }
+        final _Logged logged = await _logged(
+          () => s.applyAssets({'assets/a.png'}, []),
+        );
 
-        expect(outcome, isA<StrategyRejected>());
-        expect(outcome.message, contains('evicting the changed assets failed'));
+        expect(logged.outcome, isA<StrategyRejected>());
         expect(
-          records
-              .where((r) => r.loggerName == 'dev_tool.reload')
-              .map((r) => '${r.message}'),
+          logged.outcome.message,
+          contains('evicting the changed assets failed'),
+        );
+        expect(
+          logged.messages,
           contains(contains('dwds_evict_failed')),
         );
       },
     );
 
-    test(
-      'sends a font change back for a restart instead of claiming success',
-      () async {
-        // The web engine registers fonts once during binding init and exposes no
-        // reload hook, so evicting the bytes changes nothing on screen. Saying
-        // "applied" here is the silent half-success worth ruling out.
-        final service = FakeVmService(isolates: [isolate]);
-        final s = strategy();
-        await s.attachVmService(service);
+    test('sends a font change back for a restart instead of claiming success', () async {
+      // The web engine registers fonts once during binding init and exposes no
+      // reload hook, so evicting the bytes changes nothing on screen. Saying
+      // "applied" here is the silent half-success worth ruling out.
+      final service = FakeVmService(isolates: [isolate]);
+      final _S s = strategy();
+      await s.attachVmService(service);
 
-        final outcome = await s.applyAssets({'assets/fonts/Inter.ttf'}, []);
+      final _Outcome outcome = await s.applyAssets({
+        'assets/fonts/Inter.ttf',
+      }, []);
 
-        expect(outcome, isA<StrategyUnsupported>());
-        expect(outcome.message, contains('hot restart'));
-        expect(service.extensionCalls, isEmpty);
-      },
-    );
+      expect(outcome, isA<StrategyUnsupported>());
+      expect(outcome.message, contains('hot restart'));
+      expect(service.extensionCalls, isEmpty);
+    });
 
     test(
       'sends a shader change back for a restart, as flutter run does',
@@ -716,11 +740,15 @@ void main() {
         // A web page compiles its shaders once; there is no reinitialize hook
         // to send, and evicting the bytes leaves the old program drawing.
         final service = FakeVmService(isolates: [isolate]);
-        final s = strategy();
+        final _S s = strategy();
         await s.attachVmService(service);
 
         const glow = 'packages/pkg/shaders/glow.frag';
-        final outcome = await s.applyAssets({glow}, [], shaders: {glow});
+        final _Outcome outcome = await s.applyAssets(
+          {glow},
+          [],
+          shaders: {glow},
+        );
 
         expect(outcome, isA<StrategyUnsupported>());
         expect(outcome.message, contains('hot restart'));
@@ -731,7 +759,9 @@ void main() {
     test(
       'assets with no browser client are unsupported, not a failure',
       () async {
-        final outcome = await strategy().applyAssets({'assets/a.png'}, []);
+        final _Outcome outcome = await strategy().applyAssets({
+          'assets/a.png',
+        }, []);
 
         expect(outcome, isA<StrategyUnsupported>());
         expect(outcome.message, contains('no browser client connected yet'));
@@ -759,12 +789,12 @@ void main() {
           // navigating once the page has connected', where a connection is
           // possible.
           var navigations = 0;
-          final (:strategy, :server) = dwds(
+          final (:_S strategy, :WebModuleServer server) = dwds(
             programAlreadyServed: false,
             loadFirstProgram: () async => navigations++,
           );
 
-          final outcome = await strategy.applyRestart(compiled, []);
+          final _Outcome outcome = await strategy.applyRestart(compiled, []);
 
           expect(outcome, isA<StrategyApplied>());
           expect(
@@ -780,149 +810,134 @@ void main() {
         },
       );
 
-      test(
-        'a restart after a failed navigation navigates again',
-        () async {
-          // The strand. The first restart compiles a program onto the server
-          // and then fails to navigate — a closed tab is enough, since the
-          // page target is matched by URL. Discriminating on whether the
-          // SERVER holds a program would make every later restart believe the
-          // page already had one, take the DWDS path, and never navigate again
-          // — leaving the session blank for good.
-          var navigations = 0;
-          final (:strategy, server: _) = dwds(
-            programAlreadyServed: false,
-            loadFirstProgram: () async {
-              navigations++;
-              if (navigations == 1) {
-                throw StateError('no debuggable CDP page target');
-              }
-            },
-          );
+      test('a restart after a failed navigation navigates again', () async {
+        // The strand. The first restart compiles a program onto the server
+        // and then fails to navigate — a closed tab is enough, since the
+        // page target is matched by URL. Discriminating on whether the
+        // SERVER holds a program would make every later restart believe the
+        // page already had one, take the DWDS path, and never navigate again
+        // — leaving the session blank for good.
+        var navigations = 0;
+        final (:_S strategy, server: _) = dwds(
+          programAlreadyServed: false,
+          loadFirstProgram: () async {
+            navigations++;
+            if (navigations == 1) {
+              throw StateError('no debuggable CDP page target');
+            }
+          },
+        );
 
-          expect(
-            await strategy.applyRestart(compiled, []),
-            isA<StrategyRejected>(),
-          );
-          expect(navigations, 1, reason: 'the first restart tried to navigate');
+        expect(
+          await strategy.applyRestart(compiled, []),
+          isA<StrategyRejected>(),
+        );
+        expect(navigations, 1, reason: 'the first restart tried to navigate');
 
-          final second = await strategy.applyRestart(compiled, []);
+        final _Outcome second = await strategy.applyRestart(compiled, []);
 
-          expect(
-            navigations,
-            2,
-            reason: 'the page still has no program, so it still needs loading',
-          );
-          expect(second, isA<StrategyApplied>());
-        },
-      );
+        expect(
+          navigations,
+          2,
+          reason: 'the page still has no program, so it still needs loading',
+        );
+        expect(second, isA<StrategyApplied>());
+      });
 
       test('a failed first navigation is rejected and logged', () async {
-        final (:strategy, server: _) = dwds(
+        final (:_S strategy, server: _) = dwds(
           programAlreadyServed: false,
           loadFirstProgram: () async =>
               throw StateError('no debuggable CDP page target'),
         );
 
-        final records = <logging.LogRecord>[];
-        final rootLevel = logging.Logger.root.level;
-        logging.Logger.root.level = logging.Level.ALL;
-        final sub = logging.Logger.root.onRecord.listen(records.add);
-        StrategyOutcome outcome;
-        try {
-          outcome = await strategy.applyRestart(compiled, []);
-        } finally {
-          await sub.cancel();
-          logging.Logger.root.level = rootLevel;
-        }
+        final _Logged logged = await _logged(
+          () => strategy.applyRestart(compiled, []),
+        );
 
-        expect(outcome, isA<StrategyRejected>());
+        expect(logged.outcome, isA<StrategyRejected>());
         expect(
-          outcome.message,
+          logged.outcome.message,
           contains('the page had no program yet and could not be loaded'),
         );
         expect(
-          records
-              .where((r) => r.loggerName == 'dev_tool.reload')
-              .map((r) => '${r.message}'),
+          logged.messages,
           contains(contains('dwds_first_load_failed')),
         );
       });
 
-      test(
-        'a restart stops navigating once the page has connected',
-        () async {
-          // The other side of the same discriminator, so it cannot be
-          // satisfied by navigating unconditionally. A connection is only
-          // possible once the page fetched a boot chain, which the module
-          // server withholds until it holds a program — so a connection is
-          // proof the page has one.
-          var navigations = 0;
-          final (:strategy, server: _) = dwds(
-            programAlreadyServed: false,
-            loadFirstProgram: () async => navigations++,
-          );
+      test('a restart stops navigating once the page has connected', () async {
+        // The other side of the same discriminator, so it cannot be
+        // satisfied by navigating unconditionally. A connection is only
+        // possible once the page fetched a boot chain, which the module
+        // server withholds until it holds a program — so a connection is
+        // proof the page has one.
+        var navigations = 0;
+        final (:_S strategy, server: _) = dwds(
+          programAlreadyServed: false,
+          loadFirstProgram: () async => navigations++,
+        );
 
-          await strategy.applyRestart(compiled, []);
-          expect(navigations, 1);
+        await strategy.applyRestart(compiled, []);
+        expect(navigations, 1);
 
-          await strategy.attachVmService(FakeVmService(isolates: [isolate]));
-          await strategy.applyRestart(compiled, []);
+        await strategy.attachVmService(FakeVmService(isolates: [isolate]));
+        await strategy.applyRestart(compiled, []);
 
-          expect(
-            navigations,
-            1,
-            reason: 'a connected page is hot restarted, not reloaded',
-          );
-        },
-      );
+        expect(
+          navigations,
+          1,
+          reason: 'a connected page is hot restarted, not reloaded',
+        );
+      });
 
       test(
         'a navigation that fails is reported, not counted as applied',
         () async {
-          final (:strategy, server: _) = dwds(
+          final (:_S strategy, server: _) = dwds(
             programAlreadyServed: false,
             loadFirstProgram: () async => throw StateError('no debugging port'),
           );
 
-          final outcome = await strategy.applyRestart(compiled, []);
+          final _Outcome outcome = await strategy.applyRestart(compiled, []);
 
           expect(outcome, isA<StrategyRejected>());
           expect(outcome.message, contains('no debugging port'));
         },
       );
 
-      test(
-        'a reload refuses rather than merging a fraction of a program',
-        () async {
-          final (:strategy, :server) = dwds(programAlreadyServed: false);
-          final service = FakeVmService(isolates: [isolate]);
-          await strategy.attachVmService(service);
+      test('a reload refuses rather than merging a fraction of a program', () async {
+        final (:_S strategy, :WebModuleServer server) = dwds(
+          programAlreadyServed: false,
+        );
+        final service = FakeVmService(isolates: [isolate]);
+        await strategy.attachVmService(service);
 
-          final outcome = await strategy.applyReload(compiled, []);
+        final _Outcome outcome = await strategy.applyReload(compiled, []);
 
-          expect(outcome, isA<StrategyUnsupported>());
-          expect(outcome.message, contains('never loaded a program'));
-          // The refusal has to come BEFORE the merge. An incremental compile
-          // answers with a delta, and a delta merged as a first compile leaves
-          // the server holding part of a program while believing it holds all of
-          // one — after which every later reload builds on that.
-          expect(
-            server.holdsProgram,
-            isFalse,
-            reason: 'nothing may be merged by a reload that refused',
-          );
-        },
-      );
+        expect(outcome, isA<StrategyUnsupported>());
+        expect(outcome.message, contains('never loaded a program'));
+        // The refusal has to come BEFORE the merge. An incremental compile
+        // answers with a delta, and a delta merged as a first compile leaves
+        // the server holding part of a program while believing it holds all of
+        // one — after which every later reload builds on that.
+        expect(
+          server.holdsProgram,
+          isFalse,
+          reason: 'nothing may be merged by a reload that refused',
+        );
+      });
 
       test(
         'assets are not claimed to have reached a page showing nothing',
         () async {
-          final (:strategy, server: _) = dwds(programAlreadyServed: false);
+          final (:_S strategy, server: _) = dwds(programAlreadyServed: false);
           final service = FakeVmService(isolates: [isolate]);
           await strategy.attachVmService(service);
 
-          final outcome = await strategy.applyAssets({'assets/a.png'}, []);
+          final _Outcome outcome = await strategy.applyAssets({
+            'assets/a.png',
+          }, []);
 
           expect(outcome, isA<StrategyUnsupported>());
           expect(outcome.message, contains('never loaded a program'));
@@ -1033,7 +1048,7 @@ void main() {
     });
 
     test('renders the message and recompiled file count', () {
-      final r = report({
+      final _Recorder r = report({
         'message': 'Hot reload successful',
         'filesRecompiled': ['package:app/main.dart'],
       });
@@ -1043,7 +1058,7 @@ void main() {
     });
 
     test('calls out a no-op reload', () {
-      final r = report({
+      final _Recorder r = report({
         'message': 'Hot reload successful',
         'isEmpty': true,
       });
@@ -1075,7 +1090,7 @@ void main() {
       );
 
       test('when the sentence already names the assets that changed', () {
-        final wire = wireFor(
+        final _Wire wire = wireFor(
           const AssetOutcome(
             changed: {'assets/logo.png', 'assets/bg.png'},
             delivery: StrategyApplied(2),
@@ -1083,7 +1098,7 @@ void main() {
         );
         expect(wire['isEmpty'], isTrue);
 
-        final line = report(wire).logged.single;
+        final String line = report(wire).logged.single;
         expect(line, contains('2 asset(s) reloaded'));
         expect(
           line,
@@ -1096,10 +1111,10 @@ void main() {
         // `assetsChanged: 0` is still a clause that finishes the sentence, so
         // the suffix would say the same thing twice, the second time less
         // precisely.
-        final wire = wireFor(const AssetOutcome(rebuiltIdentical: true));
+        final _Wire wire = wireFor(const AssetOutcome(rebuiltIdentical: true));
         expect(wire['assetsChanged'], 0);
 
-        final line = report(wire).logged.single;
+        final String line = report(wire).logged.single;
         expect(line, contains('identical'));
         expect(line, isNot(contains('no changes')));
       });
@@ -1108,7 +1123,7 @@ void main() {
       // outright would satisfy them both; what is wanted is a suffix that
       // appears exactly where nothing else has explained the reload.
       test('but keeps it when no asset clause finished the sentence', () {
-        final wire = wireFor(AssetOutcome.none);
+        final _Wire wire = wireFor(AssetOutcome.none);
         expect(wire.containsKey('assetsChanged'), isFalse);
 
         expect(report(wire).logged.single, contains('no changes'));
@@ -1120,7 +1135,7 @@ void main() {
       test(
         'and still counts the files when the Dart half did do something',
         () {
-          final wire = toWire(
+          final _Wire wire = toWire(
             const CommandReport(
               verb: 'Hot reload',
               outcome: ReloadApplied(
@@ -1135,7 +1150,7 @@ void main() {
             ),
           );
 
-          final line = report(wire).logged.single;
+          final String line = report(wire).logged.single;
           expect(line, contains('1 asset(s) reloaded'));
           expect(line, contains('1 file'));
         },
@@ -1148,7 +1163,7 @@ void main() {
     // that has died — both are silence on the protocol.
     group('announces the outcome for a machine reader', () {
       test('a success, with the whole result map', () {
-        final result = {
+        final Map<String, Object> result = {
           'succeeded': true,
           'message': 'Hot reload successful',
           'filesRecompiled': ['package:dep_lib/catalog.dart'],
@@ -1156,14 +1171,11 @@ void main() {
           'assetsChanged': 2,
         };
 
-        final r = report(result);
+        final _Recorder r = report(result);
 
         expect(
           r.announced.single,
-          {
-            'method': 'app.hotReload',
-            'result': result,
-          },
+          {'method': 'app.hotReload', 'result': result},
           reason:
               'the same map the command response carries, unaltered — one '
               'shape whether the client asked or the watcher did',
@@ -1171,7 +1183,7 @@ void main() {
       });
 
       test('a failure too, which is when it matters most', () {
-        final r = report({
+        final _Recorder r = report({
           'succeeded': false,
           'error': 'lib/main.dart:3:1: Error: boom',
           'message': 'Compilation failed',
@@ -1189,7 +1201,7 @@ void main() {
       });
 
       test('names the command it is the outcome of', () {
-        final r = report(
+        final _Recorder r = report(
           {'message': 'Restart successful'},
           action: 'Hot restart',
           method: 'app.restart',
@@ -1210,7 +1222,7 @@ void main() {
     group('the claim about code already delivered', () {
       String textOf(Map<String, dynamic> result) {
         final records = <logging.LogRecord>[];
-        final sub = logging.Logger.root.onRecord.listen(records.add);
+        final _Sub sub = logging.Logger.root.onRecord.listen(records.add);
         addTearDown(sub.cancel);
         report(result);
         return records.map((r) => (r.object as Map)['text'] as String).join();
@@ -1227,7 +1239,7 @@ void main() {
         // The case the sentence would make a lie: a device that never answered
         // would be told in one line both that what it runs is unknown and that
         // it kept its old code.
-        final text = textOf({
+        final String text = textOf({
           'error': 'app-a: timed out, so what it is running is unknown',
           'runningCode': 'unknown',
         });
@@ -1300,14 +1312,17 @@ void main() {
     test(
       'a failed rebuild is rejected, and the browser is never touched',
       () async {
-        final browser = await _FakeCdpBrowser.start();
+        final _FakeCdpBrowser browser = await _FakeCdpBrowser.start();
         final strategy = WasmReloadStrategy(
           cdpPort: browser.port,
           appUrl: browser.appUrl,
           rebuild: () async => false,
         );
 
-        final outcome = await strategy.applyRestart(compiled, const []);
+        final _Outcome outcome = await strategy.applyRestart(
+          compiled,
+          const [],
+        );
 
         expect(outcome.isSuccess, isFalse);
         expect(outcome.message, 'the WASM rebuild failed');
@@ -1324,32 +1339,22 @@ void main() {
     );
 
     test('a rebuild that throws is rejected and logged', () async {
-      final browser = await _FakeCdpBrowser.start();
+      final _FakeCdpBrowser browser = await _FakeCdpBrowser.start();
       final strategy = WasmReloadStrategy(
         cdpPort: browser.port,
         appUrl: browser.appUrl,
         rebuild: () async => throw StateError('bazel died'),
       );
 
-      final records = <logging.LogRecord>[];
-      final rootLevel = logging.Logger.root.level;
-      logging.Logger.root.level = logging.Level.ALL;
-      final sub = logging.Logger.root.onRecord.listen(records.add);
-      StrategyOutcome outcome;
-      try {
-        outcome = await strategy.applyRestart(compiled, const []);
-      } finally {
-        await sub.cancel();
-        logging.Logger.root.level = rootLevel;
-      }
+      final _Logged logged = await _logged(
+        () => strategy.applyRestart(compiled, const []),
+      );
 
-      expect(outcome.isSuccess, isFalse);
-      expect(outcome.message, contains('WASM hot restart failed'));
+      expect(logged.outcome.isSuccess, isFalse);
+      expect(logged.outcome.message, contains('WASM hot restart failed'));
       expect(browser.received, isEmpty);
       expect(
-        records
-            .where((r) => r.loggerName == 'dev_tool.reload')
-            .map((r) => '${r.message}'),
+        logged.messages,
         contains(contains('wasm_restart_failed')),
       );
       await browser.stop();
@@ -1358,22 +1363,23 @@ void main() {
     test(
       'a successful rebuild reloads the page and reports it applied',
       () async {
-        final browser = await _FakeCdpBrowser.start();
+        final _FakeCdpBrowser browser = await _FakeCdpBrowser.start();
         final strategy = WasmReloadStrategy(
           cdpPort: browser.port,
           appUrl: browser.appUrl,
           rebuild: () async => true,
         );
 
-        final outcome = await strategy.applyRestart(compiled, const []);
+        final _Outcome outcome = await strategy.applyRestart(
+          compiled,
+          const [],
+        );
 
         expect(outcome.isSuccess, isTrue);
         expect(outcome, isA<StrategyApplied>());
-        expect(
-          browser.received,
-          ['Page.reload'],
-          reason: 'the success is the reload, so it has to have been sent',
-        );
+        expect(browser.received, [
+          'Page.reload',
+        ], reason: 'the success is the reload, so it has to have been sent');
         await browser.stop();
       },
     );
@@ -1409,7 +1415,7 @@ class _FakeCdpBrowser {
         await request.response.close();
         return;
       }
-      final socket = await WebSocketTransformer.upgrade(request);
+      final WebSocket socket = await WebSocketTransformer.upgrade(request);
       socket.listen((data) {
         final message = json.decode(data as String) as Map<String, dynamic>;
         received.add(message['method'] as String);

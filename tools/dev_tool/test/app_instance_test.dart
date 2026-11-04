@@ -46,10 +46,10 @@ void main() {
         final fake = FakeVmService(
           isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
         );
-        final client = await connect(fake);
+        final VmServiceClient client = await connect(fake);
         final app = VmServiceAppInstance(id: 'app1', client: client);
 
-        final outcome = await app.applyKernel(
+        final ApplyOutcome outcome = await app.applyKernel(
           dillPath,
           mode: ApplyMode.hotReload,
         );
@@ -67,10 +67,10 @@ void main() {
           isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
           reloadSuccess: false,
         );
-        final client = await connect(fake);
+        final VmServiceClient client = await connect(fake);
         final app = VmServiceAppInstance(id: 'app1', client: client);
 
-        final outcome = await app.applyKernel(
+        final ApplyOutcome outcome = await app.applyKernel(
           dillPath,
           mode: ApplyMode.hotReload,
         );
@@ -83,10 +83,10 @@ void main() {
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
         throwOnReload: true,
       );
-      final client = await connect(fake);
+      final VmServiceClient client = await connect(fake);
       final app = VmServiceAppInstance(id: 'app1', client: client);
 
-      final outcome = await app.applyKernel(
+      final ApplyOutcome outcome = await app.applyKernel(
         dillPath,
         mode: ApplyMode.hotReload,
       );
@@ -108,10 +108,10 @@ void main() {
               'The following _CompileTimeError was thrown '
               'building MyApp(dirty): Lookup failed: email',
         );
-        final client = await connect(fake);
+        final VmServiceClient client = await connect(fake);
         final app = VmServiceAppInstance(id: 'app1', client: client);
 
-        final outcome = await app.applyKernel(
+        final ApplyOutcome outcome = await app.applyKernel(
           dillPath,
           mode: ApplyMode.hotReload,
         );
@@ -132,10 +132,10 @@ void main() {
         emitFlutterErrorOnReload: true,
         flutterErrorText: 'Lookup failed: result in @getters in MyApp',
       );
-      final client = await connect(fake);
+      final VmServiceClient client = await connect(fake);
       final app = VmServiceAppInstance(id: 'app1', client: client);
 
-      final outcome = await app.applyKernel(
+      final ApplyOutcome outcome = await app.applyKernel(
         dillPath,
         mode: ApplyMode.hotRestart,
       );
@@ -152,14 +152,14 @@ void main() {
           isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
           reloadSourcesGate: gate,
         );
-        final client = await connect(fake);
+        final VmServiceClient client = await connect(fake);
         final app = VmServiceAppInstance(
           id: 'app1',
           client: client,
           rpcTimeout: const Duration(milliseconds: 50),
         );
 
-        final outcome = await app.applyKernel(
+        final ApplyOutcome outcome = await app.applyKernel(
           dillPath,
           mode: ApplyMode.hotReload,
         );
@@ -178,7 +178,7 @@ void main() {
           isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
           reloadSourcesGate: gate,
         );
-        final client = await connect(fake);
+        final VmServiceClient client = await connect(fake);
         final app = VmServiceAppInstance(
           id: 'app1',
           client: client,
@@ -209,8 +209,8 @@ void main() {
         final fakeHealthy = FakeVmService(
           isolates: [IsolateRef(id: 'iso-2', name: 'main', number: '1')],
         );
-        final hungClient = await connect(fakeHung);
-        final healthyClient = await connect(fakeHealthy);
+        final VmServiceClient hungClient = await connect(fakeHung);
+        final VmServiceClient healthyClient = await connect(fakeHealthy);
 
         final hungApp = VmServiceAppInstance(
           id: 'hung',
@@ -223,17 +223,17 @@ void main() {
         );
 
         // Fire both in parallel.
-        final hungFuture = hungApp.applyKernel(
+        final Future<ApplyOutcome> hungFuture = hungApp.applyKernel(
           dillPath,
           mode: ApplyMode.hotReload,
         );
-        final healthyFuture = healthyApp.applyKernel(
+        final Future<ApplyOutcome> healthyFuture = healthyApp.applyKernel(
           dillPath,
           mode: ApplyMode.hotReload,
         );
 
         // The healthy one completes promptly without waiting on hungGate.
-        final healthyOutcome = await healthyFuture.timeout(
+        final ApplyOutcome healthyOutcome = await healthyFuture.timeout(
           const Duration(seconds: 2),
         );
         expect(healthyOutcome, isA<Applied>());
@@ -248,10 +248,10 @@ void main() {
       final fake = FakeVmService(
         isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
       );
-      final client = await connect(fake);
+      final VmServiceClient client = await connect(fake);
       final app = VmServiceAppInstance(id: 'app1', client: client);
 
-      final outcome = await app.applyKernel(
+      final ApplyOutcome outcome = await app.applyKernel(
         dillPath,
         mode: ApplyMode.hotRestart,
       );

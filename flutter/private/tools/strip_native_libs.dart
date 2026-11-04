@@ -39,13 +39,13 @@ Map<String, String> _parseArgs(List<String> args) {
   const names = {'--zipper', '--strip', '--input', '--output'};
   final values = <String, String>{};
   for (var i = 0; i < args.length; i++) {
-    final name = args[i];
+    final String name = args[i];
     if (!names.contains(name) || i + 1 >= args.length) {
       throw ArgumentError('unexpected argument: $name');
     }
     values[name] = args[++i];
   }
-  final missing = names.difference(values.keys.toSet());
+  final Set<String> missing = names.difference(values.keys.toSet());
   if (missing.isNotEmpty) {
     throw ArgumentError('missing ${missing.join(', ')}');
   }
@@ -57,7 +57,7 @@ Future<void> _run(
   List<String> arguments, {
   String? workingDirectory,
 }) async {
-  final result = await Process.run(
+  final ProcessResult result = await Process.run(
     executable,
     arguments,
     workingDirectory: workingDirectory,
@@ -73,13 +73,13 @@ Future<void> _run(
 }
 
 Future<void> main(List<String> args) async {
-  final options = _parseArgs(args);
-  final zipper = File(options['--zipper']!).absolute.path;
-  final strip = File(options['--strip']!).absolute.path;
-  final input = File(options['--input']!).absolute.path;
-  final outputFile = File(options['--output']!).absolute;
+  final Map<String, String> options = _parseArgs(args);
+  final String zipper = File(options['--zipper']!).absolute.path;
+  final String strip = File(options['--strip']!).absolute.path;
+  final String input = File(options['--input']!).absolute.path;
+  final File outputFile = File(options['--output']!).absolute;
   outputFile.parent.createSync(recursive: true);
-  final output = outputFile.path;
+  final String output = outputFile.path;
 
   final scratch = Directory('$output.scratch')..createSync(recursive: true);
   try {
@@ -87,12 +87,12 @@ Future<void> main(List<String> args) async {
     // zipper takes `-d` relative to its working directory, absolute or not.
     await _run(zipper, ['x', input], workingDirectory: unpacked.path);
 
-    final entries = [
+    final List<String> entries = [
       for (final file in unpacked.listSync(recursive: true).whereType<File>())
         file.path.substring(unpacked.path.length + 1),
     ]..sort();
 
-    final libraries = nativeLibraries(entries);
+    final List<String> libraries = nativeLibraries(entries);
     if (libraries.isEmpty) {
       throw StateError('$input has no lib/**.so entry to strip');
     }
@@ -109,7 +109,7 @@ Future<void> main(List<String> args) async {
     // xtool_pack.dart.
     for (final entry in entries) {
       final file = File('${unpacked.path}/$entry');
-      final mode = file.statSync().mode;
+      final int mode = file.statSync().mode;
       final normalized = (mode & 0x49) != 0 ? 0x1ed : 0x1a4;
       chmodlib.chmodFile(file.path, normalized);
     }

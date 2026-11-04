@@ -16,6 +16,7 @@
 
 import 'dart:io' as io;
 
+import 'package:file/file.dart';
 import 'package:file/local.dart';
 import 'package:file/memory.dart';
 
@@ -74,19 +75,19 @@ Never _fail(String message) {
     if (!arg.startsWith('--')) {
       _fail('unexpected positional argument "$arg".\n$_usage');
     }
-    final body = arg.substring(2);
-    final eq = body.indexOf('=');
+    final String body = arg.substring(2);
+    final int eq = body.indexOf('=');
     if (eq < 0) {
       if (!_switches.contains(body)) {
         _fail('flag "--$body" requires a value (--$body=...).\n$_usage');
       }
       parsed[body] = 'true';
     } else {
-      final name = body.substring(0, eq);
+      final String name = body.substring(0, eq);
       if (_switches.contains(name)) {
         _fail('flag "--$name" takes no value.\n$_usage');
       }
-      final value = body.substring(eq + 1);
+      final String value = body.substring(eq + 1);
       if (name == 'arb-file') {
         if (value.isEmpty) {
           _fail('flag "--arb-file" requires a non-empty path.\n$_usage');
@@ -111,11 +112,12 @@ String _drain(BufferLogger logger) => <String>[
 ].where((String s) => s.trim().isNotEmpty).join();
 
 Future<void> main(List<String> argv) async {
-  final parsed = _parseArgs(argv);
-  final args = parsed.options;
-  final arbFiles = parsed.arbFiles;
+  final ({List<String> arbFiles, Map<String, String> options}) parsed =
+      _parseArgs(argv);
+  final Map<String, String> args = parsed.options;
+  final List<String> arbFiles = parsed.arbFiles;
 
-  final outputDir = args['output-dir'];
+  final String? outputDir = args['output-dir'];
   if (outputDir == null || outputDir.isEmpty || arbFiles.isEmpty) {
     _fail('--output-dir and at least one --arb-file are required.\n$_usage');
   }
@@ -124,19 +126,16 @@ Future<void> main(List<String> argv) async {
   final memFs = MemoryFileSystem.test();
   final logger = BufferLogger.test();
 
-  final projectDirPath = args['project-dir'] ?? '.';
-  final setup = _localizationSetup(
-    args: args,
-    arbFiles: arbFiles,
-    localFs: localFs,
-  );
-  final options = setup.options;
-  final arbDir = setup.arbDir;
+  final String projectDirPath = args['project-dir'] ?? '.';
+  final ({String arbDir, LocalizationOptions options}) setup =
+      _localizationSetup(args: args, arbFiles: arbFiles, localFs: localFs);
+  final LocalizationOptions options = setup.options;
+  final String arbDir = setup.arbDir;
 
   try {
-    final memProjectDir = memFs.directory(projectDirPath)
+    final Directory memProjectDir = memFs.directory(projectDirPath)
       ..createSync(recursive: true);
-    final memInputDir = memFs.directory(
+    final Directory memInputDir = memFs.directory(
       memFs.path.join(memProjectDir.path, arbDir),
     )..createSync(recursive: true);
 
@@ -156,7 +155,7 @@ Future<void> main(List<String> argv) async {
       memInputPath: memInputDir.path,
     );
 
-    final generator = await generateLocalizations(
+    final LocalizationsGenerator generator = await generateLocalizations(
       projectDir: memProjectDir,
       options: options,
       logger: logger,
@@ -182,10 +181,8 @@ Future<void> main(List<String> argv) async {
 
 /// Surfaces everything the generator printed on stderr.
 void _reportGeneratorOutput(BufferLogger logger) {
-  final output = _drain(logger);
-  if (output.isNotEmpty) {
-    io.stderr.write(output);
-  }
+  final String output = _drain(logger);
+  if (output.isNotEmpty) io.stderr.write(output);
 }
 
 /// The generator options for [args] and the logical `.arb` directory.
@@ -197,12 +194,12 @@ void _reportGeneratorOutput(BufferLogger logger) {
   required List<String> arbFiles,
   required LocalFileSystem localFs,
 }) {
-  final rawArbDir = args['arb-dir'];
-  final arbDir = (rawArbDir != null && rawArbDir.isNotEmpty)
+  final String? rawArbDir = args['arb-dir'];
+  final String arbDir = (rawArbDir != null && rawArbDir.isNotEmpty)
       ? rawArbDir
       : localFs.path.dirname(arbFiles.first);
 
-  final outputDir = args['output-dir']!;
+  final String outputDir = args['output-dir']!;
   final options = LocalizationOptions(
     arbDir: arbDir,
     outputDir: outputDir,
@@ -241,15 +238,13 @@ void _writeGeneratorOutputs({
   required LocalFileSystem localFs,
   required MemoryFileSystem memFs,
 }) {
-  final localOutputDir = localFs.directory(
+  final Directory localOutputDir = localFs.directory(
     localFs.path.join(projectDirPath, outputDir),
   )..createSync(recursive: true);
   for (final outPath in outputFileList) {
-    final memFile = memFs.file(outPath);
-    final dstFile = localOutputDir.childFile(memFile.basename);
-    if (dstFile.existsSync()) {
-      dstFile.deleteSync();
-    }
+    final File memFile = memFs.file(outPath);
+    final File dstFile = localOutputDir.childFile(memFile.basename);
+    if (dstFile.existsSync()) dstFile.deleteSync();
     dstFile.writeAsBytesSync(memFile.readAsBytesSync());
   }
 }
@@ -266,19 +261,17 @@ void _stageArbInputs({
   required MemoryFileSystem memFs,
   required String memInputPath,
 }) {
-  final memInputDir = memFs.directory(memInputPath);
+  final Directory memInputDir = memFs.directory(memInputPath);
   final stagedSources = <String, String>{};
   for (final arbPath in arbFiles) {
-    var srcFile = localFs.file(arbPath);
+    File srcFile = localFs.file(arbPath);
     if (!srcFile.existsSync() && projectDirPath != '.') {
       srcFile = localFs.file(localFs.path.join(projectDirPath, arbPath));
     }
-    if (!srcFile.existsSync()) {
-      _fail('arb file "$arbPath" does not exist.');
-    }
-    final basename = localFs.path.basename(arbPath);
-    final resolvedPath = localFs.path.normalize(srcFile.path);
-    final previous = stagedSources[basename];
+    if (!srcFile.existsSync()) _fail('arb file "$arbPath" does not exist.');
+    final String basename = localFs.path.basename(arbPath);
+    final String resolvedPath = localFs.path.normalize(srcFile.path);
+    final String? previous = stagedSources[basename];
     if (previous != null && previous != resolvedPath) {
       _fail(
         'multiple --arb-file inputs share basename "$basename": '
@@ -301,14 +294,14 @@ void _stageHeaderFile({
   required String memInputPath,
 }) {
   if (headerFile == null) return;
-  var localHeader = localFs.file(
+  File localHeader = localFs.file(
     localFs.path.join(projectDirPath, arbDir, headerFile),
   );
   if (!localHeader.existsSync()) {
     localHeader = localFs.file(localFs.path.join(projectDirPath, headerFile));
   }
   if (localHeader.existsSync()) {
-    final memHeader = memFs.directory(memInputPath).childFile(headerFile);
+    final File memHeader = memFs.directory(memInputPath).childFile(headerFile);
     memHeader.parent.createSync(recursive: true);
     memHeader.writeAsBytesSync(localHeader.readAsBytesSync());
   }

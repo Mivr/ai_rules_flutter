@@ -28,7 +28,7 @@ String _template(String name, String content) {
   String label = 'web/index.html',
 }) {
   final errors = <String>[];
-  final outputs = substituteTemplates({
+  final Map<String, String> outputs = substituteTemplates({
     'web_defines': webDefines,
     'keep_placeholders': keepPlaceholders,
     'files': [
@@ -56,7 +56,7 @@ void main() {
     test('every occurrence of the base href is replaced', () {
       // `flutter create` emits one in <base>, but a template may reference it
       // again; upstream's replaceAll semantics take all of them.
-      final (out, errors) = _runOne(
+      final (String out, List<String> errors) = _runOne(
         '<base href="\$FLUTTER_BASE_HREF">\n<p>\$FLUTTER_BASE_HREF</p>',
         baseHref: '/myapp/',
       );
@@ -65,7 +65,7 @@ void main() {
     });
 
     test('the static assets url is replaced', () {
-      final (out, errors) = _runOne(
+      final (String out, List<String> errors) = _runOne(
         '<link href="\$FLUTTER_STATIC_ASSETS_URL/icons/a.png">',
         staticAssetsUrl: 'https://cdn.example.com',
       );
@@ -76,7 +76,7 @@ void main() {
 
   group('web defines', () {
     test('a declared variable is substituted', () {
-      final (out, errors) = _runOne(
+      final (String out, List<String> errors) = _runOne(
         '<meta name="api" content="{{API_URL}}">',
         webDefines: {'API_URL': 'https://api.example.com'},
       );
@@ -85,7 +85,9 @@ void main() {
     });
 
     test('an undeclared variable is an error naming file and line', () {
-      final (out, errors) = _runOne('<html>\n<body>\n{{API_URL}}\n</body>');
+      final (String out, List<String> errors) = _runOne(
+        '<html>\n<body>\n{{API_URL}}\n</body>',
+      );
       expect(errors, hasLength(1));
       expect(errors.single, contains('web/index.html:3'));
       expect(errors.single, contains('{{API_URL}}'));
@@ -98,7 +100,7 @@ void main() {
     });
 
     test('a define no template references is an error', () {
-      final (_, errors) = _runOne(
+      final (_, List<String> errors) = _runOne(
         '<html></html>',
         webDefines: {'UNUSED': 'x'},
       );
@@ -108,7 +110,7 @@ void main() {
     });
 
     test('a define shadowing a built-in name is an error', () {
-      final (_, errors) = _runOne(
+      final (_, List<String> errors) = _runOne(
         '{{flutter_js}}',
         webDefines: {'flutter_js': 'nope'},
       );
@@ -116,7 +118,7 @@ void main() {
     });
 
     test('a name in both web_defines and keep_placeholders is an error', () {
-      final (_, errors) = _runOne(
+      final (_, List<String> errors) = _runOne(
         '{{BOTH}}',
         webDefines: {'BOTH': 'x'},
         keepPlaceholders: ['BOTH'],
@@ -135,13 +137,13 @@ void main() {
       // not match it, and neither must ours, or error-by-default would break
       // every page using a client-side template language.
       const html = '<div>{{ item.name }}</div>\n<div>{{#each xs}}</div>';
-      final (out, errors) = _runOne(html);
+      final (String out, List<String> errors) = _runOne(html);
       expect(errors, isEmpty);
       expect(out, html);
     });
 
     test('keep_placeholders ships the placeholder as written', () {
-      final (out, errors) = _runOne(
+      final (String out, List<String> errors) = _runOne(
         '<div>{{vueThing}}</div>',
         keepPlaceholders: ['vueThing'],
       );
@@ -152,7 +154,7 @@ void main() {
     test('an unused keep_placeholders entry is not an error', () {
       // Unlike an unused define, an unused passthrough cannot change the
       // output, so erroring would only make a shared list brittle.
-      final (_, errors) = _runOne(
+      final (_, List<String> errors) = _runOne(
         '<html></html>',
         keepPlaceholders: ['neverSeen'],
       );
@@ -162,8 +164,8 @@ void main() {
 
   group('built-ins', () {
     test('a literal value and a file are both substituted', () {
-      final jsPath = _template('flutter.js', 'console.log("loader");');
-      final (out, errors) = _runOne(
+      final String jsPath = _template('flutter.js', 'console.log("loader");');
+      final (String out, List<String> errors) = _runOne(
         '{{flutter_js}}\n{{flutter_service_worker_version}}',
         builtins: {
           'flutter_js': {'file': jsPath},
@@ -177,7 +179,7 @@ void main() {
     test('the worker version is expressible as null when pwa is off', () {
       // An upstream-shaped bootstrap references the built-in unconditionally;
       // with no worker the value is the literal `null`, not a missing name.
-      final (out, errors) = _runOne(
+      final (String out, List<String> errors) = _runOne(
         'serviceWorkerVersion: {{flutter_service_worker_version}}',
         builtins: {
           'flutter_service_worker_version': {'value': 'null'},
@@ -189,15 +191,15 @@ void main() {
 
     test('a later file inlines an earlier file\'s substituted result', () {
       final errors = <String>[];
-      final bootstrap = _template(
+      final String bootstrap = _template(
         'boot.js',
         '{{flutter_build_config}}\nboot();',
       );
-      final index = _template(
+      final String index = _template(
         'index.html',
         '<script>{{flutter_bootstrap_js}}</script>',
       );
-      final outputs = substituteTemplates({
+      final Map<String, String> outputs = substituteTemplates({
         'files': [
           {
             'template': bootstrap,
@@ -241,13 +243,13 @@ void main() {
       // its own, so a user template — and any `web_defines` in it — reached
       // `bazel build` and silently nothing at all under `-d chrome`.
       final errors = <String>[];
-      final template = _template(
+      final String template = _template(
         'boot.js',
         '_flutter.loader.loadEntrypoint();\n'
             '{{flutter_build_config}}\n'
             'window.api = "{{API_URL}}";',
       );
-      final outputs = substituteTemplates({
+      final Map<String, String> outputs = substituteTemplates({
         'web_defines': {'API_URL': 'https://api.example.com'},
         'files': [
           {
@@ -296,7 +298,7 @@ void main() {
     test('a built-in this file is not given is an error that says so', () {
       // The generic "supply it with web_defines" advice would be a dead end:
       // a define named after a built-in is refused as shadowing.
-      final (_, errors) = _runOne('{{flutter_bootstrap_js}}');
+      final (_, List<String> errors) = _runOne('{{flutter_bootstrap_js}}');
       expect(errors, hasLength(1));
       expect(errors.single, contains('supplied by the build'));
       expect(errors.single, isNot(contains('web_defines')));
@@ -305,20 +307,24 @@ void main() {
 
   group('legacy service worker constructs', () {
     test('the deprecated version constant is refused', () {
-      final (_, errors) = _runOne('  const serviceWorkerVersion = null;');
+      final (_, List<String> errors) = _runOne(
+        '  const serviceWorkerVersion = null;',
+      );
       expect(errors, hasLength(1));
       expect(errors.single, contains('flutter_service_worker_version'));
     });
 
     test('the var spelling is refused too', () {
-      final (_, errors) = _runOne('var serviceWorkerVersion = null;');
+      final (_, List<String> errors) = _runOne(
+        'var serviceWorkerVersion = null;',
+      );
       expect(errors, hasLength(1));
     });
 
     test(
       'a hand-rolled registration is refused when the build ships a worker',
       () {
-        final (_, errors) = _runOne(
+        final (_, List<String> errors) = _runOne(
           "navigator.serviceWorker.register('flutter_service_worker.js')",
         );
         expect(errors, hasLength(1));
@@ -330,7 +336,7 @@ void main() {
       // `pwa = False` hands service worker duty to the app. Refusing the
       // registration there would refuse the very thing the attr grants — and
       // the remedy would tell the user to set a flag they already set.
-      final (out, errors) = _runOne(
+      final (String out, List<String> errors) = _runOne(
         "navigator.serviceWorker.register('flutter_service_worker.js')",
         managesServiceWorker: false,
       );
@@ -344,7 +350,7 @@ void main() {
     test(
       'the deprecated version constant is allowed with no managed worker too',
       () {
-        final (_, errors) = _runOne(
+        final (_, List<String> errors) = _runOne(
           'const serviceWorkerVersion = null;',
           managesServiceWorker: false,
         );
@@ -355,7 +361,7 @@ void main() {
     test(
       'loadEntrypoint stays refused either way — it is not about workers',
       () {
-        final (_, errors) = _runOne(
+        final (_, List<String> errors) = _runOne(
           '_flutter.loader.loadEntrypoint({});',
           managesServiceWorker: false,
         );
@@ -364,7 +370,9 @@ void main() {
     );
 
     test('loadEntrypoint is refused because it skips the wasm build', () {
-      final (_, errors) = _runOne('_flutter.loader.loadEntrypoint({});');
+      final (_, List<String> errors) = _runOne(
+        '_flutter.loader.loadEntrypoint({});',
+      );
       expect(errors, hasLength(1));
       expect(errors.single, contains('loader.load()'));
     });
@@ -377,7 +385,7 @@ void main() {
         'flutter_bootstrap_js',
         'flutter_build_config',
       ]) {
-        final (_, errors) = _runOne(
+        final (_, List<String> errors) = _runOne(
           '<script>{{$name}}</script>',
           devLoopGuard: true,
           builtins: {
@@ -394,7 +402,7 @@ void main() {
     });
 
     test('the guard says nothing about a script-src index', () {
-      final (out, errors) = _runOne(
+      final (String out, List<String> errors) = _runOne(
         '<script src="flutter_bootstrap.js" async></script>',
         devLoopGuard: true,
       );
@@ -403,7 +411,7 @@ void main() {
     });
 
     test('the same template is accepted with the guard off', () {
-      final (out, errors) = _runOne(
+      final (String out, List<String> errors) = _runOne(
         '<script>{{flutter_bootstrap_js}}</script>',
         builtins: {
           'flutter_bootstrap_js': {'value': 'boot();'},
@@ -430,7 +438,11 @@ void main() {
 </body>
 </html>
 ''';
-      final (out, errors) = _runOne(created, baseHref: '/', devLoopGuard: true);
+      final (String out, List<String> errors) = _runOne(
+        created,
+        baseHref: '/',
+        devLoopGuard: true,
+      );
       expect(errors, isEmpty);
       expect(out, created.replaceAll(r'$FLUTTER_BASE_HREF', '/'));
     },
@@ -442,7 +454,7 @@ void main() {
       () {
         const stageRootUri =
             'file:///execroot/_main/bazel-out/k8-fastbuild/bin/pkg/app.dart2js_cfe.1234.stage/';
-        final args = buildDart2JsSnapshotArgs(
+        final List<String> args = buildDart2JsSnapshotArgs(
           forwardArgs: [
             '--packages=/tmp/rewritten/package_config.json',
             '--cfe-only',
@@ -548,7 +560,7 @@ void main() {
           rewrittenPkgPath: rewrittenPkgFile.path,
         );
 
-        final depsLines = depsFile
+        final List<String> depsLines = depsFile
             .readAsStringSync()
             .split('\n')
             .where((l) => l.isNotEmpty)
@@ -563,7 +575,7 @@ void main() {
           ]),
         );
 
-        final mapContent = mapFile.readAsStringSync();
+        final String mapContent = mapFile.readAsStringSync();
         expect(
           mapContent,
           equals(
@@ -571,7 +583,7 @@ void main() {
           ),
         );
 
-        final infoContent = infoFile.readAsStringSync();
+        final String infoContent = infoFile.readAsStringSync();
         expect(infoContent, isNot(contains('file:')));
         expect(infoContent, isNot(contains('app_stage')));
         expect(infoContent, isNot(contains('bazel-out')));
@@ -602,7 +614,7 @@ void main() {
 
         scrubDart2JsOutputs(outDir, cwdPath: fakeCwd.path);
 
-        final depsLines = depsFile
+        final List<String> depsLines = depsFile
             .readAsStringSync()
             .split('\n')
             .where((l) => l.isNotEmpty)
@@ -664,7 +676,7 @@ void main() {
               '$siblingPkgUri\n'
               'org-dartlang-sdk:///lib/core/core.dart\n',
             );
-        final siblingBefore = siblingDeps.readAsStringSync();
+        final String siblingBefore = siblingDeps.readAsStringSync();
 
         scrubDart2JsFile(
           ownDeps,

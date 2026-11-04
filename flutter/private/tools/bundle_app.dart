@@ -50,21 +50,21 @@ Future<void> main(List<String> args) async {
   Directory(outputDir).createSync(recursive: true);
 
   // Process file copies.
-  final copies = (config['copies'] as List<dynamic>?) ?? [];
+  final List<dynamic> copies = (config['copies'] as List<dynamic>?) ?? [];
   for (final copy in copies) {
     final src = copy['src'] as String;
     final dst = '$outputDir/${copy['dst']}';
-    final dstDir = File(dst).parent;
+    final Directory dstDir = File(dst).parent;
     if (!dstDir.existsSync()) dstDir.createSync(recursive: true);
     File(src).copySync(dst);
   }
 
   // Process directory copies.
-  final copyDirs = (config['copy_dirs'] as List<dynamic>?) ?? [];
+  final List<dynamic> copyDirs = (config['copy_dirs'] as List<dynamic>?) ?? [];
   for (final copy in copyDirs) {
     final src = copy['src'] as String;
     final dst = '$outputDir/${copy['dst']}';
-    final exclude = ((copy['exclude'] as List<dynamic>?) ?? [])
+    final List<String> exclude = ((copy['exclude'] as List<dynamic>?) ?? [])
         .cast<String>()
         .toList();
     _copyDirectory(Directory(src), Directory(dst), exclude);
@@ -75,7 +75,7 @@ Future<void> main(List<String> args) async {
   // declared output of its own — an execroot-relative path, which resolves
   // because the action runs at the execroot — rather than a place inside the
   // bundle.
-  final extracts = (config['extracts'] as List<dynamic>?) ?? [];
+  final List<dynamic> extracts = (config['extracts'] as List<dynamic>?) ?? [];
   for (final extract in extracts) {
     final src = extract['src'] as String;
     final dst = extract['dst'] as String;
@@ -90,21 +90,22 @@ Future<void> main(List<String> args) async {
   }
 
   // Process symlinks.
-  final symlinks = (config['symlinks'] as List<dynamic>?) ?? [];
+  final List<dynamic> symlinks = (config['symlinks'] as List<dynamic>?) ?? [];
   for (final sym in symlinks) {
     final target = sym['target'] as String;
     final link = '$outputDir/${sym['link']}';
-    final linkDir = File(link).parent;
+    final Directory linkDir = File(link).parent;
     if (!linkDir.existsSync()) linkDir.createSync(recursive: true);
     Link(link).createSync(target);
   }
 
   // Process write_files.
-  final writeFiles = (config['write_files'] as List<dynamic>?) ?? [];
+  final List<dynamic> writeFiles =
+      (config['write_files'] as List<dynamic>?) ?? [];
   for (final wf in writeFiles) {
     final path = '$outputDir/${wf['path']}';
     final content = wf['content'] as String;
-    final executable = (wf['executable'] as bool?) ?? false;
+    final bool executable = (wf['executable'] as bool?) ?? false;
     final file = File(path);
     file.parent.createSync(recursive: true);
     file.writeAsStringSync(content);
@@ -116,10 +117,10 @@ Future<void> main(List<String> args) async {
 
 void _copyDirectory(Directory src, Directory dst, List<String> exclude) {
   dst.createSync(recursive: true);
-  final entities = src.listSync(recursive: false)
+  final List<FileSystemEntity> entities = src.listSync(recursive: false)
     ..sort((a, b) => a.path.compareTo(b.path));
   for (final entity in entities) {
-    final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    final String name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
     if (_excluded(name, exclude)) continue;
     final dstPath = '${dst.path}/$name';
     if (entity is File) {
@@ -144,8 +145,10 @@ bool _excluded(String name, List<String> exclude) {
     // `*.` prefix would let `*.info.*` through the extension branch, where it
     // matches nothing and reports nothing — the exact silence this validation
     // exists to prevent, reintroduced by the validation's own shortcut.
-    final suffix = pattern.startsWith('*.') ? pattern.substring(1) : null;
-    final rest = suffix ?? pattern;
+    final String? suffix = pattern.startsWith('*.')
+        ? pattern.substring(1)
+        : null;
+    final String rest = suffix ?? pattern;
     if (rest.contains('*') || rest.contains('?')) {
       throw ArgumentError.value(
         pattern,

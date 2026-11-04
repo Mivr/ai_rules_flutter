@@ -60,7 +60,7 @@ import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 export 'app_log.dart' show AppLogLine, AppLogStream, LogPage;
 export 'build_mode.dart' show BuildMode;
 export 'host_tools.dart' show HostTool, MissingHostToolException;
-export 'vm_service_discovery.dart' show vmServiceUriPattern;
+export 'vm_service_discovery.dart' show VmServiceDiscovery, vmServiceUriPattern;
 
 final _logger = Logger('dev_tool.device');
 
@@ -154,10 +154,10 @@ Future<ProcessResult> runProcessBounded(
   required Duration bound,
   required String what,
 }) async {
-  final process = await start(executable, arguments, environment);
+  final Process process = await start(executable, arguments, environment);
   final out = StringBuffer();
   final err = StringBuffer();
-  final drained = Future.wait([
+  final Future<List<void>> drained = Future.wait([
     process.stdout.transform(utf8.decoder).forEach(out.write),
     process.stderr.transform(utf8.decoder).forEach(err.write),
   ]);
@@ -240,7 +240,7 @@ class AppInstance {
   /// Call after the processes that were using them have exited: a directory
   /// deleted out from under a still-running program comes back partly written.
   Future<void> disposeScratchDirs() async {
-    for (final dir in scratchDirs) {
+    for (final Directory dir in scratchDirs) {
       await deleteTempDir(dir);
     }
   }
@@ -263,14 +263,14 @@ class LaunchScratch {
   /// Gives the folder to the [AppInstance] being returned, which deletes it
   /// from then on.
   List<Directory> handOver() {
-    final dir = _dir;
+    final Directory? dir = _dir;
     _dir = null;
     return [?dir];
   }
 
   /// Deletes the folder, unless it was handed over.
   Future<void> release() async {
-    final dir = _dir;
+    final Directory? dir = _dir;
     _dir = null;
     if (dir != null) await deleteTempDir(dir);
   }
@@ -405,7 +405,7 @@ abstract class Device {
   ) async {
     beginLaunch();
     try {
-      final instance = await start();
+      final AppInstance instance = await start();
       endLaunch();
       return instance;
     } catch (_) {
@@ -485,7 +485,7 @@ abstract class Device {
   /// reported in seconds. Without it the shortfall surfaces mid-launch as a
   /// symptom instead of a cause.
   Future<void> preflight() async {
-    for (final tool in await requiredHostTools()) {
+    for (final HostTool tool in await requiredHostTools()) {
       tool.require();
     }
   }
@@ -647,11 +647,11 @@ Future<void> waitForLocalTcpPort(
   required String what,
   Duration budget = const Duration(seconds: 10),
 }) async {
-  final deadline = DateTime.now().add(budget);
+  final DateTime deadline = DateTime.now().add(budget);
   var delay = const Duration(milliseconds: 50);
   while (true) {
     try {
-      final probe = await Socket.connect(
+      final Socket probe = await Socket.connect(
         '127.0.0.1',
         port,
         timeout: const Duration(seconds: 1),
@@ -666,7 +666,7 @@ Future<void> waitForLocalTcpPort(
         );
       }
       await Future<void>.delayed(delay);
-      final doubled = delay * 2;
+      final Duration doubled = delay * 2;
       delay = doubled > const Duration(milliseconds: 500)
           ? const Duration(milliseconds: 500)
           : doubled;
@@ -688,8 +688,8 @@ AppLogStream startProcessLogs(
   bool stderrIsError = true,
   String? Function(String line)? transform,
 }) {
-  final logs = newAppLogs(onLog);
-  final pump = pumpProcessLines(
+  final AppLogStream logs = newAppLogs(onLog);
+  final AppLogPump pump = pumpProcessLines(
     process,
     logs,
     stderrIsError: stderrIsError,

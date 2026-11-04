@@ -36,7 +36,7 @@ String merge(String base, String overlay) => mergeManifests(
 void main() {
   group('mergeManifests', () {
     test('inserts the overlay permission after the manifest open tag', () {
-      final merged = merge(_base, _pristineOverlay);
+      final String merged = merge(_base, _pristineOverlay);
       expect(
         merged,
         contains(
@@ -45,22 +45,22 @@ void main() {
         ),
       );
       // Inserted between the root open tag and <application>.
-      final open = merged.indexOf('>');
-      final permission = merged.indexOf('uses-permission');
-      final application = merged.indexOf('<application');
+      final int open = merged.indexOf('>');
+      final int permission = merged.indexOf('uses-permission');
+      final int application = merged.indexOf('<application');
       expect(permission, greaterThan(open));
       expect(permission, lessThan(application));
     });
 
     test('preserves every base byte outside the insertion', () {
-      final merged = merge(_base, _pristineOverlay);
-      final openTagEnd = _base.indexOf('>') + 1;
+      final String merged = merge(_base, _pristineOverlay);
+      final int openTagEnd = _base.indexOf('>') + 1;
       expect(merged, startsWith(_base.substring(0, openTagEnd)));
       expect(merged, endsWith(_base.substring(openTagEnd)));
     });
 
     test('emits a provenance comment naming both input paths', () {
-      final merged = merge(_base, _pristineOverlay);
+      final String merged = merge(_base, _pristineOverlay);
       expect(merged, contains('out/base/AndroidManifest.xml'));
       expect(merged, contains('android/app/src/debug/AndroidManifest.xml'));
       expect(merged, contains('<!--'));
@@ -73,7 +73,7 @@ void main() {
     <application android:label="example"/>
 </manifest>
 ''';
-      final merged = merge(baseWithInternet, _pristineOverlay);
+      final String merged = merge(baseWithInternet, _pristineOverlay);
       expect(
         'uses-permission'.allMatches(merged).length,
         1,
@@ -88,7 +88,7 @@ void main() {
     <application android:label="example"/>
 </manifest>
 ''';
-      final merged = merge(baseSdk23, _pristineOverlay);
+      final String merged = merge(baseSdk23, _pristineOverlay);
       expect('android.permission.INTERNET'.allMatches(merged).length, 1);
     });
 
@@ -99,7 +99,7 @@ void main() {
     <uses-permission android:name="android.permission.INTERNET"/>
 </manifest>
 ''';
-      final merged = merge(_base, overlay);
+      final String merged = merge(_base, overlay);
       expect('android.permission.INTERNET'.allMatches(merged).length, 1);
     });
 
@@ -109,7 +109,7 @@ void main() {
     <uses-permission-sdk-23 android:name="android.permission.VIBRATE"/>
 </manifest>
 ''';
-      final merged = merge(_base, overlay);
+      final String merged = merge(_base, overlay);
       expect(
         merged,
         contains(
@@ -120,7 +120,7 @@ void main() {
     });
 
     test('accepts an overlay with an XML declaration', () {
-      final merged = merge(
+      final String merged = merge(
         _base,
         '<?xml version="1.0" encoding="utf-8"?>\n$_pristineOverlay',
       );
@@ -134,7 +134,7 @@ void main() {
     </uses-permission>
 </manifest>
 ''';
-      final merged = merge(_base, overlay);
+      final String merged = merge(_base, overlay);
       expect(merged, contains('android.permission.INTERNET'));
     });
 
@@ -143,7 +143,7 @@ void main() {
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 </manifest>
 ''';
-      final merged = merge(_base, overlay);
+      final String merged = merge(_base, overlay);
       expect(merged, contains('android/app/src/debug/AndroidManifest.xml'));
       expect(merged, isNot(contains('uses-permission')));
     });
@@ -277,7 +277,7 @@ void main() {
 ''';
 
     test('lifts the permissions under the root, keeping android:*', () {
-      final merged = lift({'alerts/AndroidManifest.xml': alerts});
+      final String merged = lift({'alerts/AndroidManifest.xml': alerts});
       expect(
         merged,
         contains(
@@ -297,12 +297,12 @@ void main() {
     });
 
     test('skips a tools:node="remove" directive', () {
-      final merged = lift({'alerts/AndroidManifest.xml': alerts});
+      final String merged = lift({'alerts/AndroidManifest.xml': alerts});
       expect(merged, isNot(contains('READ_PHONE_STATE')));
     });
 
     test('takes nothing from below <application>', () {
-      final merged = lift({'alerts/AndroidManifest.xml': alerts});
+      final String merged = lift({'alerts/AndroidManifest.xml': alerts});
       expect(merged, isNot(contains('AlertsReceiver')));
     });
 
@@ -318,7 +318,7 @@ void main() {
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
 </manifest>
 ''';
-      final merged = lift({
+      final String merged = lift({
         'alerts/AndroidManifest.xml': alerts,
         'other/AndroidManifest.xml': other,
       }, base: base);
@@ -407,7 +407,7 @@ void main() {
 ''';
 
         // Step 1: variant overlay merge (intermediate).
-        final afterVariant = mergeManifests(
+        final String afterVariant = mergeManifests(
           baseXml: baseRemovingPhoneState,
           basePath: 'android/app/src/main/AndroidManifest.xml',
           overlayXml: variantOverlay,
@@ -416,7 +416,7 @@ void main() {
         expect(afterVariant, contains('tools:node="remove"'));
 
         // Step 2: permissions overlay merge (intermediate).
-        final afterPermissions = mergeManifests(
+        final String afterPermissions = mergeManifests(
           baseXml: afterVariant,
           basePath: 'out/variant/AndroidManifest.xml',
           overlayXml: permissionsOverlay,
@@ -425,7 +425,7 @@ void main() {
         expect(afterPermissions, contains('tools:node="remove"'));
 
         // Step 3: library merge (packaged manifest).
-        final packaged = mergeManifests(
+        final String packaged = mergeManifests(
           baseXml: afterPermissions,
           basePath: 'out/permissions/AndroidManifest.xml',
           libraries: {'plugin/AndroidManifest.xml': pluginManifest},
@@ -507,25 +507,25 @@ void main() {
 </manifest>
 ''';
 
-        final hop1 = mergeManifests(
+        final String hop1 = mergeManifests(
           baseXml: baseManifest,
           basePath: 'base.xml',
           overlayXml: overlay1,
           overlayPath: 'overlay1.xml',
         );
-        final hop2 = mergeManifests(
+        final String hop2 = mergeManifests(
           baseXml: hop1,
           basePath: 'hop1.xml',
           overlayXml: overlay2,
           overlayPath: 'overlay2.xml',
         );
-        final hop3 = mergeManifests(
+        final String hop3 = mergeManifests(
           baseXml: hop2,
           basePath: 'hop2.xml',
           overlayXml: overlay3,
           overlayPath: 'overlay3.xml',
         );
-        final packaged = mergeManifests(
+        final String packaged = mergeManifests(
           baseXml: hop3,
           basePath: 'hop3.xml',
           libraries: {'lib.xml': libManifest},
@@ -591,7 +591,7 @@ void main() {
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
 </manifest>
 ''';
-        final merged = lift(
+        final String merged = lift(
           {'lib/AndroidManifest.xml': libUnbounded},
           base: appBase,
         );
@@ -635,7 +635,7 @@ void main() {
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
 </manifest>
 ''';
-        final merged = lift(
+        final String merged = lift(
           {
             'high/AndroidManifest.xml': highPriorityLib,
             'low/AndroidManifest.xml': lowPriorityLib,
@@ -685,7 +685,7 @@ void main() {
     <uses-permission android:name="android.permission.VIBRATE"/>
 </manifest>
 ''';
-        final merged = lift(
+        final String merged = lift(
           {'lib/AndroidManifest.xml': libWithBoth},
           base: baseWithCrossRemoves,
         );

@@ -6,9 +6,12 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'plist_parse.dart' show escapeXml;
 import 'xtool_hash.dart' show sha1Bytes, sha256Bytes;
+
+typedef _Hashes = ({String sha1B64, String sha256B64});
 
 // ---------------------------------------------------------------------------
 // _CodeSignature/CodeResources generation
@@ -23,10 +26,12 @@ List<String> _collectBundleRelativeFiles(
   final relativeFiles = <String>[];
 
   void walk(Directory dir, String relPrefix) {
-    final children = dir.listSync(followLinks: false)
+    final List<FileSystemEntity> children = dir.listSync(followLinks: false)
       ..sort((a, b) => a.path.compareTo(b.path));
     for (final entity in children) {
-      final name = entity.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      final String name = entity.uri.pathSegments
+          .where((s) => s.isNotEmpty)
+          .last;
       final relPath = relPrefix.isEmpty ? name : '$relPrefix/$name';
       if (relPath == '_CodeSignature' ||
           relPath.startsWith('_CodeSignature/') ||
@@ -43,9 +48,7 @@ List<String> _collectBundleRelativeFiles(
     }
   }
 
-  if (bundleDir.existsSync()) {
-    walk(bundleDir, '');
-  }
+  if (bundleDir.existsSync()) walk(bundleDir, '');
   relativeFiles.sort();
   return relativeFiles;
 }
@@ -54,15 +57,15 @@ List<String> _collectBundleRelativeFiles(
 /// v2 (`files2`) CodeResources maps, omitting `Info.plist` and `PkgInfo`.
 ({
   Map<String, String> files1,
-  Map<String, ({String sha1B64, String sha256B64})> files2,
+  Map<String, _Hashes> files2,
 })
 _hashBundleFiles(String rootPath, List<String> relativeFiles) {
   final files1 = <String, String>{};
-  final files2 = <String, ({String sha1B64, String sha256B64})>{};
+  final files2 = <String, _Hashes>{};
   for (final relPath in relativeFiles) {
-    final bytes = File('$rootPath/$relPath').readAsBytesSync();
-    final sha1B64 = base64.encode(sha1Bytes(bytes));
-    final sha256B64 = base64.encode(sha256Bytes(bytes));
+    final Uint8List bytes = File('$rootPath/$relPath').readAsBytesSync();
+    final String sha1B64 = base64.encode(sha1Bytes(bytes));
+    final String sha256B64 = base64.encode(sha256Bytes(bytes));
     // Per Apple CodeResources format, Info.plist and PkgInfo are omitted from
     // `files` / `files2` when rules2 omits them, or included in `files` for v1
     // resources. Including all non-Info.plist/PkgInfo files in both `files` and
@@ -88,17 +91,23 @@ String generateCodeResources(
   Directory bundleDir, {
   Set<String> excludedRelativePaths = const {},
 }) {
-  final relativeFiles = _collectBundleRelativeFiles(
+  final List<String> relativeFiles = _collectBundleRelativeFiles(
     bundleDir,
     excludedRelativePaths,
   );
-  final (:files1, :files2) = _hashBundleFiles(bundleDir.path, relativeFiles);
+  final (
+    :Map<String, String> files1,
+    :Map<String, _Hashes> files2,
+  ) = _hashBundleFiles(
+    bundleDir.path,
+    relativeFiles,
+  );
   return _renderCodeResourcesXml(files1, files2);
 }
 
 String _renderCodeResourcesXml(
   Map<String, String> files1,
-  Map<String, ({String sha1B64, String sha256B64})> files2,
+  Map<String, _Hashes> files2,
 ) {
   final buf = StringBuffer()
     ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
@@ -110,7 +119,7 @@ String _renderCodeResourcesXml(
     ..writeln('<dict>')
     ..writeln('\t<key>files</key>')
     ..writeln('\t<dict>');
-  for (final entry in files1.entries) {
+  for (final MapEntry<String, String> entry in files1.entries) {
     buf
       ..writeln('\t\t<key>${escapeXml(entry.key)}</key>')
       ..writeln('\t\t<data>${entry.value}</data>');
@@ -119,7 +128,7 @@ String _renderCodeResourcesXml(
     ..writeln('\t</dict>')
     ..writeln('\t<key>files2</key>')
     ..writeln('\t<dict>');
-  for (final entry in files2.entries) {
+  for (final MapEntry<String, _Hashes> entry in files2.entries) {
     buf
       ..writeln('\t\t<key>${escapeXml(entry.key)}</key>')
       ..writeln('\t\t<dict>')
@@ -175,7 +184,7 @@ File writeCodeResources(
   Directory bundleDir, {
   Set<String> excludedRelativePaths = const {},
 }) {
-  final xml = generateCodeResources(
+  final String xml = generateCodeResources(
     bundleDir,
     excludedRelativePaths: excludedRelativePaths,
   );

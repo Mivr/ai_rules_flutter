@@ -19,6 +19,8 @@ import '../macho_parse.dart' as macho;
 import '../macho_patch.dart' as macho;
 import 'macho_test_support.dart' as support;
 
+typedef _Input = ({Uint8List bytes, int probe, Uint8List zeroBytes});
+
 /// The rpath every growth probe adds.
 const _probeRpath = '@executable_path/Frameworks';
 
@@ -31,8 +33,8 @@ macho.PatchOptions _growthOptions() =>
 
 /// The file offset where [bytes]' load commands end (header plus `cmdsize`s).
 int _commandsEnd(Uint8List bytes) {
-  var end = macho.mhHeaderSize64;
-  for (final c in macho.parseLoadCommands(bytes)) {
+  int end = macho.mhHeaderSize64;
+  for (final macho.LoadCommand c in macho.parseLoadCommands(bytes)) {
     end += c.cmdsize;
   }
   return end;
@@ -68,12 +70,14 @@ int _commandsEnd(Uint8List bytes) {
     reserved1: reserved1,
     reserved2: reserved2,
   );
-  final zero = support.buildSectionDylib(
+  final ({Uint8List bytes, int oldEnd, int stroff, int strsize, int symoff})
+  zero = support.buildSectionDylib(
     textSegEnd: 0x300,
     textSection: at(0),
   );
-  final probe = _commandsEnd(zero.bytes) + 16;
-  final placed = support.buildSectionDylib(
+  final int probe = _commandsEnd(zero.bytes) + 16;
+  final ({Uint8List bytes, int oldEnd, int stroff, int strsize, int symoff})
+  placed = support.buildSectionDylib(
     textSegEnd: 0x300,
     textSection: at(probe),
   );
@@ -83,10 +87,11 @@ int _commandsEnd(Uint8List bytes) {
 /// Copies [patched] with its first section's `offset` word zeroed, so a patch
 /// that ignored the zero-fill offset compares equal to the zero-offset patch.
 Uint8List _withSectionOffsetZeroed(Uint8List patched) {
-  var at = macho.mhHeaderSize64;
-  for (final c in macho.parseLoadCommands(patched)) {
+  int at = macho.mhHeaderSize64;
+  for (final macho.LoadCommand c in macho.parseLoadCommands(patched)) {
     if (c.cmd == macho.lcSegment64 && c.bytes.length >= 72 + 80) {
-      final nsects = ByteData.sublistView(c.bytes).getUint32(64, Endian.little);
+      final int nsects = ByteData.sublistView(c.bytes)
+          .getUint32(64, Endian.little);
       if (nsects >= 1) {
         final out = Uint8List.fromList(patched);
         ByteData.sublistView(out).setUint32(at + 72 + 48, 0, Endian.little);
@@ -103,8 +108,11 @@ Uint8List _withSectionOffsetZeroed(Uint8List patched) {
 void _expectRoomPatch(
   ({Uint8List bytes, Uint8List zeroBytes, int probe}) input,
 ) {
-  final patched = macho.patchMachO(input.bytes, _growthOptions());
-  final patchedZero = macho.patchMachO(input.zeroBytes, _growthOptions());
+  final Uint8List patched = macho.patchMachO(input.bytes, _growthOptions());
+  final Uint8List patchedZero = macho.patchMachO(
+    input.zeroBytes,
+    _growthOptions(),
+  );
   expect(_withSectionOffsetZeroed(patched), equals(patchedZero));
 }
 
@@ -145,7 +153,7 @@ void main() {
     });
 
     test('live section in the growth room is refused naming the section', () {
-      final input = _buildRoomProbe(
+      final _Input input = _buildRoomProbe(
         sectname: '__text',
         segname: '__TEXT',
         size: 0x100,
@@ -153,12 +161,12 @@ void main() {
         reserved1: 1,
         reserved2: 0x1234,
       );
-      final dir = Directory.systemTemp.createTempSync('macho_floor_');
+      final Directory dir = Directory.systemTemp.createTempSync('macho_floor_');
       addTearDown(() => dir.deleteSync(recursive: true));
       final inPath = '${dir.path}/in.dylib';
       final outPath = '${dir.path}/out.dylib';
       File(inPath).writeAsBytesSync(input.bytes);
-      final newEnd = _commandsEnd(input.bytes) + _probeGrowth;
+      final int newEnd = _commandsEnd(input.bytes) + _probeGrowth;
       expect(
         () => macho.runPatch([
           '--input',
@@ -186,13 +194,13 @@ void main() {
     });
 
     test('fat slice without room names the slice', () {
-      final roomy = _buildRoomProbe(
+      final _Input roomy = _buildRoomProbe(
         sectname: '__bss',
         segname: '__DATA',
         size: 0x100,
         flags: macho.sectionTypeZerofill,
       );
-      final tight = _buildRoomProbe(
+      final _Input tight = _buildRoomProbe(
         sectname: '__text',
         segname: '__TEXT',
         size: 0x100,
@@ -204,7 +212,7 @@ void main() {
         macho.cpuTypeX86_64,
         Endian.little,
       );
-      final fat = macho.buildFatMachO([
+      final Uint8List fat = macho.buildFatMachO([
         macho.FatSlice(
           cputype: macho.cpuTypeX86_64,
           cpusubtype: macho.cpuSubtypeX86_64All,
@@ -216,7 +224,7 @@ void main() {
           bytes: tight.bytes,
         ),
       ]);
-      final newEnd = _commandsEnd(tight.bytes) + _probeGrowth;
+      final int newEnd = _commandsEnd(tight.bytes) + _probeGrowth;
       expect(
         () => macho.patchMachO(fat, _growthOptions()),
         throwsA(

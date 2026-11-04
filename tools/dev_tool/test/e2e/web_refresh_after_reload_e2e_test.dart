@@ -32,9 +32,9 @@ void main() {
     test(
       'the app survives a browser refresh that follows a hot reload',
       () async {
-        final ws = await editableWorkspace('web_example');
-        final appMain = ws.file('lib/main.dart');
-        final original = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('web_example');
+        final File appMain = ws.file('lib/main.dart');
+        final String original = appMain.readAsStringSync();
         const anchor =
             "const Text('You have pushed the button this many times:')";
         expect(
@@ -52,11 +52,14 @@ void main() {
 
         // Dictated rather than discovered: the refresh below is driven over
         // CDP, and the port has to be known before Chrome launches.
-        final probeSocket = await ServerSocket.bind('127.0.0.1', 0);
-        final cdpPort = probeSocket.port;
+        final ServerSocket probeSocket = await ServerSocket.bind(
+          '127.0.0.1',
+          0,
+        );
+        final int cdpPort = probeSocket.port;
         await probeSocket.close();
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app_wasm',
           device: 'chrome',
@@ -71,12 +74,13 @@ void main() {
           timeout: const Duration(minutes: 5),
         );
         await dt.waitForHttpControl(timeout: const Duration(minutes: 2));
-        final appId = dt.appId!;
+        final String appId = dt.appId!;
 
         Uri? serverUri;
-        for (final line in dt.stderrLines) {
+        for (final String line in dt.stderrLines) {
           if (!line.contains('frontend_server_ready')) continue;
-          final m = RegExp(r'"uri":"(http[^"]+)"').firstMatch(line);
+          final RegExpMatch? m = RegExp(r'"uri":"(http[^"]+)"')
+              .firstMatch(line);
           if (m != null) serverUri = Uri.parse(m.group(1)!);
         }
         expect(
@@ -86,11 +90,14 @@ void main() {
         );
 
         Future<void> mustSee(String label, String text) async {
-          final found = await dt.httpCommand('app.waitFor', {
-            'appId': appId,
-            'text': text,
-            'timeoutMs': '25000',
-          });
+          final Map<String, dynamic> found = await dt.httpCommand(
+            'app.waitFor',
+            {
+              'appId': appId,
+              'text': text,
+              'timeoutMs': '25000',
+            },
+          );
           expect(
             found['error'],
             isNull,
@@ -103,7 +110,7 @@ void main() {
           'You have pushed the button this many times:',
         );
 
-        final edited = original.replaceFirst(
+        final String edited = original.replaceFirst(
           anchor,
           "const Text('REFRESH_SURVIVES')",
         );
@@ -115,7 +122,7 @@ void main() {
         }
         appMain.writeAsStringSync(edited);
 
-        final reload = await dt.sendCommand(
+        final Map<String, dynamic> reload = await dt.sendCommand(
           1,
           'app.hotReload',
           timeout: e2eColdBuildTimeout,
@@ -128,7 +135,7 @@ void main() {
         await mustSee('after reload', 'REFRESH_SURVIVES');
 
         // The user presses F5.
-        final cursor = dt.events.length;
+        final int cursor = dt.events.length;
         await _refreshPage(cdpPort, serverUri!.port);
         await dt.waitForEventWhere(
           'app.debugPort',
@@ -156,23 +163,27 @@ Future<void> _refreshPage(int cdpPort, int serverPort) async {
   final http = HttpClient();
   final List targets;
   try {
-    final request = await http.getUrl(
+    final HttpClientRequest request = await http.getUrl(
       Uri.parse('http://127.0.0.1:$cdpPort/json'),
     );
-    final response = await request.close();
+    final HttpClientResponse response = await request.close();
     targets = jsonDecode(await response.transform(utf8.decoder).join()) as List;
   } finally {
     http.close();
   }
-  final page = targets.cast<Map<String, dynamic>>().firstWhere(
-    (t) => t['type'] == 'page' && '${t['url']}'.contains(':$serverPort'),
-    orElse: () => throw StateError(
-      'no page target on :$serverPort among $targets',
-    ),
+  final Map<String, dynamic> page = targets
+      .cast<Map<String, dynamic>>()
+      .firstWhere(
+        (t) => t['type'] == 'page' && '${t['url']}'.contains(':$serverPort'),
+        orElse: () => throw StateError(
+          'no page target on :$serverPort among $targets',
+        ),
+      );
+  final WebSocket ws = await WebSocket.connect(
+    page['webSocketDebuggerUrl'] as String,
   );
-  final ws = await WebSocket.connect(page['webSocketDebuggerUrl'] as String);
   try {
-    final answered = ws.firstWhere(
+    final Future<dynamic> answered = ws.firstWhere(
       (m) => (jsonDecode(m as String) as Map<String, dynamic>)['id'] == 1,
     );
     ws.add(

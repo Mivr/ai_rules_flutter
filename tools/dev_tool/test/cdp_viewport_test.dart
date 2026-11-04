@@ -34,13 +34,14 @@ class _FakeChrome {
         await request.response.close();
         return;
       }
-      final socket = await WebSocketTransformer.upgrade(request);
+      final WebSocket socket = await WebSocketTransformer.upgrade(request);
       connectionsOpened++;
       _open.add(socket);
       socket.listen(
         (data) {
           final msg = jsonDecode(data as String) as Map<String, dynamic>;
-          final params = (msg['params'] as Map?)?.cast<String, dynamic>();
+          final Map<String, dynamic>? params = (msg['params'] as Map?)
+              ?.cast<String, dynamic>();
           switch (msg['method']) {
             case 'Emulation.setDeviceMetricsOverride':
               if (honoursOverride) {
@@ -50,8 +51,8 @@ class _FakeChrome {
               overridesSet++;
               socket.add(jsonEncode({'id': msg['id'], 'result': {}}));
             case 'Runtime.evaluate':
-              final o = _override;
-              final unsettled = o != null && unsettledReads-- > 0;
+              final Map<String, dynamic>? o = _override;
+              final bool unsettled = o != null && unsettledReads-- > 0;
               socket.add(
                 jsonEncode({
                   'id': msg['id'],
@@ -107,7 +108,7 @@ class _FakeChrome {
   );
 
   Future<void> stop() async {
-    for (final s in _open.toList()) {
+    for (final WebSocket s in _open.toList()) {
       await s.close();
     }
     await _server.close(force: true);
@@ -134,7 +135,7 @@ void main() {
     test('returns the connection that set the viewport, still open, because '
         'closing it would take the viewport with it', () async {
       await start();
-      final hold = await applyViewportOverCdp(
+      final CdpPageConnection hold = await applyViewportOverCdp(
         page: (cdpPort: chrome.port, appUrl: _appUrl),
         viewport: const WebViewport(
           width: 390,
@@ -165,13 +166,13 @@ void main() {
 
     test('changes the viewport on the connection it was given', () async {
       await start();
-      final first = await applyViewportOverCdp(
+      final CdpPageConnection first = await applyViewportOverCdp(
         page: (cdpPort: chrome.port, appUrl: _appUrl),
         viewport: const WebViewport(width: 390, height: 844),
         asked: '--web-viewport',
       );
-      final opened = chrome.connectionsOpened;
-      final second = await applyViewportOverCdp(
+      final int opened = chrome.connectionsOpened;
+      final CdpPageConnection second = await applyViewportOverCdp(
         page: (cdpPort: chrome.port, appUrl: _appUrl),
         viewport: const WebViewport(width: 300, height: 500),
         asked: 'app.setViewport',
@@ -186,13 +187,13 @@ void main() {
 
     test('replaces a held connection that has closed', () async {
       await start();
-      final first = await applyViewportOverCdp(
+      final CdpPageConnection first = await applyViewportOverCdp(
         page: (cdpPort: chrome.port, appUrl: _appUrl),
         viewport: const WebViewport(width: 390, height: 844),
         asked: '--web-viewport',
       );
       await first.close();
-      final second = await applyViewportOverCdp(
+      final CdpPageConnection second = await applyViewportOverCdp(
         page: (cdpPort: chrome.port, appUrl: _appUrl),
         viewport: const WebViewport(width: 390, height: 844),
         asked: 'app.setViewport',
@@ -206,7 +207,7 @@ void main() {
 
     test('waits for a page that has not yet settled at the size', () async {
       await start(unsettledReads: 3);
-      final hold = await applyViewportOverCdp(
+      final CdpPageConnection hold = await applyViewportOverCdp(
         page: (cdpPort: chrome.port, appUrl: _appUrl),
         viewport: const WebViewport(width: 390, height: 844),
         asked: '--web-viewport',

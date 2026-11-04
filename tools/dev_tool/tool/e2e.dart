@@ -87,6 +87,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+typedef _Split = ({List<String> forwarded, List<String> requireRan});
+
 /// The path used when the caller names none.
 const _defaultPath = 'test/e2e/';
 
@@ -137,21 +139,21 @@ Future<void> main(List<String> args) async {
   final List<String> forwarded;
   final List<String> requireRan;
   try {
-    final split = splitRunnerArgs(args);
+    final _Split split = splitRunnerArgs(args);
     forwarded = split.forwarded;
     requireRan = split.requireRan;
   } on RequireRanUsage catch (e) {
     stderr.writeln(e.usage);
     exit(2);
   }
-  final packageDir = _packageDir();
+  final Directory packageDir = _packageDir();
   // Forwarded verbatim and in order — splitting flags from positionals would
   // tear `--plain-name occluded` in half, since the value carries no leading
   // dash. The default path is supplied only when the caller named nothing that
   // could be one; when they did, `dart test` resolves it, and when they passed
   // a flag value that merely looks positional it falls back to `test/`, where
   // `--tags=e2e` still selects these files and nothing else.
-  final testArgs = [
+  final List<String> testArgs = [
     'test',
     if (!forwarded.any((a) => !a.startsWith('-'))) _defaultPath,
     ..._alwaysArgs,
@@ -160,11 +162,11 @@ Future<void> main(List<String> args) async {
 
   // `Platform.version` is `<semver> (<channel>) (<date>) on "<os>"`; the
   // banner wants the semver.
-  final runner = Platform.version.split(' ').first;
+  final String runner = Platform.version.split(' ').first;
   stderr.writeln('e2e: ${Platform.resolvedExecutable} ($runner)');
   stderr.writeln('e2e: ${packageDir.path}\$ dart ${testArgs.join(' ')}');
 
-  final outcome = await _runSuite(packageDir, testArgs, requireRan);
+  final Outcome outcome = await _runSuite(packageDir, testArgs, requireRan);
   outcome.report();
   exit(outcome.ok ? 0 : 1);
 }
@@ -172,7 +174,7 @@ Future<void> main(List<String> args) async {
 /// The directory holding `pubspec.yaml`, derived from this script's own
 /// location so the runner works from any cwd.
 Directory _packageDir() {
-  final dir = File(Platform.script.toFilePath()).parent.parent;
+  final Directory dir = File(Platform.script.toFilePath()).parent.parent;
   final pubspec = File('${dir.path}/pubspec.yaml');
   if (!pubspec.existsSync()) {
     _fail(
@@ -188,7 +190,7 @@ Future<Outcome> _runSuite(
   List<String> testArgs,
   List<String> requireRan,
 ) async {
-  final process = await Process.start(
+  final Process process = await Process.start(
     Platform.resolvedExecutable,
     [...testArgs, '--reporter', 'json'],
     workingDirectory: packageDir.path,
@@ -284,18 +286,18 @@ class Outcome {
         final test = decoded['test'] as Map<String, dynamic>;
         final id = test['id'] as int;
         _names[id] = test['name'] as String;
-        final metadata = test['metadata'];
+        final dynamic metadata = test['metadata'];
         if (metadata is Map<String, dynamic>) {
-          final reason = metadata['skipReason'];
+          final dynamic reason = metadata['skipReason'];
           if (reason is String) _skipReasons[id] = reason;
         }
       case 'testDone':
         if (decoded['hidden'] == true) return;
         final id = decoded['testID'] as int;
-        final name = _names[id] ?? '<unnamed>';
+        final String name = _names[id] ?? '<unnamed>';
         if (decoded['skipped'] == true) {
           skipped.add(name);
-          final reason = _skipReasons[id];
+          final String? reason = _skipReasons[id];
           if (reason != null) _skipReasonByName[name] = reason;
           stderr.writeln('  ~ $name');
         } else if (decoded['result'] == 'success') {
@@ -315,9 +317,9 @@ class Outcome {
         // A `markTestSkipped` reason arrives only here — there is no metadata
         // for it, because the test was not declared skipped — so it is picked
         // up on the way past.
-        final printedFor = decoded['testID'];
+        final dynamic printedFor = decoded['testID'];
         if (decoded['messageType'] == 'skip' && printedFor is int) {
-          final said = decoded['message'];
+          final dynamic said = decoded['message'];
           if (said is String) _skipReasons.putIfAbsent(printedFor, () => said);
         }
         stderr.writeln('    ${decoded['message']}');
@@ -325,7 +327,7 @@ class Outcome {
         // What a failure actually *said*. The `testDone` event carries only a
         // verdict, so without this a failing test reduces to its name — less
         // than the default reporter gives.
-        final name = _names[decoded['testID'] as int] ?? '<unnamed>';
+        final String name = _names[decoded['testID'] as int] ?? '<unnamed>';
         _errors
             .putIfAbsent(name, () => [])
             .add(
@@ -401,7 +403,7 @@ class Outcome {
   /// branch, reporting "all 2 of them skipped".
   String? get diagnosis {
     if (ok) return null;
-    final sections = [
+    final String sections = [
       _verdictSection,
       if (failed.isNotEmpty) _failuresSection,
       if (_unmetRequirements.isNotEmpty)
@@ -451,11 +453,11 @@ class Outcome {
   /// skipped (with their reasons) and failed (with what they said), or that
   /// nothing matched at all.
   String _requirementDiagnosis(String required) {
-    final matchingSkipped = [
+    final List<String> matchingSkipped = [
       for (final name in skipped)
         if (name.contains(required)) name,
     ];
-    final matchingFailed = [
+    final List<String> matchingFailed = [
       for (final name in failed)
         if (name.contains(required)) name,
     ];
@@ -475,7 +477,7 @@ class Outcome {
       );
     }
     for (final name in matchingSkipped) {
-      final why = _skipReasonByName[name];
+      final String? why = _skipReasonByName[name];
       lines.add('  skipped — $name${why == null ? '' : ' — $why'}');
     }
     return lines.join('\n');
@@ -493,17 +495,17 @@ class Outcome {
   /// A getter rather than writes inside [report] so it can be asserted on,
   /// for the same reason [diagnosis] is one.
   Iterable<String> get skipReport => skipped.map((name) {
-    final why = _skipReasonByName[name];
+    final String? why = _skipReasonByName[name];
     return 'e2e: skipped — $name${why == null ? '' : ' — $why'}';
   });
 
   void report() {
     stderr.writeln('');
-    for (final line in skipReport) {
+    for (final String line in skipReport) {
       stderr.writeln(line);
     }
     stderr.writeln(summary);
-    final why = diagnosis;
+    final String? why = diagnosis;
     if (why != null) _fail(why);
   }
 }

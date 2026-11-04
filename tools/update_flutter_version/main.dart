@@ -22,15 +22,18 @@ import 'shader_flags.dart';
 import 'version_update.dart';
 
 Future<void> main(List<String> args) async {
-  final request = resolveVersionRequest(args);
-  final version = request.version;
+  final VersionRequest request = resolveVersionRequest(args);
+  final String version = request.version;
 
   print('Flutter version: $version');
   print('Flutter repo: ${request.flutterRepo}');
 
-  final engine = await readEngineRevisions(version, request.flutterRepo);
-  final engineRev = engine.engineRev;
-  final materialFontsUrl = engine.materialFontsUrl;
+  final EngineRevisions engine = await readEngineRevisions(
+    version,
+    request.flutterRepo,
+  );
+  final String engineRev = engine.engineRev;
+  final String materialFontsUrl = engine.materialFontsUrl;
 
   // Download artifacts and compute checksums.
   print('');
@@ -39,12 +42,15 @@ Future<void> main(List<String> args) async {
   print('');
 
   // Archives already pinned for this version are not downloaded again.
-  final versionsBzl = File(
+  final String versionsBzl = File(
     '${request.workspaceDir}/flutter/private/versions.bzl',
   ).readAsStringSync();
-  final pinned = pinnedArtifactChecksums(versionsBzl, version);
+  final Map<String, String> pinned = pinnedArtifactChecksums(
+    versionsBzl,
+    version,
+  );
   final client = HttpClient();
-  final outcome = await downloadAllChecksums(
+  final ArtifactOutcome outcome = await downloadAllChecksums(
     client,
     DownloadSpec(
       version: version,
@@ -55,8 +61,8 @@ Future<void> main(List<String> args) async {
     ),
   );
   client.close();
-  final checksums = outcome.checksums;
-  final failures = outcome.failures;
+  final Map<String, String> checksums = outcome.checksums;
+  final List<String> failures = outcome.failures;
 
   await reportSysrootChecksums(
     version,
@@ -89,7 +95,7 @@ void _checkShaderFlags(String version, String flutterRepo, String workspace) {
   print('Checking shader compile flags...');
   const toolsPath =
       'packages/flutter_tools/lib/src/build_system/tools/shader_compiler.dart';
-  final shown = Process.runSync('git', [
+  final ProcessResult shown = Process.runSync('git', [
     'show',
     '$version:$toolsPath',
   ], workingDirectory: flutterRepo);
@@ -98,7 +104,7 @@ void _checkShaderFlags(String version, String flutterRepo, String workspace) {
     return;
   }
   const bzlPath = 'flutter/private/flutter_shader_compile.bzl';
-  final mismatches = shaderFlagMismatches(
+  final List<String> mismatches = shaderFlagMismatches(
     flutterToolsShaderFlags(shown.stdout as String),
     rulesShaderFlags(File('$workspace/$bzlPath').readAsStringSync()),
   );

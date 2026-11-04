@@ -69,14 +69,14 @@ class FakeVmDiscoveryClock implements VmDiscoveryClock {
   /// without that, a timer re-registered a few turns later would sit past its
   /// due instant with nothing left to fire it.
   Future<void> advance(Duration duration) async {
-    final target = _now.add(duration);
+    final DateTime target = _now.add(duration);
     while (true) {
       _timers.sort((a, b) => a.at.compareTo(b.at));
-      final index = _timers.indexWhere(
+      final int index = _timers.indexWhere(
         (t) => !t.settled && !t.at.isAfter(target),
       );
       if (index == -1) break;
-      final timer = _timers.removeAt(index);
+      final _FakeVmDiscoveryTimer timer = _timers.removeAt(index);
       _now = timer.at;
       timer.fire();
       for (var i = 0; i < 5; i++) {
@@ -123,7 +123,9 @@ class _FakeVmDiscoveryTimer implements VmDiscoveryTimer {
 /// Capture records on [loggerName] for the duration of the test.
 List<LogRecord> captureLog(String loggerName) {
   final records = <LogRecord>[];
-  final sub = Logger.root.onRecord.listen((record) {
+  final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen((
+    record,
+  ) {
     if (record.loggerName == loggerName) records.add(record);
   });
   addTearDown(sub.cancel);
@@ -144,12 +146,12 @@ void main() {
       'and logs progress',
       () async {
         final clock = FakeVmDiscoveryClock();
-        final records = captureLog('test.vm_discovery.late');
+        final List<LogRecord> records = captureLog('test.vm_discovery.late');
         final logs = AppLogStream();
         addTearDown(logs.close);
         final exit = Completer<int?>();
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'iOS Simulator (TEST)',
           appExit: exit.future,
@@ -161,14 +163,14 @@ void main() {
         );
         await clock.advance(const Duration(seconds: 90));
         logs.add(_vmServiceLine);
-        final discovery = await pending;
+        final VmServiceDiscovery discovery = await pending;
 
         expect(
           discovery.uri.toString(),
           'http://127.0.0.1:12345/test=/',
         );
         expect(discovery.gaveUpNote, isNull);
-        final progress = waitingLines(records);
+        final List<Map<dynamic, dynamic>> progress = waitingLines(records);
         expect(progress.length, greaterThanOrEqualTo(2));
         for (final line in progress) {
           expect(line['text'], contains('still waiting for the VM service'));
@@ -182,7 +184,7 @@ void main() {
       'log lines',
       () async {
         final clock = FakeVmDiscoveryClock();
-        final start = clock.now();
+        final DateTime start = clock.now();
         captureLog('test.vm_discovery.exit');
         final logs = AppLogStream();
         addTearDown(logs.close);
@@ -190,7 +192,7 @@ void main() {
         logs.add('flutter: starting up');
         logs.add('flutter: Null check operator used on a null value');
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'macOS',
           appExit: exit.future,
@@ -233,7 +235,7 @@ void main() {
         addTearDown(logs.close);
         final exit = Completer<int?>();
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'macOS',
           appExit: exit.future,
@@ -247,7 +249,7 @@ void main() {
         // Giving up on a living app is not a throw: the run continues
         // without a URI, and the note carries the bound, the option that
         // raises it, and the last lines.
-        final discovery = await pending;
+        final VmServiceDiscovery discovery = await pending;
 
         expect(discovery.uri, isNull);
         expect(
@@ -267,8 +269,8 @@ void main() {
       'an announcement before 30 s returns at once, with no progress line',
       () async {
         final clock = FakeVmDiscoveryClock();
-        final start = clock.now();
-        final records = captureLog('test.vm_discovery.early');
+        final DateTime start = clock.now();
+        final List<LogRecord> records = captureLog('test.vm_discovery.early');
         final logs = AppLogStream();
         addTearDown(logs.close);
         final exit = Completer<int?>();
@@ -276,7 +278,7 @@ void main() {
         // wait never reaches its first progress point.
         logs.add(_vmServiceLine);
 
-        final discovery = await waitForVmServiceUri(
+        final VmServiceDiscovery discovery = await waitForVmServiceUri(
           logs: logs,
           deviceName: 'Linux',
           appExit: exit.future,
@@ -303,7 +305,7 @@ void main() {
         final clock = FakeVmDiscoveryClock();
         final logs = AppLogStream();
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'Android (emulator-5554)',
           config: VmDiscoveryConfig(
@@ -313,7 +315,7 @@ void main() {
         );
         await logs.close();
 
-        final discovery = await pending;
+        final VmServiceDiscovery discovery = await pending;
         expect(discovery.uri, isNull);
         expect(discovery.gaveUpNote, isNull);
       },
@@ -329,7 +331,7 @@ void main() {
         logs.add('flutter: warming up');
         logs.add('flutter: still warming up');
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'Android (emulator-5554)',
           appExit: exit.future,
@@ -352,7 +354,7 @@ void main() {
           await clock.advance(const Duration(seconds: 1));
         }
         expect(done, isTrue);
-        final discovery = await pending;
+        final VmServiceDiscovery discovery = await pending;
 
         expect(discovery.uri, isNull);
         expect(
@@ -381,7 +383,7 @@ void main() {
         final exit = Completer<int?>();
         logs.add('flutter: boom');
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'Linux',
           appExit: exit.future,
@@ -420,13 +422,13 @@ void main() {
       'timer pending',
       () async {
         final clock = FakeVmDiscoveryClock();
-        final records = captureLog('test.vm_discovery.abandon');
+        final List<LogRecord> records = captureLog('test.vm_discovery.abandon');
         final logs = AppLogStream();
         addTearDown(logs.close);
         final exit = Completer<int?>();
         final abandoned = Completer<void>();
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'iOS Simulator (TEST)',
           appExit: exit.future,
@@ -467,12 +469,14 @@ void main() {
       'abandoning before the first progress point waits for nothing',
       () async {
         final clock = FakeVmDiscoveryClock();
-        final records = captureLog('test.vm_discovery.abandon_early');
+        final List<LogRecord> records = captureLog(
+          'test.vm_discovery.abandon_early',
+        );
         final logs = AppLogStream();
         addTearDown(logs.close);
         final abandoned = Completer<void>();
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'Linux',
           appExit: Completer<int?>().future,
@@ -504,7 +508,7 @@ void main() {
         final abandoned = Completer<void>();
         logs.add('flutter: warming up');
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'Android (emulator-5554)',
           appExit: exit.future,
@@ -539,7 +543,7 @@ void main() {
         final exit = Completer<int?>();
         final abandoned = Completer<void>();
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'Linux',
           appExit: exit.future,
@@ -570,7 +574,7 @@ void main() {
         final logs = AppLogStream();
         addTearDown(logs.close);
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'Linux',
           appExit: Completer<int?>().future,
@@ -581,7 +585,7 @@ void main() {
         );
         logs.add(_vmServiceLine);
 
-        final discovery = await pending;
+        final VmServiceDiscovery discovery = await pending;
         expect(discovery.uri, isNotNull);
         expect(clock.pendingTimers, isZero);
       },
@@ -604,7 +608,7 @@ void main() {
       () async {
         final clock = FakeVmDiscoveryClock();
         var alive = true;
-        final watched = watchHostPid(
+        final Future<int?> watched = watchHostPid(
           pid: 4242,
           isAlive: (_) async => alive,
           config: VmDiscoveryConfig(clock: clock),
@@ -623,7 +627,7 @@ void main() {
       final clock = FakeVmDiscoveryClock();
       var probes = 0;
       final stop = Completer<void>();
-      final watched = watchHostPid(
+      final Future<int?> watched = watchHostPid(
         pid: 4242,
         isAlive: (_) async {
           probes++;
@@ -650,18 +654,18 @@ void main() {
       'an exited child process fails discovery at once with its exit code',
       () async {
         final clock = FakeVmDiscoveryClock();
-        final start = clock.now();
+        final DateTime start = clock.now();
         captureLog('test.vm_discovery.child');
         final logs = AppLogStream();
         final proc = FakeProcess();
-        final pump = pumpProcessLines(proc, logs);
+        final AppLogPump pump = pumpProcessLines(proc, logs);
         logs.closeWhen([pump.done]);
         addTearDown(() async {
           await pump.dispose();
           await logs.close();
         });
 
-        final pending = waitForVmServiceUri(
+        final Future<VmServiceDiscovery> pending = waitForVmServiceUri(
           logs: logs,
           deviceName: 'Linux',
           appExit: proc.exitCode,

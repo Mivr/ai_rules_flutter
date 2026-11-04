@@ -50,8 +50,8 @@ IosPlatformLauncher iosLauncherFromEnv(
   Map<String, String> env,
   Runfiles r,
 ) {
-  final appKey = env['FLUTTER_INTEGRATION_TEST_IOS_APP'];
-  final bundleId = env['FLUTTER_INTEGRATION_TEST_IOS_BUNDLE_ID'];
+  final String? appKey = env['FLUTTER_INTEGRATION_TEST_IOS_APP'];
+  final String? bundleId = env['FLUTTER_INTEGRATION_TEST_IOS_BUNDLE_ID'];
   if (appKey == null || appKey.isEmpty) {
     throw const FormatException(
       'FLUTTER_INTEGRATION_TEST_IOS_APP must be set for platform="ios".',
@@ -137,13 +137,13 @@ String extractIpaApp({
   required Uint8List ipaBytes,
   required Directory destDir,
 }) {
-  final entries = readZipEntries(ipaBytes)
+  final List<ZipEntry> entries = readZipEntries(ipaBytes)
     ..sort((a, b) => a.path.compareTo(b.path));
-  final appName = _singlePayloadApp(entries);
+  final String appName = _singlePayloadApp(entries);
   final prefix = 'Payload/$appName/';
   for (final entry in entries) {
     if (!entry.path.startsWith(prefix)) continue;
-    final rel = entry.path.substring(prefix.length);
+    final String rel = entry.path.substring(prefix.length);
     if (rel.isEmpty) continue;
     _writeIpaEntry(destDir, appName, rel, entry);
   }
@@ -155,7 +155,7 @@ String extractIpaApp({
 String _singlePayloadApp(List<ZipEntry> entries) {
   final names = <String>{};
   for (final entry in entries) {
-    final parts = entry.path.split('/');
+    final List<String> parts = entry.path.split('/');
     if (parts.length < 3 || parts[0] != 'Payload') continue;
     if (parts[1].isEmpty || !parts[1].endsWith('.app')) continue;
     names.add(parts[1]);
@@ -181,8 +181,8 @@ void _writeIpaEntry(
   // empty segment after that slash is the directory marker itself; an empty
   // segment anywhere else (`a//b`, a leading `/`), or a `.`/`..` segment,
   // is still refused below.
-  final segments = rel.split('/');
-  final names = rel.endsWith('/')
+  final List<String> segments = rel.split('/');
+  final List<String> names = rel.endsWith('/')
       ? segments.sublist(0, segments.length - 1)
       : segments;
   if (names.any((s) => s.isEmpty || s == '.' || s == '..')) {
@@ -209,7 +209,7 @@ void _writeIpaEntry(
 
 /// Recreates one `.ipa` symlink member with its exact stored target.
 void _writeIpaSymlink(String destPath, ZipEntry entry) {
-  final target = utf8.decode(entry.data);
+  final String target = utf8.decode(entry.data);
   if (target.isEmpty ||
       target.startsWith('/') ||
       target.split('/').any((s) => s.isEmpty || s == '..')) {
@@ -227,7 +227,7 @@ void _writeIpaSymlink(String destPath, ZipEntry entry) {
 /// The first non-blank line of a child's output, or a placeholder when there
 /// is none — the most that fits on a failure's one stderr line.
 String _firstOutputLine(String output) {
-  for (final line in const LineSplitter().convert(output)) {
+  for (final String line in const LineSplitter().convert(output)) {
     if (line.trim().isNotEmpty) return line.trim();
   }
   return 'no output';
@@ -290,10 +290,10 @@ class IosPlatformLauncher implements PlatformLauncher {
 
   @override
   Future<Process> startTarget(HarnessBinding binding) async {
-    final udid = await _bootDevice();
-    final appDir = _resolveAppDir();
+    final String udid = await _bootDevice();
+    final String appDir = _resolveAppDir();
     await _installApp(udid, appDir);
-    final harnessUrl = binding.url;
+    final String harnessUrl = binding.url;
     await _writeHarnessUrlFile(udid, harnessUrl);
     return _launchApp(udid, harnessUrl);
   }
@@ -390,7 +390,7 @@ class IosPlatformLauncher implements PlatformLauncher {
       );
     }
     var container = '';
-    for (final line in const LineSplitter().convert(result.stdoutText)) {
+    for (final String line in const LineSplitter().convert(result.stdoutText)) {
       if (line.trim().isNotEmpty) {
         container = line.trim();
         break;
@@ -444,7 +444,7 @@ class IosPlatformLauncher implements PlatformLauncher {
         'iOS simulator launch of "$bundleId" on $udid failed: $e',
       );
     }
-    final earlyExit = await launched.exitCode.timeout(
+    final int earlyExit = await launched.exitCode.timeout(
       Duration.zero,
       onTimeout: () => -1,
     );
@@ -466,7 +466,7 @@ class IosPlatformLauncher implements PlatformLauncher {
 
   @override
   Future<void> dispose() async {
-    final udid = _udid;
+    final String? udid = _udid;
     _udid = null;
     if (udid != null) {
       if (_launched) {
@@ -486,7 +486,7 @@ class IosPlatformLauncher implements PlatformLauncher {
       }
       _installed = false;
     }
-    final scratch = _scratchDir;
+    final Directory? scratch = _scratchDir;
     _scratchDir = null;
     if (scratch != null && scratch.existsSync()) {
       cleanupQuietly(() => scratch.deleteSync(recursive: true));
@@ -502,7 +502,11 @@ class IosPlatformLauncher implements PlatformLauncher {
     Duration timeout,
   ) async {
     try {
-      final result = await runSimctl(spawner, args, timeout: timeout);
+      final CommandResult result = await runSimctl(
+        spawner,
+        args,
+        timeout: timeout,
+      );
       if (result.exitCode != 0) {
         stderr.writeln(
           'flutter_integration_test: iOS simulator $step of "$bundleId" '

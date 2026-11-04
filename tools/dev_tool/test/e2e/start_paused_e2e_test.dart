@@ -25,16 +25,19 @@ typedef _PausedApp = ({
 /// Start [app] with `--start-paused` and prove the engine holds the main
 /// isolate, the control channel still answers, and a resume lets it draw.
 Future<void> _holdsUntilResumed(_PausedApp app) async {
-  final dt = await startDevTool(
+  final DevToolProcess dt = await startDevTool(
     workspace: app.workspace,
     target: ':app',
     device: app.device,
     extraArgs: ['--start-paused'],
   );
 
-  final start = await dt.waitForEvent('app.start', timeout: app.buildTimeout);
-  final appId = start['params']?['appId'] as String? ?? dt.appId!;
-  final debugPort = await dt.waitForEvent(
+  final Map<String, dynamic> start = await dt.waitForEvent(
+    'app.start',
+    timeout: app.buildTimeout,
+  );
+  final String appId = start['params']?['appId'] as String? ?? dt.appId!;
+  final Map<String, dynamic> debugPort = await dt.waitForEvent(
     'app.debugPort',
     timeout: app.launchTimeout,
   );
@@ -47,11 +50,11 @@ Future<void> _holdsUntilResumed(_PausedApp app) async {
     timeout: const Duration(seconds: 60),
   );
 
-  final service = await vmServiceConnectUri(wsUri);
+  final VmService service = await vmServiceConnectUri(wsUri);
   addTearDown(service.dispose);
-  final vm = await service.getVM();
-  final main = vm.isolates!.firstWhere((i) => i.name == 'main');
-  final isolate = await service.getIsolate(main.id!);
+  final VM vm = await service.getVM();
+  final IsolateRef main = vm.isolates!.firstWhere((i) => i.name == 'main');
+  final Isolate isolate = await service.getIsolate(main.id!);
   expect(
     isolate.pauseEvent?.kind,
     EventKind.kPauseStart,
@@ -64,7 +67,7 @@ Future<void> _holdsUntilResumed(_PausedApp app) async {
   // dispatching it would block the control channel for the rest of the
   // run.
   await dt.waitForHttpControl(timeout: const Duration(seconds: 60));
-  final tooEarly = await dt
+  final Map<String, dynamic> tooEarly = await dt
       .httpCommand('app.getText', {
         'appId': appId,
         'key': app.labelKey,
@@ -87,7 +90,7 @@ Future<void> _holdsUntilResumed(_PausedApp app) async {
   // Resume, exactly as a debugger would, and the app comes up.
   await service.resume(main.id!);
 
-  final ready = await dt.httpCommand('app.waitFor', {
+  final Map<String, dynamic> ready = await dt.httpCommand('app.waitFor', {
     'appId': appId,
     'key': app.labelKey,
     'timeoutMs': '30000',
@@ -152,7 +155,7 @@ void main() {
         // There is no engine switch to pass a browser. DWDS is what gates
         // `main()`, so pausing means withholding the run request — a different
         // mechanism reaching the same observable.
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: e2eWorkspace('web_example'),
           target: ':app_wasm',
           device: 'chrome',
@@ -163,7 +166,7 @@ void main() {
           'app.start',
           timeout: const Duration(seconds: 240),
         );
-        final debugPort = await dt.waitForEvent(
+        final Map<String, dynamic> debugPort = await dt.waitForEvent(
           'app.debugPort',
           timeout: const Duration(seconds: 180),
         );
@@ -172,20 +175,23 @@ void main() {
           timeout: const Duration(seconds: 60),
         );
 
-        final service = await vmServiceConnectUri(
+        final VmService service = await vmServiceConnectUri(
           debugPort['params']!['wsUri'] as String,
         );
         addTearDown(service.dispose);
-        final vm = await service.getVM();
-        final isolate = vm.isolates!.first;
+        final VM vm = await service.getVM();
+        final IsolateRef isolate = vm.isolates!.first;
 
         // The widget inspector answers only once the framework is up, which
         // only happens once `main()` has run — a check that goes through the
         // tool's own control channel rather than guessing at what DWDS reports.
         Future<bool> frameworkIsUp() async {
-          final tree = await dt.httpCommand('app.dumpWidgetTree', {
-            'appId': dt.appId!,
-          });
+          final Map<String, dynamic> tree = await dt.httpCommand(
+            'app.dumpWidgetTree',
+            {
+              'appId': dt.appId!,
+            },
+          );
           return tree['error'] == null;
         }
 
@@ -200,7 +206,9 @@ void main() {
         // so this is exactly what pressing resume in a debugger does.
         await service.resume(isolate.id!);
 
-        final deadline = DateTime.now().add(const Duration(seconds: 90));
+        final DateTime deadline = DateTime.now().add(
+          const Duration(seconds: 90),
+        );
         while (!await frameworkIsUp()) {
           expect(
             DateTime.now().isBefore(deadline),

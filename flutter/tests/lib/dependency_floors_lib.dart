@@ -51,12 +51,12 @@ class Floor {
 List<String> _calls(String source, String kind) {
   final bodies = <String>[];
   final start = RegExp('\\b$kind\\s*\\(');
-  for (final match in start.allMatches(source)) {
+  for (final RegExpMatch match in start.allMatches(source)) {
     var depth = 1;
-    var i = match.end;
+    int i = match.end;
     String? quote;
     while (i < source.length && depth > 0) {
-      final ch = source[i];
+      final String ch = source[i];
       if (quote != null) {
         if (ch == r'\' && i + 1 < source.length) {
           i += 2;
@@ -82,7 +82,8 @@ List<String> _calls(String source, String kind) {
 
 /// The value of `name = "..."` in [body], or null when absent.
 String? _stringAttribute(String body, String name) {
-  final match = RegExp('\\b$name\\s*=\\s*"([^"]*)"').firstMatch(body);
+  final RegExpMatch? match = RegExp('\\b$name\\s*=\\s*"([^"]*)"')
+      .firstMatch(body);
   return match?.group(1);
 }
 
@@ -93,9 +94,9 @@ bool _isDev(String body) =>
 /// Every `bazel_dep` in [source], in file order.
 List<Dependency> dependencies(String source) {
   final deps = <Dependency>[];
-  for (final body in _calls(source, 'bazel_dep')) {
-    final name = _stringAttribute(body, 'name');
-    final version = _stringAttribute(body, 'version');
+  for (final String body in _calls(source, 'bazel_dep')) {
+    final String? name = _stringAttribute(body, 'name');
+    final String? version = _stringAttribute(body, 'version');
     if (name == null || version == null) {
       throw StateError('bazel_dep without name/version: $body');
     }
@@ -107,9 +108,9 @@ List<Dependency> dependencies(String source) {
 /// Every `single_version_override` in [source], keyed by module name.
 Map<String, String> overrides(String source) {
   final found = <String, String>{};
-  for (final body in _calls(source, 'single_version_override')) {
-    final module = _stringAttribute(body, 'module_name');
-    final version = _stringAttribute(body, 'version');
+  for (final String body in _calls(source, 'single_version_override')) {
+    final String? module = _stringAttribute(body, 'module_name');
+    final String? version = _stringAttribute(body, 'version');
     if (module == null || version == null) {
       throw StateError('single_version_override without module/version: $body');
     }
@@ -121,7 +122,7 @@ Map<String, String> overrides(String source) {
 /// Parse the checked-in table, failing when an entry lacks a field instead of
 /// silently skipping it.
 Map<String, Floor> parseFloors(String source) {
-  final decoded = jsonDecode(source);
+  final dynamic decoded = jsonDecode(source);
   if (decoded is! Map<String, dynamic>) {
     throw StateError('dependency_floors.json is not a JSON object');
   }
@@ -131,14 +132,14 @@ Map<String, Floor> parseFloors(String source) {
       throw StateError('floor entry for $name is not an object');
     }
     String field(String key) {
-      final entry = value[key];
+      final dynamic entry = value[key];
       if (entry is! String || entry.isEmpty) {
         throw StateError('floor entry for $name has no $key');
       }
       return entry;
     }
 
-    final lifted = value['lifted_by'];
+    final dynamic lifted = value['lifted_by'];
     if (lifted is! List || lifted.any((module) => module is! String)) {
       throw StateError('floor entry for $name has no lifted_by string list');
     }

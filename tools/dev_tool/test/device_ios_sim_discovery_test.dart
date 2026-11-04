@@ -11,7 +11,7 @@ import 'fakes.dart';
 
 /// The structured `message` of a log record, or null for plain-text records.
 String? _messageOf(LogRecord record) {
-  final object = record.object;
+  final Object? object = record.object;
   if (object is Map) return object['message'] as String?;
   return null;
 }
@@ -101,7 +101,7 @@ void main() {
       'takes this launch announcement after another pid announces',
       () async {
         final launch = _ScriptedLaunch();
-        final discovery = await launch.discovery;
+        final FakeProcess discovery = await launch.discovery;
         await discovery.outputAttached;
         emitSimStreamAnnouncement(
           discovery,
@@ -124,7 +124,7 @@ void main() {
           first: false,
         );
 
-        final instance = await launch.done;
+        final AppInstance instance = await launch.done;
         expect(
           instance.vmServiceUri.toString(),
           'http://127.0.0.1:4242/own=/',
@@ -136,7 +136,7 @@ void main() {
       'takes the never-closed last announcement in the real layout',
       () async {
         final launch = _ScriptedLaunch();
-        final discovery = await launch.discovery;
+        final FakeProcess discovery = await launch.discovery;
         await discovery.outputAttached;
         emitSimStreamAnnouncement(
           discovery,
@@ -155,7 +155,7 @@ void main() {
           first: false,
         );
 
-        final instance = await launch.done.timeout(
+        final AppInstance instance = await launch.done.timeout(
           const Duration(seconds: 10),
         );
         expect(
@@ -167,10 +167,12 @@ void main() {
 
     test('takes no announcement from other pids when the app exits', () async {
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+        records.add,
+      );
       final launch = _ScriptedLaunch();
       try {
-        final discovery = await launch.discovery;
+        final FakeProcess discovery = await launch.discovery;
         await discovery.outputAttached;
         emitSimStreamAnnouncement(
           discovery,
@@ -180,7 +182,9 @@ void main() {
         );
         // Let the stream judge the foreign announcement before the exit
         // lands: the skip is logged, and the wait then fails on the exit.
-        final deadline = DateTime.now().add(const Duration(seconds: 10));
+        final DateTime deadline = DateTime.now().add(
+          const Duration(seconds: 10),
+        );
         while (!records.any(
           (r) => _messageOf(r) == 'sim_discovery_foreign_announcement',
         )) {
@@ -213,7 +217,7 @@ void main() {
       'takes an announcement printed before simctl launch answers',
       () async {
         final launch = _ScriptedLaunch(holdLaunch: true);
-        final discovery = await launch.discovery;
+        final FakeProcess discovery = await launch.discovery;
         // The output pump attaches before `simctl launch` answers, and the
         // discovery pump attaches earlier still: emitting now proves the
         // lines arrived while the pid was still unknown.
@@ -229,7 +233,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 50));
         launch.openLaunch.complete();
 
-        final instance = await launch.done;
+        final AppInstance instance = await launch.done;
         expect(
           instance.vmServiceUri.toString(),
           'http://127.0.0.1:4242/early=/',
@@ -249,7 +253,7 @@ void main() {
         // last, and no delimiter after it — the stream prints that only when
         // the next entry starts. The nested `}` and `]` lines must neither
         // end nor split the entry, and the pid line takes it at once.
-        for (final line in simStreamAnnouncement(
+        for (final String line in simStreamAnnouncement(
           pid: 4242,
           uri: 'http://127.0.0.1:4/own=/',
           first: true,
@@ -289,7 +293,9 @@ void main() {
 
     test('reports a foreign announcement once, with pid and URI', () async {
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+        records.add,
+      );
       try {
         final lines = AppLogStream();
         final feed = SimDiscoveryFeed(out: lines, log: Logger('test.feed'));
@@ -303,7 +309,7 @@ void main() {
         }
         feed.flush();
 
-        final foreign = records
+        final List<LogRecord> foreign = records
             .where(
               (r) => _messageOf(r) == 'sim_discovery_foreign_announcement',
             )

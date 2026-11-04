@@ -20,7 +20,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import 'package:dwds/dwds.dart' show AppConnection;
+import 'package:dwds/dwds.dart' show AppConnection, DebugConnection;
 import 'package:flutter_bazel_dev_tool/command_report.dart';
 import 'package:flutter_bazel_dev_tool/compiler_config.dart';
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
@@ -46,8 +46,11 @@ import 'package:flutter_bazel_dev_tool/web_bootstrap.dart';
 import 'package:flutter_bazel_dev_tool/web_expression_compiler.dart';
 import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:path/path.dart' as p;
+import 'package:vm_service/vm_service.dart';
 import 'package:webkit_inspection_protocol/webkit_inspection_protocol.dart'
     show ChromeConnection;
+
+typedef _Servers = ({WebModuleServer server, Uri serverUri});
 
 /// The http form of a DDS websocket URI.
 ///
@@ -56,7 +59,7 @@ import 'package:webkit_inspection_protocol/webkit_inspection_protocol.dart'
 /// `_httpUriFromWebsocketUri`.
 Uri httpUriFromWebSocketUri(Uri wsUri) {
   const wsPath = '/ws';
-  final path = wsUri.path.endsWith(wsPath)
+  final String path = wsUri.path.endsWith(wsPath)
       ? wsUri.path.substring(0, wsUri.path.length - 2)
       : wsUri.path;
   return wsUri.replace(
@@ -120,11 +123,13 @@ class WebPipelineAssembler {
   /// One attempt, run inside the assembly scope [assemble] opens.
   Future<void> _assembleOnce(List<String> outputFiles) async {
     try {
-      final config = _loadDevConfig(outputFiles);
+      final _WebConfig config = _loadDevConfig(outputFiles);
       _rejectShadowedSources(config.devConfig);
-      final syntheticDir = await _stageSyntheticEntrypoint(config.devConfig);
-      final servers = await _startModuleServer(config: config);
-      final fs = await _startFrontendServer(
+      final Directory syntheticDir = await _stageSyntheticEntrypoint(
+        config.devConfig,
+      );
+      final _Servers servers = await _startModuleServer(config: config);
+      final FrontendServer fs = await _startFrontendServer(
         config: config,
         syntheticDir: syntheticDir,
       );
@@ -135,7 +140,7 @@ class WebPipelineAssembler {
         fs: fs,
         webDevice: webDevice,
       );
-      final initialSnap = _snapshotSources(config.devConfig);
+      final SourceVersions initialSnap = _snapshotSources(config.devConfig);
       // Compile the synthetic entrypoint.
       //
       // A failure here is not different in kind from any later compile: it
@@ -151,7 +156,7 @@ class WebPipelineAssembler {
       // why the recovery is a restart rather than a reload, and why it navigates
       // the page — see [ReloadPipeline.webBaselineFailure] and
       // [DwdsReloadStrategy.loadFirstProgram].
-      final initialResult = await fs.compile(pipeline.entrypoint);
+      final CompileResult initialResult = await fs.compile(pipeline.entrypoint);
       await _settleInitialCompile(
         fs: fs,
         moduleServer: servers.server,
@@ -255,7 +260,7 @@ extension _WebAssembly on WebPipelineAssembler {
   /// target, so each throws naming the file and what the run loses with it.
   _WebConfig _loadDevConfig(List<String> outputFiles) {
     // Find dev config in build outputs (emitted by flutter_web_bundle in -c dbg).
-    final devConfigPath = findDevConfig(outputFiles);
+    final String? devConfigPath = findDevConfig(outputFiles);
     if (devConfigPath == null) {
       throw DevToolException(
         'No _dev_config.json found in build outputs.\n'
@@ -268,15 +273,15 @@ extension _WebAssembly on WebPipelineAssembler {
       'text': 'Parsing dev config from $devConfigPath...',
       'path': devConfigPath,
     });
-    final devConfig = parseDevConfig(devConfigPath);
+    final DevConfig devConfig = parseDevConfig(devConfigPath);
     requireDeclaredFilesExist(devConfig);
 
     // Build web toolchain paths and find web output dir from build outputs.
-    final webToolchain = buildWebToolchainFromOutputs(
+    final WebToolchainPaths webToolchain = buildWebToolchainFromOutputs(
       outputFiles,
       devConfig,
     );
-    final webOutputDir = findWebOutputDir(outputFiles);
+    final String webOutputDir = findWebOutputDir(outputFiles);
 
     // The page's boot path comes from the build, not from here. A dev config
     // without it is a rules/dev-tool version skew, and the alternative to
@@ -315,7 +320,7 @@ extension _WebAssembly on WebPipelineAssembler {
         'rules_flutter.',
       );
     }
-    final packageConfig = devConfig.buildPackageConfig;
+    final String packageConfig = devConfig.buildPackageConfig;
     return _WebConfig(
       devConfigPath: devConfigPath,
       devConfig: devConfig,
@@ -334,8 +339,8 @@ extension _WebAssembly on WebPipelineAssembler {
     // by it — the dev loop would compile the generated file in its place,
     // and nothing would say so. Upstream stages the same way; refused here
     // by name instead of left to surface as the wrong program.
-    for (final source in devConfig.appSources) {
-      for (final staged in _stagedNames) {
+    for (final ({String path, String uri}) source in devConfig.appSources) {
+      for (final String staged in _stagedNames) {
         if (source.uri == 'org-dartlang-app:///$staged') {
           throw DevToolException(
             '${source.path} is compiled as ${source.uri}, the name the dev '
@@ -352,7 +357,7 @@ extension _WebAssembly on WebPipelineAssembler {
   /// the compiler resolves first, and point the pipeline at it.
   Future<Directory> _stageSyntheticEntrypoint(DevConfig devConfig) async {
     // Generate synthetic web_entrypoint.dart with bootstrapEngine() + plugin registrant.
-    final syntheticDir = syntheticDirectory = await createTempDir(
+    final Directory syntheticDir = syntheticDirectory = await createTempDir(
       'flutter_ddc_',
     );
     final syntheticMain = File(
@@ -406,9 +411,7 @@ extension _WebAssembly on WebPipelineAssembler {
   }
 
   /// Serve the build's web outputs over HTTP, with DWDS attached lazily.
-  Future<({WebModuleServer server, Uri serverUri})> _startModuleServer({
-    required _WebConfig config,
-  }) async {
+  Future<_Servers> _startModuleServer({required _WebConfig config}) async {
     // Create the module server with workspace root and package config
     // for DWDS source resolution. Held in a non-null local as well: the
     // browser-connection listener wired below outlives this block, and the
@@ -437,7 +440,7 @@ extension _WebAssembly on WebPipelineAssembler {
     );
 
     // Start HTTP server first (without DWDS) to get the server URI.
-    final serverUri = await moduleServer.start();
+    final Uri serverUri = await moduleServer.start();
     return (server: moduleServer, serverUri: serverUri);
   }
 
@@ -476,9 +479,9 @@ extension _WebAssembly on WebPipelineAssembler {
     // Its own directory, deliberately not [syntheticDir]: that one is a
     // `--filesystem-root`, so anything written into it becomes addressable as
     // `org-dartlang-app:///<name>` and would collide with the live source tree.
-    final packageConfigDir = await createTempDir('flutter_pkgcfg_');
+    final Directory packageConfigDir = await createTempDir('flutter_pkgcfg_');
     await host.teardown.add(() => deleteTempDir(packageConfigDir));
-    final stabilized = stabilizePackageRoots(
+    final StabilizedPackageConfig stabilized = stabilizePackageRoots(
       config.devConfig.devPackageConfig,
       into: packageConfigDir,
     );
@@ -491,7 +494,7 @@ extension _WebAssembly on WebPipelineAssembler {
       'packages': stabilized.repointed,
       'packageConfig': stabilized.path,
     });
-    final webPackageConfig = stabilized.path;
+    final String webPackageConfig = stabilized.path;
     final compilerConfig = WebCompilerConfig(
       webToolchain: config.webToolchain,
       fileSystemRoots: [
@@ -502,7 +505,7 @@ extension _WebAssembly on WebPipelineAssembler {
       dartDefines: config.devConfig.dartDefines,
       enableExperiments: config.devConfig.enableExperiments,
     );
-    final fs = pipeline.frontendServer = FrontendServer(
+    final FrontendServer fs = pipeline.frontendServer = FrontendServer(
       dartaotruntimePath: config.devConfig.dartaotruntime,
       frontendServerPath: config.devConfig.frontendServer,
       config: compilerConfig,
@@ -530,7 +533,7 @@ extension _WebAssembly on WebPipelineAssembler {
     // Chrome has not launched either — the connection callback is lazy.
     await moduleServer.initDwds(
       chromeConnection: () async {
-        final cdpPort = webDevice.cdpPort;
+        final int? cdpPort = webDevice.cdpPort;
         if (cdpPort == null) {
           throw StateError('Chrome CDP port not yet discovered');
         }
@@ -575,16 +578,16 @@ extension _WebAssembly on WebPipelineAssembler {
     // compile did pick up being re-sent once. `builtBefore` is not the cutoff
     // for any of this; it governs the asset tree below, which really is
     // bazel-built.
-    final res = pipeline.resolver = SourceUriResolver(
+    final SourceUriResolver res = pipeline.resolver = SourceUriResolver(
       workspaceRoot: plan.workspace,
       sourcePackages: devConfig.sourcePackages,
       appSources: devConfig.appSources,
     );
-    final ws = pipeline.workspaceView = Workspace(
+    final Workspace ws = pipeline.workspaceView = Workspace(
       resolver: res,
       generatedFiles: devConfig.generatedFileUris,
     );
-    final initialSnap = ws.snapshot();
+    final SourceVersions initialSnap = ws.snapshot();
     return initialSnap;
   }
 
@@ -666,7 +669,7 @@ extension _WebAssembly on WebPipelineAssembler {
   // edit. The native `_rebuildBundle` comment describes the same family of
   // mistake.
   Future<bool> _rebuildWebBundle() async {
-    final r = await host.bazel.build(
+    final BazelBuildResult r = await host.bazel.build(
       plan.target,
       workspace: plan.workspace,
       compilationMode: 'dbg',
@@ -687,7 +690,7 @@ extension _WebAssembly on WebPipelineAssembler {
     // Declared rather than found: this directory also holds the app's own
     // `main.dart.wasm`, which moves on every Dart edit.
     if (config.devConfig.nativeLibs.isNotEmpty) {
-      final nativeLibs = await NativeLibsWatch.of(
+      final NativeLibsWatch nativeLibs = await NativeLibsWatch.of(
         config.devConfig.nativeLibContracts,
       );
       pipeline.nativeLibsVerdict = nativeLibs.verdict;
@@ -747,7 +750,7 @@ extension _WebAssembly on WebPipelineAssembler {
     // does exactly that, losing the AppConnection, never sending `runMain()`,
     // and leaving DWDS holding `main()` back: a blank page forever with no
     // diagnostics. Nothing here needs Chrome to exist yet.
-    final connectedApps = moduleServer.connectedApps;
+    final Stream<AppConnection>? connectedApps = moduleServer.connectedApps;
     if (connectedApps == null) {
       // `initDwds` either wires DWDS up or throws, so a live module server
       // always has this stream. Reaching here means that invariant broke.
@@ -775,7 +778,7 @@ extension _WebAssembly on WebPipelineAssembler {
         // log forwarder on the reconnection, exactly as it does for a user
         // pressing reload.
         loadFirstProgram: () async {
-          final cdpPort = webDevice.cdpPort;
+          final int? cdpPort = webDevice.cdpPort;
           if (cdpPort == null) {
             throw StateError(
               'the browser announced no debugging port, so the page cannot be '
@@ -847,25 +850,21 @@ extension _WebAssembly on WebPipelineAssembler {
       'message': 'dwds_connected',
       'text': 'DWDS: Browser connected (app: ${appConnection.request.appId})',
     });
-    final debugConnection = await wiring.moduleServer.debugConnection(
-      appConnection,
-    );
+    final DebugConnection debugConnection = await wiring.moduleServer
+        .debugConnection(appConnection);
     // Awaited, not searched for: the listener is attached before the
     // launch loop runs, so on a fast connection the session may not
     // exist yet and `sessions.firstWhere` would throw.
-    final session = await webSession.future;
+    final DeviceSession session = await webSession.future;
 
     // DWDS runs the DDS, so `debugConnection.uri` already *is* the DDS
     // websocket. Everything — our client, DevTools, DWDS's own client —
     // attaches there, and DDS multiplexes them.
-    final wsUri = Uri.parse(debugConnection.uri);
+    final Uri wsUri = Uri.parse(debugConnection.uri);
     final webClient = VmServiceClient();
-    await webClient.connect(
-      httpUriFromWebSocketUri(wsUri),
-      createDevFS: false,
-    );
+    await webClient.connect(httpUriFromWebSocketUri(wsUri), createDevFS: false);
     session.vmClient = webClient;
-    final webVmService = webClient.service!;
+    final VmService webVmService = webClient.service!;
     await wiring.dwdsReload.attachVmService(webVmService);
     // Announced on web too: the event exists to say where a run's VM
     // service is, and a `--machine` client has no other way to find a
@@ -937,7 +936,7 @@ extension _WebAssembly on WebPipelineAssembler {
     // releases it is DWDS itself: its `resume` handler runs `main()` when
     // the app has not started yet, so a debugger's resume button is the
     // resume, with nothing here to relay it.
-    final webVm = (await webSession.future).vmClient?.service;
+    final VmService? webVm = (await webSession.future).vmClient?.service;
     if (webVm == null) {
       // Nothing can resume it, so holding main() back would be a hang
       // with no way out. Run, and say why it is not paused.
@@ -1034,7 +1033,7 @@ class WasmPipelineAssembler {
   });
 
   void assemble() {
-    final cdpPort = this.cdpPort;
+    final int? cdpPort = this.cdpPort;
     // Without a CDP port there is no way to reload the page, so there is no
     // restart to offer. The run's gate fallback answers for it.
     if (cdpPort == null) return;
@@ -1047,7 +1046,7 @@ class WasmPipelineAssembler {
           'message': 'wasm_rebuild',
           'text': 'Rebuilding $target (WASM)...',
         });
-        final result = await host.bazel.build(
+        final BazelBuildResult result = await host.bazel.build(
           target,
           workspace: workspace,
           compilationMode: compilationMode,
@@ -1069,7 +1068,7 @@ class WasmPipelineAssembler {
       });
       final stopwatch = Stopwatch()..start();
       // Dummy CompileResult — WASM doesn't use the frontend server.
-      final outcome = await strategy.applyRestart(
+      final StrategyOutcome outcome = await strategy.applyRestart(
         CompileResult(dillPath: '', success: true),
         host.sessions,
       );

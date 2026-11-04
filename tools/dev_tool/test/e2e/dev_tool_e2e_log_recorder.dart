@@ -36,7 +36,7 @@ const devToolE2eLogDirVar = 'DEV_TOOL_E2E_LOG_DIR';
 /// rounded up into the next millisecond, so the stamp never claims a time
 /// later than the moment it was taken.
 String formatDevToolE2eLogStamp(DateTime time) {
-  final utc = time.toUtc();
+  final DateTime utc = time.toUtc();
   String two(int value) => value.toString().padLeft(2, '0');
   return '${utc.year.toString().padLeft(4, '0')}-${two(utc.month)}-'
       '${two(utc.day)}T${two(utc.hour)}:${two(utc.minute)}:'
@@ -77,7 +77,7 @@ class DevToolE2eLogRecorder {
   /// names its pid. Never throws: a directory or file that cannot be written
   /// is reported once on stderr and recording stays off for that process.
   static DevToolE2eLogRecorder? maybeStart(int pid) {
-    final dirName =
+    final String? dirName =
         testOnlyLogDirectory ?? Platform.environment[devToolE2eLogDirVar];
     if (dirName == null || dirName.isEmpty) return null;
     try {
@@ -96,7 +96,7 @@ class DevToolE2eLogRecorder {
     int pid,
     DateTime now,
   ) {
-    final path = _uniquePath(dirName, pid, now);
+    final String path = _uniquePath(dirName, pid, now);
     Directory(dirName).createSync(recursive: true);
     final recorder = DevToolE2eLogRecorder._(
       File(path).openSync(mode: FileMode.write),
@@ -110,7 +110,7 @@ class DevToolE2eLogRecorder {
   /// while one already exists, so two processes never share a file even when
   /// two VMs start same-pid processes in the same millisecond.
   static String _uniquePath(String dirName, int pid, DateTime now) {
-    final stamp = formatDevToolE2eLogStamp(now).replaceAll(':', '-');
+    final String stamp = formatDevToolE2eLogStamp(now).replaceAll(':', '-');
     var candidate = '$dirName${Platform.pathSeparator}dev-tool-$pid-$stamp.log';
     var n = 0;
     while (File(candidate).existsSync()) {

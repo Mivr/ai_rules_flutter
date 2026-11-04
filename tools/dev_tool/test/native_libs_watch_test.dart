@@ -16,8 +16,10 @@ void main() {
       File('${tmp.path}/$name')..writeAsBytesSync(bytes);
 
   test('current while the build writes the same bytes', () async {
-    final lib = file('liba.dylib', [1, 2, 3]);
-    final watch = await NativeLibsWatch.of({lib.path: const []});
+    final File lib = file('liba.dylib', [1, 2, 3]);
+    final NativeLibsWatch watch = await NativeLibsWatch.of({
+      lib.path: const [],
+    });
 
     expect(await watch.verdict(), isA<NativeLibsCurrent>());
     // A rebuild that re-ran the native action and produced identical bytes —
@@ -42,11 +44,13 @@ void main() {
     // baseline is read: only then does a matching stamp prove the bytes
     // unchanged. A file written in the baseline's own tick stays on the read
     // path instead (see the same-tick group below).
-    final lib = file('liba.dylib', [1, 2, 3]);
-    final past = DateTime.now().subtract(const Duration(seconds: 10));
+    final File lib = file('liba.dylib', [1, 2, 3]);
+    final DateTime past = DateTime.now().subtract(const Duration(seconds: 10));
     lib.setLastModifiedSync(past);
-    final stamp = lib.statSync();
-    final watch = await NativeLibsWatch.of({lib.path: const []});
+    final FileStat stamp = lib.statSync();
+    final NativeLibsWatch watch = await NativeLibsWatch.of({
+      lib.path: const [],
+    });
 
     lib.writeAsBytesSync([9, 9, 9]);
     lib.setLastModifiedSync(stamp.modified);
@@ -65,9 +69,11 @@ void main() {
     // the file's mtime is not older than its last read by more than the window
     // — and report the changed bytes.
     test('of a library is reported', () async {
-      final lib = file('liba.dylib', [1, 2, 3]);
-      final stamp = lib.statSync();
-      final watch = await NativeLibsWatch.of({lib.path: const []});
+      final File lib = file('liba.dylib', [1, 2, 3]);
+      final FileStat stamp = lib.statSync();
+      final NativeLibsWatch watch = await NativeLibsWatch.of({
+        lib.path: const [],
+      });
 
       lib.writeAsBytesSync([4, 5, 6]);
       lib.setLastModifiedSync(stamp.modified);
@@ -75,10 +81,10 @@ void main() {
     });
 
     test('of a contract is reported', () async {
-      final bridge = file('libbridge.dylib', [1]);
-      final contract = file('codegen.ir', [10, 11]);
-      final stamp = contract.statSync();
-      final watch = await NativeLibsWatch.of({
+      final File bridge = file('libbridge.dylib', [1]);
+      final File contract = file('codegen.ir', [10, 11]);
+      final FileStat stamp = contract.statSync();
+      final NativeLibsWatch watch = await NativeLibsWatch.of({
         bridge.path: [contract.path],
       });
 
@@ -88,11 +94,11 @@ void main() {
     });
 
     test('of a source is reported', () async {
-      final lib = file('libbridge.dylib', [1]);
-      final contract = file('bridge.h', [10]);
-      final source = file('bridge.c', [20, 21]);
-      final stamp = source.statSync();
-      final watch = await NativeLibsWatch.of(
+      final File lib = file('libbridge.dylib', [1]);
+      final File contract = file('bridge.h', [10]);
+      final File source = file('bridge.c', [20, 21]);
+      final FileStat stamp = source.statSync();
+      final NativeLibsWatch watch = await NativeLibsWatch.of(
         {
           lib.path: [contract.path],
         },
@@ -108,9 +114,11 @@ void main() {
   });
 
   test('a confirming read beyond the window returns to stat-only', () async {
-    final lib = file('liba.dylib', [1, 2, 3]);
-    final stamp = lib.statSync();
-    final watch = await NativeLibsWatch.of({lib.path: const []});
+    final File lib = file('liba.dylib', [1, 2, 3]);
+    final FileStat stamp = lib.statSync();
+    final NativeLibsWatch watch = await NativeLibsWatch.of({
+      lib.path: const [],
+    });
 
     // The baseline tick is racy, so this verdict reads the content and
     // confirms it unchanged — and stays on the read path, since the file was
@@ -135,8 +143,10 @@ void main() {
     test(
       'withholds, because nothing says whether its bindings moved',
       () async {
-        final lib = file('libsqlite3.dylib', [1]);
-        final watch = await NativeLibsWatch.of({lib.path: const []});
+        final File lib = file('libsqlite3.dylib', [1]);
+        final NativeLibsWatch watch = await NativeLibsWatch.of({
+          lib.path: const [],
+        });
 
         lib.writeAsBytesSync([2]);
         expect(
@@ -152,10 +162,10 @@ void main() {
       // Unknown beats known-safe: one library nothing describes is enough to
       // make the whole increment unsafe, however many of its neighbours declared
       // a contract.
-      final bridge = file('libbridge.dylib', [1]);
-      final contract = file('codegen.ir', [10]);
-      final other = file('libother.dylib', [2]);
-      final watch = await NativeLibsWatch.of({
+      final File bridge = file('libbridge.dylib', [1]);
+      final File contract = file('codegen.ir', [10]);
+      final File other = file('libother.dylib', [2]);
+      final NativeLibsWatch watch = await NativeLibsWatch.of({
         bridge.path: [contract.path],
         other.path: const [],
       });
@@ -173,9 +183,9 @@ void main() {
 
   group('a library with a declared contract', () {
     test('delivers when only its code moved', () async {
-      final bridge = file('libbridge.dylib', [1, 2, 3]);
-      final contract = file('codegen.ir', [10, 11]);
-      final watch = await NativeLibsWatch.of({
+      final File bridge = file('libbridge.dylib', [1, 2, 3]);
+      final File contract = file('codegen.ir', [10, 11]);
+      final NativeLibsWatch watch = await NativeLibsWatch.of({
         bridge.path: [contract.path],
       });
 
@@ -190,15 +200,15 @@ void main() {
     });
 
     test('withholds when the contract moved with it', () async {
-      final bridge = file('libbridge.dylib', [1]);
-      final contract = file('codegen.ir', [10]);
-      final watch = await NativeLibsWatch.of({
+      final File bridge = file('libbridge.dylib', [1]);
+      final File contract = file('codegen.ir', [10]);
+      final NativeLibsWatch watch = await NativeLibsWatch.of({
         bridge.path: [contract.path],
       });
 
       bridge.writeAsBytesSync([2]);
       contract.writeAsBytesSync([11]);
-      final verdict = await watch.verdict();
+      final NativeLibsVerdict verdict = await watch.verdict();
       expect(
         verdict,
         isA<NativeBindingsMoved>()
@@ -212,9 +222,9 @@ void main() {
       // the same source — so the answer is the safe one rather than a special
       // case. Naming the library rather than only the contract is what makes the
       // reply about something the reader recognises.
-      final bridge = file('libbridge.dylib', [1]);
-      final contract = file('codegen.ir', [10]);
-      final watch = await NativeLibsWatch.of({
+      final File bridge = file('libbridge.dylib', [1]);
+      final File contract = file('codegen.ir', [10]);
+      final NativeLibsWatch watch = await NativeLibsWatch.of({
         bridge.path: [contract.path],
       });
 
@@ -227,8 +237,10 @@ void main() {
   });
 
   test('keeps saying so until the process is replaced', () async {
-    final lib = file('liba.dylib', [1]);
-    final watch = await NativeLibsWatch.of({lib.path: const []});
+    final File lib = file('liba.dylib', [1]);
+    final NativeLibsWatch watch = await NativeLibsWatch.of({
+      lib.path: const [],
+    });
     lib.writeAsBytesSync([2]);
 
     expect(await watch.verdict(), isA<NativeLibsUnverifiable>());
@@ -240,9 +252,9 @@ void main() {
   });
 
   test('a relaunch is what clears it', () async {
-    final bridge = file('libbridge.dylib', [1]);
-    final contract = file('codegen.ir', [10]);
-    final watch = await NativeLibsWatch.of({
+    final File bridge = file('libbridge.dylib', [1]);
+    final File contract = file('codegen.ir', [10]);
+    final NativeLibsWatch watch = await NativeLibsWatch.of({
       bridge.path: [contract.path],
     });
     bridge.writeAsBytesSync([2]);
@@ -264,10 +276,10 @@ void main() {
     // edit and the increment went in over the machine code the app launched
     // with.
     test('reports the libraries when a native source moved', () async {
-      final lib = file('libbridge.dylib', [1]);
-      final contract = file('bridge.h', [10]);
-      final source = file('bridge.c', [20]);
-      final watch = await NativeLibsWatch.of(
+      final File lib = file('libbridge.dylib', [1]);
+      final File contract = file('bridge.h', [10]);
+      final File source = file('bridge.c', [20]);
+      final NativeLibsWatch watch = await NativeLibsWatch.of(
         {
           lib.path: [contract.path],
         },
@@ -292,9 +304,9 @@ void main() {
     });
 
     test('a source rewritten with the same bytes is not a change', () async {
-      final lib = file('libbridge.dylib', [1]);
-      final source = file('bridge.c', [20]);
-      final watch = await NativeLibsWatch.of(
+      final File lib = file('libbridge.dylib', [1]);
+      final File source = file('bridge.c', [20]);
+      final NativeLibsWatch watch = await NativeLibsWatch.of(
         {
           lib.path: const [],
         },
@@ -308,11 +320,11 @@ void main() {
     });
 
     test('answers for the library whose source moved, and no other', () async {
-      final patched = file('libbridge.dylib', [1]);
-      final other = file('libother.dylib', [2]);
-      final bridgeSource = file('bridge.c', [20]);
-      final otherSource = file('other.c', [30]);
-      final watch = await NativeLibsWatch.of(
+      final File patched = file('libbridge.dylib', [1]);
+      final File other = file('libother.dylib', [2]);
+      final File bridgeSource = file('bridge.c', [20]);
+      final File otherSource = file('other.c', [30]);
+      final NativeLibsWatch watch = await NativeLibsWatch.of(
         {
           patched.path: const [],
           other.path: const [],
@@ -342,10 +354,10 @@ void main() {
   test(
     'a native hot patch clears the library it delivered, and only that',
     () async {
-      final bridge = file('libbridge.dylib', [1]);
-      final other = file('libother.dylib', [5]);
-      final contract = file('codegen.ir', [10]);
-      final watch = await NativeLibsWatch.of({
+      final File bridge = file('libbridge.dylib', [1]);
+      final File other = file('libother.dylib', [5]);
+      final File contract = file('codegen.ir', [10]);
+      final NativeLibsWatch watch = await NativeLibsWatch.of({
         bridge.path: [contract.path],
         other.path: [contract.path],
       });
@@ -363,9 +375,9 @@ void main() {
   );
 
   test('a native hot patch clears the contract it was asked about', () async {
-    final bridge = file('libbridge.dylib', [1]);
-    final contract = file('codegen.ir', [10]);
-    final watch = await NativeLibsWatch.of({
+    final File bridge = file('libbridge.dylib', [1]);
+    final File contract = file('codegen.ir', [10]);
+    final NativeLibsWatch watch = await NativeLibsWatch.of({
       bridge.path: [contract.path],
     });
     // The shape a bridged function being added makes: the library moved and so
@@ -384,8 +396,10 @@ void main() {
   });
 
   test('a declared file the build never wrote is loud', () async {
-    final lib = file('liba.dylib', [1]);
-    final watch = await NativeLibsWatch.of({lib.path: const []});
+    final File lib = file('liba.dylib', [1]);
+    final NativeLibsWatch watch = await NativeLibsWatch.of({
+      lib.path: const [],
+    });
     lib.deleteSync();
     // Not "current", which would let an increment land on stale machine code,
     // and not "moved", which would blame the app's source for a broken build.

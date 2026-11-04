@@ -30,7 +30,7 @@ import 'macho_parse.dart'
         buildLcRpath,
         findFirstPayload,
         parseLoadCommands;
-import 'macho_strip.dart' show stripLocalSymbols;
+import 'macho_strip.dart' show StrippedSymbols, stripLocalSymbols;
 
 /// Writes [bytes] to [outputPath], creating parent directories as needed.
 void _writePatchedOutput(Uint8List bytes, String outputPath) {
@@ -82,7 +82,7 @@ _PatchArgs _parsePatchArgs(List<String> args) {
   var stripSymbols = false;
   final flags = FlagCursor(args);
   while (flags.moveNext()) {
-    final arg = flags.current;
+    final String arg = flags.current;
     if (arg.startsWith('--allow-non-macho=')) {
       addCommaParts(
         allowNonMacho,
@@ -108,11 +108,11 @@ _PatchArgs _parsePatchArgs(List<String> args) {
       case '--arch':
         arch = flags.take('--arch');
       case '--rpath':
-        for (final part in flags.take('--rpath').split(',')) {
+        for (final String part in flags.take('--rpath').split(',')) {
           if (part.isNotEmpty) rpaths.add(part);
         }
       case '--allow-non-macho':
-        final next = flags.peek();
+        final String? next = flags.peek();
         if (next == null || next.startsWith('--')) {
           usageError(
             '--allow-non-macho requires an explicit binary or framework name',
@@ -139,21 +139,22 @@ _PatchArgs _parsePatchArgs(List<String> args) {
 
 /// Runs the `patch` subcommand: parses [args] and writes a patched Mach-O file.
 void runPatch(List<String> args) {
-  final parsed = _parsePatchArgs(args);
-  final inputPath = parsed.inputPath;
-  final outputPath = parsed.outputPath;
+  final _PatchArgs parsed = _parsePatchArgs(args);
+  final String? inputPath = parsed.inputPath;
+  final String? outputPath = parsed.outputPath;
   if (inputPath == null || outputPath == null) {
     usageError('patch requires --input and --output');
   }
 
-  final versions = parsePlatformVersions(
-    parsed.platformName,
-    parsed.minOsStr,
-    parsed.sdkVersionStr,
-  );
+  final ({int? minOs, int? platform, int? sdkVersion}) versions =
+      parsePlatformVersions(
+        parsed.platformName,
+        parsed.minOsStr,
+        parsed.sdkVersionStr,
+      );
 
-  final inputBytes = File(inputPath).readAsBytesSync();
-  final isAllowed = isAllowedNonMacho(
+  final Uint8List inputBytes = File(inputPath).readAsBytesSync();
+  final bool isAllowed = isAllowedNonMacho(
     parsed.allowNonMacho,
     inputPath: inputPath,
     outputPath: outputPath,
@@ -278,10 +279,10 @@ Uint8List patchMachO(
   Uint8List inputBytes, [
   PatchOptions options = const PatchOptions(),
 ]) {
-  final arch = options.arch;
+  final String? arch = options.arch;
   if (isFatMachO(inputBytes)) {
     if (arch != null) {
-      final thinSlice = thinFatMachO(inputBytes, arch);
+      final Uint8List thinSlice = thinFatMachO(inputBytes, arch);
       return _patchSingleMachO64(thinSlice, options);
     }
     return _patchFatMachO(inputBytes, options);
@@ -310,14 +311,14 @@ Uint8List patchMachO(
 /// Patches every slice of a universal (fat) Mach-O binary and reassembles it,
 /// preserving the fat32/fat64 header width.
 Uint8List _patchFatMachO(Uint8List inputBytes, PatchOptions options) {
-  final slices = extractFatSlices(inputBytes);
+  final List<FatSlice> slices = extractFatSlices(inputBytes);
   final bd = ByteData.sublistView(inputBytes);
-  final isFat64 =
+  final bool isFat64 =
       bd.getUint32(0, Endian.big) == fatMagic64 ||
       bd.getUint32(0, Endian.little) == fatMagic64;
   final patchedSlices = <FatSlice>[];
   for (var i = 0; i < slices.length; i++) {
-    final s = slices[i];
+    final FatSlice s = slices[i];
     if (isMachO32(s.bytes) || (s.cputype & cpuArchAbi64) == 0) {
       throw FormatException(
         'Fat Mach-O slice $i (cputype 0x${s.cputype.toRadixString(16)}) is '
@@ -329,7 +330,7 @@ Uint8List _patchFatMachO(Uint8List inputBytes, PatchOptions options) {
         'Fat Mach-O slice $i is not a valid 64-bit Mach-O binary.',
       );
     }
-    final patchedBytes = _patchSingleMachO64(
+    final Uint8List patchedBytes = _patchSingleMachO64(
       s.bytes,
       options,
       'slice $i (${_archNameForCpuType(s.cputype)})',
@@ -356,8 +357,8 @@ String _archNameForCpuType(int cputype) {
 
 /// Throws when a thin binary's cputype is not the requested [arch].
 void _checkThinArch(Uint8List inputBytes, String arch) {
-  final targetCpu = cpuTypeForArch(arch);
-  final actualCpu = ByteData.sublistView(
+  final int targetCpu = cpuTypeForArch(arch);
+  final int actualCpu = ByteData.sublistView(
     inputBytes,
   ).getUint32(4, Endian.little);
   if (actualCpu != targetCpu) {
@@ -374,19 +375,25 @@ Uint8List _patchSingleMachO64(
   String? sliceLabel,
 ]) {
   // Locals: PatchOptions' public fields do not promote on null checks.
-  final platform = options.platform;
-  final minOs = options.minOs;
-  final installName = options.installName;
+  final int? platform = options.platform;
+  final int? minOs = options.minOs;
+  final String? installName = options.installName;
   var workBytes = inputBytes;
-  var originalCommands = parseLoadCommands(workBytes);
+  List<LoadCommand> originalCommands = parseLoadCommands(workBytes);
   if (options.stripSymbols) {
-    final stripped = stripLocalSymbols(workBytes, originalCommands);
+    final StrippedSymbols stripped = stripLocalSymbols(
+      workBytes,
+      originalCommands,
+    );
     workBytes = stripped.bytes;
     originalCommands = stripped.commands;
   }
   final bdIn = ByteData.sublistView(workBytes);
-  final oldSizeofcmds = bdIn.getUint32(20, Endian.little);
-  final firstPayload = findFirstPayload(originalCommands, workBytes.length);
+  final int oldSizeofcmds = bdIn.getUint32(20, Endian.little);
+  final FirstPayload firstPayload = findFirstPayload(
+    originalCommands,
+    workBytes.length,
+  );
 
   final state = _PatchRewrite();
   for (final lc in originalCommands) {
@@ -407,7 +414,7 @@ Uint8List _patchSingleMachO64(
     state.updatedCommands.add(buildLcIdDylib(installName));
   }
 
-  for (final rpath in options.rpaths) {
+  for (final String rpath in options.rpaths) {
     if (state.existingRpaths.add(rpath)) {
       state.updatedCommands.add(buildLcRpath(rpath));
     }
@@ -446,10 +453,10 @@ void _rewriteLoadCommand(
   _PatchRewrite state,
 ) {
   // Locals: PatchOptions' public fields do not promote on null checks.
-  final platform = options.platform;
-  final minOs = options.minOs;
-  final sdkVersion = options.sdkVersion;
-  final installName = options.installName;
+  final int? platform = options.platform;
+  final int? minOs = options.minOs;
+  final int? sdkVersion = options.sdkVersion;
+  final String? installName = options.installName;
   // Strip legacy LC_VERSION_MIN_* commands when setting LC_BUILD_VERSION.
   if (platform != null &&
       (lc.cmd == lcVersionMinMacosx ||
@@ -475,7 +482,8 @@ void _rewriteLoadCommand(
 
   if (lc.cmd == lcIdDylib && installName != null) {
     if (!state.wroteIdDylib) {
-      final versions = _idDylibVersions(lc);
+      final ({int compatibilityVersion, int currentVersion, int timestamp})
+      versions = _idDylibVersions(lc);
       state.updatedCommands.add(
         buildLcIdDylib(
           installName,
@@ -491,7 +499,7 @@ void _rewriteLoadCommand(
 
   if (lc.cmd == lcRpath && lc.bytes.length >= 12) {
     final lcBd = ByteData.sublistView(lc.bytes);
-    final pathOffset = lcBd.getUint32(8, Endian.little);
+    final int pathOffset = lcBd.getUint32(8, Endian.little);
     state.existingRpaths.add(_readLcString(lc.bytes, pathOffset));
     state.updatedCommands.add(lc);
     return;
@@ -565,9 +573,9 @@ Uint8List _emitPatchedMachO(
     newSizeofcmds += lc.cmdsize;
   }
 
-  final newLoadCmdEnd = mhHeaderSize64 + newSizeofcmds;
-  final maxLoadCommandEnd = ceiling.firstPayload.offset;
-  final oldSizeofcmds = ceiling.oldSizeofcmds;
+  final int newLoadCmdEnd = mhHeaderSize64 + newSizeofcmds;
+  final int maxLoadCommandEnd = ceiling.firstPayload.offset;
+  final int oldSizeofcmds = ceiling.oldSizeofcmds;
   // If the file has no payload sections/segments at all (header-only fixture)
   // and grows past EOF, extend the buffer; otherwise verify we fit before
   // the first payload offset.
@@ -579,14 +587,14 @@ Uint8List _emitPatchedMachO(
     throw FormatException(_noRoomMessage(ceiling, newLoadCmdEnd));
   }
 
-  final outLength = isHeaderOnly
+  final int outLength = isHeaderOnly
       ? math.max<int>(inputBytes.length, newLoadCmdEnd)
       : inputBytes.length;
   final out = Uint8List(outLength);
   out.setRange(0, inputBytes.length, inputBytes);
 
   // Zero the old load command region first so any shrinkage leaves clean zeroes.
-  final clearEnd = math.min<int>(
+  final int clearEnd = math.min<int>(
     out.length,
     mhHeaderSize64 + math.max<int>(oldSizeofcmds, newSizeofcmds),
   );
@@ -597,7 +605,7 @@ Uint8List _emitPatchedMachO(
   bdOut.setUint32(16, updatedCommands.length, Endian.little);
   bdOut.setUint32(20, newSizeofcmds, Endian.little);
 
-  var writeOffset = mhHeaderSize64;
+  int writeOffset = mhHeaderSize64;
   for (final lc in updatedCommands) {
     out.setRange(writeOffset, writeOffset + lc.cmdsize, lc.bytes);
     writeOffset += lc.cmdsize;
@@ -615,11 +623,11 @@ Uint8List _emitPatchedMachO(
 /// patching a universal binary. A [FormatException], the patch's refusal for
 /// an input it cannot patch; `runPatch` prefixes the input path.
 String _noRoomMessage(_PayloadCeiling ceiling, int newLoadCmdEnd) {
-  final payloadOffset = ceiling.firstPayload.offset;
+  final int payloadOffset = ceiling.firstPayload.offset;
   final where = ceiling.sliceLabel == null
       ? 'first payload is at $payloadOffset'
       : 'first payload is at $payloadOffset in fat ${ceiling.sliceLabel}';
-  final what = ceiling.firstPayload.owner;
+  final String? what = ceiling.firstPayload.owner;
   if (what == null) {
     return 'Not enough header padding for load commands: need $newLoadCmdEnd '
         'bytes, $where (end of file).';

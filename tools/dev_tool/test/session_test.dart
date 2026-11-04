@@ -24,6 +24,41 @@ import 'package:watcher/watcher.dart';
 
 import 'fakes.dart';
 
+typedef _Result = ReloadResult;
+typedef _Session = DeviceSession;
+
+typedef _Sub = StreamSubscription<LogRecord>;
+
+/// Runs [runInteractiveSession] over [sessions], feeding it [keys] and logging
+/// into [logs] (nowhere, when null), with everything else switched off.
+Future<void> _drive({
+  required List<DeviceSession> sessions,
+  required StreamController<List<int>> keys,
+  List<String>? logs,
+  CommandRunner? commandRunner,
+  String? hotReloadUnavailable,
+  Future<void>? shutdownSignal,
+}) => runInteractiveSession(
+  targets: (
+    sessions: sessions,
+    frontendServer: null,
+    protocol: MachineProtocol(enabled: false),
+    commandRunner: commandRunner ?? CommandRunner(),
+  ),
+  options: (
+    devToolsEnabled: false,
+    dartExecutable: 'dart',
+    hotReloadUnavailable: hotReloadUnavailable,
+  ),
+  terminal: (
+    shutdownSignal: shutdownSignal,
+    log: logs?.add,
+    keyboardReader: () => keys.stream,
+    setEchoMode: (_) {},
+    setLineMode: (_) {},
+  ),
+);
+
 void main() {
   group('parseDevToolsUrl', () {
     // The line `dart devtools` actually prints. The period ends the sentence;
@@ -68,10 +103,10 @@ void main() {
     // Opening the bare server root lands on DevTools' "Connect to a Running
     // App" form — it has no idea which VM service to attach to. The target is
     // carried in the `uri` query parameter.
-    final ws = Uri.parse('ws://127.0.0.1:51231/DoJ9hE44ZWc=/ws');
+    final Uri ws = Uri.parse('ws://127.0.0.1:51231/DoJ9hE44ZWc=/ws');
 
     test('carries the VM service ws URI in the uri query parameter', () {
-      final connect = devToolsConnectUri('http://127.0.0.1:9100', ws);
+      final Uri connect = devToolsConnectUri('http://127.0.0.1:9100', ws);
 
       expect(connect.queryParameters['uri'], ws.toString());
       expect(connect.host, '127.0.0.1');
@@ -79,7 +114,7 @@ void main() {
     });
 
     test('percent-encodes the nested URI so it survives as one parameter', () {
-      final connect = devToolsConnectUri('http://127.0.0.1:9100', ws);
+      final Uri connect = devToolsConnectUri('http://127.0.0.1:9100', ws);
 
       // The `:` and `/` of the inner URI must not be readable as structure of
       // the outer one; round-tripping is what proves it.
@@ -91,7 +126,10 @@ void main() {
     });
 
     test('preserves a served path prefix', () {
-      final connect = devToolsConnectUri('http://127.0.0.1:9100/devtools/', ws);
+      final Uri connect = devToolsConnectUri(
+        'http://127.0.0.1:9100/devtools/',
+        ws,
+      );
 
       expect(connect.path, '/devtools/');
       expect(connect.queryParameters['uri'], ws.toString());
@@ -275,7 +313,9 @@ void main() {
         await frontendServer.start();
 
         // Use a real temp directory so the watcher can start.
-        final tmpDir = await Directory.systemTemp.createTemp('session_test_');
+        final Directory tmpDir = await Directory.systemTemp.createTemp(
+          'session_test_',
+        );
 
         // Create a keyboard stream that sends 'q' after a short delay.
         final keyboardController = StreamController<List<int>>();
@@ -360,25 +400,11 @@ void main() {
         keys.add(utf8.encode('q'));
 
         final logs = <String>[];
-        await runInteractiveSession(
-          targets: (
-            sessions: [session],
-            frontendServer: null,
-            protocol: MachineProtocol(enabled: false),
-            commandRunner: commandRunner,
-          ),
-          options: (
-            devToolsEnabled: false,
-            dartExecutable: 'dart',
-            hotReloadUnavailable: null,
-          ),
-          terminal: (
-            shutdownSignal: null,
-            log: logs.add,
-            keyboardReader: () => keys.stream,
-            setEchoMode: (_) {},
-            setLineMode: (_) {},
-          ),
+        await _drive(
+          sessions: [session],
+          keys: keys,
+          logs: logs,
+          commandRunner: commandRunner,
         ).timeout(const Duration(seconds: 5));
 
         expect(
@@ -430,25 +456,12 @@ void main() {
         keys.add(utf8.encode('q'));
 
         final logs = <String>[];
-        await runInteractiveSession(
-          targets: (
-            sessions: [session],
-            frontendServer: null,
-            protocol: MachineProtocol(enabled: false),
-            commandRunner: commandRunner,
-          ),
-          options: (
-            devToolsEnabled: false,
-            dartExecutable: 'dart',
-            hotReloadUnavailable: '`--no-hot` was passed',
-          ),
-          terminal: (
-            shutdownSignal: null,
-            log: logs.add,
-            keyboardReader: () => keys.stream,
-            setEchoMode: (_) {},
-            setLineMode: (_) {},
-          ),
+        await _drive(
+          sessions: [session],
+          keys: keys,
+          logs: logs,
+          commandRunner: commandRunner,
+          hotReloadUnavailable: '`--no-hot` was passed',
         ).timeout(const Duration(seconds: 5));
 
         expect(
@@ -494,26 +507,7 @@ void main() {
         keys.add(utf8.encode('q'));
 
         final logs = <String>[];
-        await runInteractiveSession(
-          targets: (
-            sessions: [session],
-            frontendServer: null,
-            protocol: MachineProtocol(enabled: false),
-            commandRunner: CommandRunner(),
-          ),
-          options: (
-            devToolsEnabled: false,
-            dartExecutable: 'dart',
-            hotReloadUnavailable: null,
-          ),
-          terminal: (
-            shutdownSignal: null,
-            log: logs.add,
-            keyboardReader: () => keys.stream,
-            setEchoMode: (_) {},
-            setLineMode: (_) {},
-          ),
-        ).timeout(
+        await _drive(sessions: [session], keys: keys, logs: logs).timeout(
           const Duration(seconds: 5),
           onTimeout: () => fail('the run never reached the q that ends it'),
         );
@@ -538,7 +532,7 @@ void main() {
     // sentences glued together.
     test('a refusal reads as one sentence, not three glued together', () {
       final records = <LogRecord>[];
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       addTearDown(sub.cancel);
 
       // What `ReloadPipeline._awaitReady` hands back from a gate that was
@@ -560,7 +554,7 @@ void main() {
         announce: (_) {},
       );
 
-      final text = records
+      final String text = records
           .map((r) => (r.object as Map)['text'] as String)
           .join('\n');
       expect(text, contains('--no-hot'));
@@ -596,32 +590,18 @@ void main() {
       }) {
         final logs = <String>[];
         var returned = false;
-        final loop = runInteractiveSession(
-          targets: (
-            sessions: [
-              DeviceSession(
-                device: _TrackingDevice('test_device', onStop: () {}),
-                appInstance: AppInstance(process: process),
-                vmClient: null,
-                appId: 'app_1',
-              ),
-            ],
-            frontendServer: null,
-            protocol: MachineProtocol(enabled: false),
-            commandRunner: CommandRunner(),
-          ),
-          options: (
-            devToolsEnabled: false,
-            dartExecutable: 'dart',
-            hotReloadUnavailable: null,
-          ),
-          terminal: (
-            shutdownSignal: shutdownSignal,
-            log: logs.add,
-            keyboardReader: () => keys.stream,
-            setEchoMode: (_) {},
-            setLineMode: (_) {},
-          ),
+        final Future<void> loop = _drive(
+          sessions: [
+            DeviceSession(
+              device: _TrackingDevice('test_device', onStop: () {}),
+              appInstance: AppInstance(process: process),
+              vmClient: null,
+              appId: 'app_1',
+            ),
+          ],
+          keys: keys,
+          logs: logs,
+          shutdownSignal: shutdownSignal,
         )..then((_) => returned = true);
         return (loop: loop, returned: () => returned, logs: logs);
       }
@@ -629,7 +609,8 @@ void main() {
       test('does not end a run whose app is still alive', () async {
         final keys = StreamController<List<int>>();
         final process = FakeProcess();
-        final run = loopOver(keys, process);
+        final ({List<String> logs, Future<void> loop, bool Function() returned})
+        run = loopOver(keys, process);
 
         await keys.close();
         await pumpEventQueue();
@@ -655,11 +636,8 @@ void main() {
         // have no way out but killing the process.
         final keys = StreamController<List<int>>();
         final shutdown = Completer<void>();
-        final run = loopOver(
-          keys,
-          FakeProcess(),
-          shutdownSignal: shutdown.future,
-        );
+        final ({List<String> logs, Future<void> loop, bool Function() returned})
+        run = loopOver(keys, FakeProcess(), shutdownSignal: shutdown.future);
 
         await keys.close();
         await pumpEventQueue();
@@ -672,11 +650,8 @@ void main() {
       test('says so, rather than going quiet', () async {
         final keys = StreamController<List<int>>();
         final process = FakeProcess();
-        final run = loopOver(
-          keys,
-          process,
-          shutdownSignal: Completer<void>().future,
-        );
+        final ({List<String> logs, Future<void> loop, bool Function() returned})
+        run = loopOver(keys, process, shutdownSignal: Completer<void>().future);
 
         await keys.close();
         await pumpEventQueue();
@@ -703,26 +678,7 @@ void main() {
         // can arrive, so waiting would be waiting forever. Returning is what
         // lets the caller run its teardown.
         final keys = StreamController<List<int>>();
-        final loop = runInteractiveSession(
-          targets: (
-            sessions: const [],
-            frontendServer: null,
-            protocol: MachineProtocol(enabled: false),
-            commandRunner: CommandRunner(),
-          ),
-          options: (
-            devToolsEnabled: false,
-            dartExecutable: 'dart',
-            hotReloadUnavailable: null,
-          ),
-          terminal: (
-            shutdownSignal: null,
-            log: null,
-            keyboardReader: () => keys.stream,
-            setEchoMode: (_) {},
-            setLineMode: (_) {},
-          ),
-        );
+        final Future<void> loop = _drive(sessions: const [], keys: keys);
 
         await keys.close();
         // Returning, rather than hanging until the timeout, is the whole
@@ -739,28 +695,14 @@ void main() {
         final keys = StreamController<List<int>>()..add(utf8.encode('q'));
         final logs = <String>[];
 
-        await runInteractiveSession(
-          targets: (
-            sessions: [],
-            frontendServer: null,
-            protocol: MachineProtocol(enabled: false),
-            commandRunner: CommandRunner(),
-          ),
-          options: (
-            devToolsEnabled: false,
-            dartExecutable: 'dart',
-            hotReloadUnavailable: 'profile mode builds AOT',
-          ),
-          terminal: (
-            shutdownSignal: null,
-            log: logs.add,
-            keyboardReader: () => keys.stream,
-            setEchoMode: (_) {},
-            setLineMode: (_) {},
-          ),
+        await _drive(
+          sessions: [],
+          keys: keys,
+          logs: logs,
+          hotReloadUnavailable: 'profile mode builds AOT',
         ).timeout(const Duration(seconds: 5));
 
-        final banner = logs.first;
+        final String banner = logs.first;
         expect(banner, isNot(contains('hot reload')));
         expect(banner, isNot(contains('restart')));
         expect(banner, contains('quit'));
@@ -835,7 +777,7 @@ void main() {
         );
 
         var loopReturned = false;
-        final loop = runInteractiveSession(
+        final Future<void> loop = runInteractiveSession(
           targets: (
             sessions: [session],
             frontendServer: null,
@@ -893,7 +835,7 @@ void main() {
 
       final strategy = _RecordingReloadStrategy();
       var settled = false;
-      final restart = recompileAndRestart(
+      final Future<ReloadResult> restart = recompileAndRestart(
         frontendServer: frontendServer,
         entrypoint: 'lib/main.dart',
         invalidatedFiles: const ['package:app/main.dart'],
@@ -942,7 +884,7 @@ void main() {
       fakeProcess.emitStdout('result reject_key');
       fakeProcess.emitStdout('reject_key');
 
-      final result = await restart.timeout(const Duration(seconds: 5));
+      final _Result result = await restart.timeout(const Duration(seconds: 5));
       expect(result.compileSuccess, isFalse);
       expect(
         strategy.calls,
@@ -952,10 +894,14 @@ void main() {
 
       // The stream is back in sync: the acknowledgement was consumed as one,
       // not mistaken for the next compile's boundary key.
-      final next = frontendServer.compile('lib/main.dart');
+      final Future<CompileResult> next = frontendServer.compile(
+        'lib/main.dart',
+      );
       fakeProcess.emitStdout('result abc2');
       fakeProcess.emitStdout('abc2 /tmp/out2.dill 0');
-      final compiled = await next.timeout(const Duration(seconds: 5));
+      final CompileResult compiled = await next.timeout(
+        const Duration(seconds: 5),
+      );
       expect(compiled.success, isTrue);
       expect(compiled.dillPath, '/tmp/out2.dill');
     });
@@ -998,14 +944,14 @@ void main() {
     test(
       'a strategy that throws leaves the compile reported as successful',
       () async {
-        final (:server, :process) = startedServer();
+        final (:FrontendServer server, :FakeProcess process) = startedServer();
         await server.start();
         addTearDown(() async {
           process.complete(0);
           await server.shutdown();
         });
 
-        final reload = recompileAndReload(
+        final Future<ReloadResult> reload = recompileAndReload(
           frontendServer: server,
           entrypoint: 'lib/main.dart',
           invalidatedFiles: const ['package:app/main.dart'],
@@ -1016,7 +962,7 @@ void main() {
         );
         emitCleanCompile(process);
 
-        final result = await reload.timeout(const Duration(seconds: 5));
+        final _Result result = await reload.timeout(const Duration(seconds: 5));
 
         expect(
           result.compileSuccess,
@@ -1035,7 +981,7 @@ void main() {
     );
 
     test('a strategy throw is logged next to the compile lines', () async {
-      final (:server, :process) = startedServer();
+      final (:FrontendServer server, :FakeProcess process) = startedServer();
       await server.start();
       addTearDown(() async {
         process.complete(0);
@@ -1043,12 +989,12 @@ void main() {
       });
 
       final records = <LogRecord>[];
-      final rootLevel = Logger.root.level;
+      final Level rootLevel = Logger.root.level;
       Logger.root.level = Level.ALL;
-      final sub = Logger.root.onRecord.listen(records.add);
-      ReloadResult result;
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
+      _Result result;
       try {
-        final reload = recompileAndReload(
+        final Future<ReloadResult> reload = recompileAndReload(
           frontendServer: server,
           entrypoint: 'lib/main.dart',
           invalidatedFiles: const ['package:app/main.dart'],
@@ -1075,14 +1021,14 @@ void main() {
     });
 
     test('a restart whose strategy throws blames the delivery too', () async {
-      final (:server, :process) = startedServer();
+      final (:FrontendServer server, :FakeProcess process) = startedServer();
       await server.start();
       addTearDown(() async {
         process.complete(0);
         await server.shutdown();
       });
 
-      final restart = recompileAndRestart(
+      final Future<ReloadResult> restart = recompileAndRestart(
         frontendServer: server,
         entrypoint: 'lib/main.dart',
         invalidatedFiles: const ['package:app/main.dart'],
@@ -1093,7 +1039,7 @@ void main() {
       );
       emitCleanCompile(process);
 
-      final result = await restart.timeout(const Duration(seconds: 5));
+      final _Result result = await restart.timeout(const Duration(seconds: 5));
 
       expect(result.compileSuccess, isTrue);
       expect(result.outcome, isA<StrategyThrew>());
@@ -1105,10 +1051,10 @@ void main() {
     // started throws `StateError('Frontend server not started')` from
     // `recompile` itself, which is the phase boundary this pins.
     test('a throw from the compile is still a compile failure', () async {
-      final server = startedServer().server;
+      final FrontendServer server = startedServer().server;
       final strategy = _RecordingReloadStrategy();
 
-      final result = await recompileAndReload(
+      final _Result result = await recompileAndReload(
         frontendServer: server,
         entrypoint: 'lib/main.dart',
         invalidatedFiles: const ['package:app/main.dart'],
@@ -1126,14 +1072,14 @@ void main() {
     });
 
     test('a throw from the compile is logged, not only verdict', () async {
-      final server = startedServer().server;
+      final FrontendServer server = startedServer().server;
       final strategy = _RecordingReloadStrategy();
 
       final records = <LogRecord>[];
-      final rootLevel = Logger.root.level;
+      final Level rootLevel = Logger.root.level;
       Logger.root.level = Level.ALL;
-      final sub = Logger.root.onRecord.listen(records.add);
-      ReloadResult result;
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
+      _Result result;
       try {
         result = await recompileAndReload(
           frontendServer: server,
@@ -1220,7 +1166,7 @@ void main() {
       // Supplied, or the loop reads the process's real stdin — which the second
       // test in this group cannot subscribe to a second time.
       final keys = StreamController<List<int>>();
-      final loop = runInteractiveSession(
+      final Future<void> loop = runInteractiveSession(
         targets: (
           sessions: [
             DeviceSession(
@@ -1271,7 +1217,9 @@ void main() {
       // derives its own work from the disk snapshot once the pipeline exists,
       // so an empty `invalidatedFiles` costs nothing — and it is the only
       // thing the watcher can send when nothing can map a path yet.
-      final dispatched = await dispatchesFor(awaitingAssembly: true);
+      final List<Map<String, dynamic>> dispatched = await dispatchesFor(
+        awaitingAssembly: true,
+      );
 
       expect(dispatched, hasLength(1));
       expect(dispatched.single['invalidatedFiles'], isEmpty);
@@ -1292,7 +1240,7 @@ void main() {
   /// minute apart. [DeviceSession.drivable] is that second question, asked
   /// separately.
   group('DeviceSession.drivable', () {
-    final serviceUri = Uri.parse('http://127.0.0.1:8181/');
+    final Uri serviceUri = Uri.parse('http://127.0.0.1:8181/');
 
     FakeVmService newFake() => FakeVmService(
       isolates: [IsolateRef(id: 'iso-1', name: 'main', number: '1')],
@@ -1329,12 +1277,15 @@ void main() {
       'the run ending releases the wait rather than sitting on it',
       () async {
         final sink = BufferSink();
-        final fake = newFake();
-        final session = sessionOn(MacOSDevice(), await connected(fake));
+        final FakeVmService fake = newFake();
+        final _Session session = sessionOn(
+          MacOSDevice(),
+          await connected(fake),
+        );
         // Answering nothing, so only the abandon can end this.
         fake.callServiceExtensionGate = Completer<void>();
 
-        final waiting = session.waitUntilDrivable(
+        final Future<void> waiting = session.waitUntilDrivable(
           MachineProtocol(enabled: true, output: sink),
         );
         await pumpEventQueue();
@@ -1356,7 +1307,10 @@ void main() {
     );
 
     test('a live debug connection is not on its own drivable', () async {
-      final session = sessionOn(MacOSDevice(), await connected(newFake()));
+      final _Session session = sessionOn(
+        MacOSDevice(),
+        await connected(newFake()),
+      );
 
       expect(
         session.drivable.isSettled,
@@ -1368,13 +1322,13 @@ void main() {
     test('settles ready on the first frame, and says so as progress', () async {
       final sink = BufferSink();
       final protocol = MachineProtocol(enabled: true, output: sink);
-      final fake = newFake();
-      final session = sessionOn(MacOSDevice(), await connected(fake));
+      final FakeVmService fake = newFake();
+      final _Session session = sessionOn(MacOSDevice(), await connected(fake));
       // The app is up but answering nothing, so the frame event is the only
       // thing that can settle this — the physical-device case.
       fake.callServiceExtensionGate = Completer<void>();
 
-      final waiting = session.waitUntilDrivable(protocol);
+      final Future<void> waiting = session.waitUntilDrivable(protocol);
       await pumpEventQueue();
       fake.emitFirstFrame();
       await waiting;
@@ -1382,7 +1336,7 @@ void main() {
       expect(session.drivable.isReady, isTrue);
       expect(session.drivable.unavailableReason, isNull);
 
-      final progress = progressFrom(sink);
+      final List<Map<String, dynamic>> progress = progressFrom(sink);
       expect(progress, hasLength(2));
       expect(progress.first['appId'], 'app_1');
       expect(progress.first['finished'], isFalse);
@@ -1404,10 +1358,10 @@ void main() {
       fake.extensionResponses['ext.flutter.didSendFirstFrameEvent'] = {
         'enabled': 'true',
       };
-      final client = await connected(fake);
-      final session = sessionOn(MacOSDevice(), client);
+      final VmServiceClient client = await connected(fake);
+      final _Session session = sessionOn(MacOSDevice(), client);
 
-      final waiting = session.waitUntilDrivable(protocol);
+      final Future<void> waiting = session.waitUntilDrivable(protocol);
       await pumpEventQueue();
       fake.emitIsolateStart('iso-1');
       await waiting;
@@ -1421,7 +1375,7 @@ void main() {
       () async {
         final sink = BufferSink();
         final protocol = MachineProtocol(enabled: true, output: sink);
-        final session = sessionOn(
+        final _Session session = sessionOn(
           _ImpatientDevice(),
           await connected(newFake()),
         );
@@ -1447,21 +1401,21 @@ void main() {
     test('a failed first-frame wait is logged, not only gated', () async {
       final sink = BufferSink();
       final protocol = MachineProtocol(enabled: true, output: sink);
-      final fake = newFake();
+      final FakeVmService fake = newFake();
       // A fault that is not -32601: the poll keeps it as the wait's failure
       // and the wait throws it, instead of asking again.
       fake.extensionErrors['ext.flutter.didSendFirstFrameEvent'] = StateError(
         'connection reset',
       );
-      final session = sessionOn(
+      final _Session session = sessionOn(
         _ImpatientDevice(),
         await connected(fake),
       );
 
       final records = <LogRecord>[];
-      final rootLevel = Logger.root.level;
+      final Level rootLevel = Logger.root.level;
       Logger.root.level = Level.ALL;
-      final sub = Logger.root.onRecord.listen(records.add);
+      final _Sub sub = Logger.root.onRecord.listen(records.add);
       try {
         await session.waitUntilDrivable(protocol);
       } finally {
@@ -1486,7 +1440,7 @@ void main() {
       // way to serving — a gate, once settled, stays settled.
       'leaves the gate alone when the client has not arrived yet',
       () async {
-        final session = sessionOn(WebDevice(), null);
+        final _Session session = sessionOn(WebDevice(), null);
 
         await session.waitUntilDrivable(
           MachineProtocol(enabled: true, output: BufferSink()),

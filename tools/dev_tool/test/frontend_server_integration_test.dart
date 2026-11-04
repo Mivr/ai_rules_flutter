@@ -19,12 +19,12 @@ void main() {
       );
 
       await server.start();
-      final future = server.compile('lib/main.dart');
+      final Future<CompileResult> future = server.compile('lib/main.dart');
 
       // Simulate process death before result arrives.
       fakeProcess.complete(1);
 
-      final result = await future;
+      final CompileResult result = await future;
       expect(result.success, isFalse);
       expect(result.diagnostics, contains('exited unexpectedly'));
     });
@@ -40,13 +40,13 @@ void main() {
       );
 
       await server.start();
-      final future = server.recompile('lib/main.dart', [
+      final Future<CompileResult> future = server.recompile('lib/main.dart', [
         'file:///lib/foo.dart',
       ]);
 
       fakeProcess.complete(1);
 
-      final result = await future;
+      final CompileResult result = await future;
       expect(result.success, isFalse);
     });
   });
@@ -71,11 +71,11 @@ void main() {
       // own — which is what lets the debugger's expression compiles share
       // this compiler with the reload path.
       final fakeProcess = FakeProcess();
-      final server = serverWith(fakeProcess);
+      final FrontendServer server = serverWith(fakeProcess);
       await server.start();
 
-      final first = server.compile('lib/main.dart');
-      final second = server.compile('lib/main.dart');
+      final Future<CompileResult> first = server.compile('lib/main.dart');
+      final Future<CompileResult> second = server.compile('lib/main.dart');
 
       fakeProcess.emitStdout('result abc123');
       fakeProcess.emitStdout('abc123 /tmp/first.dill 0');
@@ -93,11 +93,13 @@ void main() {
 
     test('a recompile queued behind a compile keeps its own answer', () async {
       final fakeProcess = FakeProcess();
-      final server = serverWith(fakeProcess);
+      final FrontendServer server = serverWith(fakeProcess);
       await server.start();
 
-      final first = server.compile('lib/main.dart');
-      final second = server.recompile('lib/main.dart', ['file:///lib/a.dart']);
+      final Future<CompileResult> first = server.compile('lib/main.dart');
+      final Future<CompileResult> second = server.recompile('lib/main.dart', [
+        'file:///lib/a.dart',
+      ]);
 
       fakeProcess.emitStdout('result abc123');
       fakeProcess.emitStdout('abc123 /tmp/first.dill 0');
@@ -121,14 +123,14 @@ void main() {
       );
 
       await server.start();
-      final future = server.compile('lib/main.dart');
+      final Future<CompileResult> future = server.compile('lib/main.dart');
 
       // Send result and completion in partial chunks.
       fakeProcess.emitStdoutRaw('result abc');
       await Future.delayed(Duration(milliseconds: 10));
       fakeProcess.emitStdoutRaw('123\nabc123 /tmp/out.dill 0\n');
 
-      final result = await future;
+      final CompileResult result = await future;
       expect(result.success, isTrue);
       expect(result.dillPath, '/tmp/out.dill');
     });
@@ -144,13 +146,13 @@ void main() {
       );
 
       await server.start();
-      final future = server.compile('lib/main.dart');
+      final Future<CompileResult> future = server.compile('lib/main.dart');
 
       fakeProcess.emitStdout('lib/main.dart:1:8: Error: Not found');
       fakeProcess.emitStdout('result abc123');
       fakeProcess.emitStdout('abc123 /tmp/out.dill 1');
 
-      final result = await future;
+      final CompileResult result = await future;
       expect(result.success, isFalse);
     });
   });

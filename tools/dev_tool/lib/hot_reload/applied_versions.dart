@@ -24,7 +24,7 @@ class AppliedVersions {
   /// A file present on disk but not yet applied counts as changed.
   Set<String> findChangedFrom(SourceVersions disk) {
     final changed = <String>{};
-    for (final uri in disk.fileUris) {
+    for (final String uri in disk.fileUris) {
       if (_applied[uri] != disk.versionOf(uri)) {
         changed.add(uri);
       }
@@ -40,7 +40,7 @@ class AppliedVersions {
   /// correctly treat them as unknown until they reappear in a snapshot.
   void markApplied(SourceVersions snapshot, {required Set<String> files}) {
     for (final f in files) {
-      final v = snapshot.versionOf(f);
+      final Version? v = snapshot.versionOf(f);
       if (v != null) _applied[f] = v;
     }
   }
@@ -70,7 +70,7 @@ class AppliedVersions {
     required Set<String> generated,
   }) {
     final files = <String>{};
-    for (final uri in snapshot.fileUris) {
+    for (final String uri in snapshot.fileUris) {
       // `isBefore`, not `!isAfter`: a file stamped exactly at the cutoff is
       // ambiguous, and the two ways of being wrong are not equal. Treating it
       // as changed costs a recompile of content the app already has; treating

@@ -23,7 +23,7 @@ import 'fakes.dart';
 /// its own vocabulary.
 Future<String> refusalFrom(Future<Map<String, dynamic>> call) async {
   try {
-    final result = await call;
+    final Map<String, dynamic> result = await call;
     fail('expected a refusal, got $result');
   } on CommandFailure catch (e) {
     return e.message;
@@ -106,7 +106,8 @@ void main() {
       }
 
       test('is answered, not waited on', () async {
-        final (fake, _, session) = await pausedSession();
+        final (FakeVmService fake, _, DeviceSession session) =
+            await pausedSession();
         // Set after connecting, which makes its own extension calls: from here
         // on, any extension dispatched to this isolate hangs — which is what
         // the real one does, and what the test must not depend on not doing.
@@ -116,7 +117,7 @@ void main() {
 
         final cr = CommandRunner();
         setUpAgentCommands(cr, (_) => session);
-        final error = await refusalFrom(
+        final String error = await refusalFrom(
           cr
               .run('app.getText', {'appId': 'app', 'key': 'k'})
               .timeout(const Duration(seconds: 5)),
@@ -133,7 +134,11 @@ void main() {
       });
 
       test('whose pause state cannot be read is not called paused', () async {
-        final (fake, client, session) = await pausedSession();
+        final (
+          FakeVmService fake,
+          VmServiceClient client,
+          DeviceSession session,
+        ) = await pausedSession();
         // A socket gone silent rather than closed: no `RPCError`, so
         // `_withReconnect` never fires and an unbounded read never returns.
         // Silent from before the command starts, and this is the one route on
@@ -153,7 +158,7 @@ void main() {
           (_) => session,
           pauseReadBound: const Duration(seconds: 1),
         );
-        final error = await refusalFrom(
+        final String error = await refusalFrom(
           cr
               .run('app.getText', {'appId': 'app', 'key': 'k'})
               .timeout(const Duration(seconds: 20)),
@@ -213,7 +218,10 @@ void main() {
 
         final cr = CommandRunner();
         setUpAgentCommands(cr, (_) => sessionFor(client));
-        final running = cr.run('app.getText', {'appId': 'app', 'key': 'k'});
+        final Future<Map<String, dynamic>> running = cr.run('app.getText', {
+          'appId': 'app',
+          'key': 'k',
+        });
 
         // The window, then the registrations that end it — in the order web
         // produces them: the agent's own from the synthetic entrypoint, then
@@ -242,7 +250,7 @@ void main() {
 
           final cr = CommandRunner();
           setUpAgentCommands(cr, (_) => sessionFor(client));
-          final error = await refusalFrom(
+          final String error = await refusalFrom(
             cr
                 .run('app.getText', {'appId': 'app', 'key': 'k'})
                 .timeout(const Duration(seconds: 5)),
@@ -279,7 +287,9 @@ void main() {
       }
 
       test('is the command\'s answer, not a thrown transport fault', () async {
-        final (fake, client) = await readyClient('ext.rules_flutter.waitFor');
+        final (FakeVmService fake, VmServiceClient client) = await readyClient(
+          'ext.rules_flutter.waitFor',
+        );
         // Exactly what the VM puts on the wire for
         // `ServiceExtensionResponse.error(invalidParams, <text>)`: the code's
         // own generic `message`, and the handler's text in `data.details`.
@@ -292,7 +302,7 @@ void main() {
 
         final cr = CommandRunner();
         setUpAgentCommands(cr, (_) => sessionFor(client));
-        final error = await refusalFrom(
+        final String error = await refusalFrom(
           cr
               .run('app.waitFor', {'appId': 'app', 'text': 'RELOADED ONE'})
               .timeout(const Duration(seconds: 5)),
@@ -312,7 +322,8 @@ void main() {
       test(
         'reports its own message, not the JSON-RPC code\'s generic one',
         () async {
-          final (fake, client) = await readyClient('ext.rules_flutter.getText');
+          final (FakeVmService fake, VmServiceClient client) =
+              await readyClient('ext.rules_flutter.getText');
           fake.extensionErrors['ext.rules_flutter.getText'] = RPCError(
             'ext.rules_flutter.getText',
             -32602,
@@ -322,7 +333,7 @@ void main() {
 
           final cr = CommandRunner();
           setUpAgentCommands(cr, (_) => sessionFor(client));
-          final error = await refusalFrom(
+          final String error = await refusalFrom(
             cr.run('app.getText', {
               'appId': 'app',
               'key': 'agent_test_label',
@@ -339,7 +350,9 @@ void main() {
       );
 
       test('falls back to the message when there are no details', () async {
-        final (fake, client) = await readyClient('ext.rules_flutter.tap');
+        final (FakeVmService fake, VmServiceClient client) = await readyClient(
+          'ext.rules_flutter.tap',
+        );
         // No `data`, so nothing in `details` — what a VM-level refusal looks
         // like next to an extension's own.
         fake.extensionErrors['ext.rules_flutter.tap'] = RPCError(
@@ -350,7 +363,7 @@ void main() {
 
         final cr = CommandRunner();
         setUpAgentCommands(cr, (_) => sessionFor(client));
-        final error = await refusalFrom(
+        final String error = await refusalFrom(
           cr.run('app.tap', {'appId': 'app', 'key': 'k'}),
         );
 
@@ -398,13 +411,13 @@ void main() {
       test('is answered, and the next command is not stuck behind it', () async {
         final gate = Completer<void>();
         addTearDown(gate.complete);
-        final (fake, client) = await wedgedClient(
+        final (FakeVmService fake, VmServiceClient client) = await wedgedClient(
           'ext.rules_flutter.getText',
           gate,
         );
-        final cr = runnerFor(client);
+        final CommandRunner cr = runnerFor(client);
 
-        final error = await refusalFrom(
+        final String error = await refusalFrom(
           cr
               .run('app.getText', {
                 'appId': 'app',
@@ -434,7 +447,7 @@ void main() {
           'type': '_extensionType',
           'text': 'count: 0',
         };
-        final after = await cr
+        final Map<String, dynamic> after = await cr
             .run('app.getText', {'appId': 'app', 'key': 'k'})
             .timeout(const Duration(seconds: 20));
         expect(after['text'], 'count: 0');
@@ -445,13 +458,16 @@ void main() {
         () async {
           final gate = Completer<void>();
           addTearDown(gate.complete);
-          final (fake, client) = await wedgedClient(
+          final (
+            FakeVmService fake,
+            VmServiceClient client,
+          ) = await wedgedClient(
             'ext.rules_flutter.getText',
             gate,
           );
-          final cr = runnerFor(client);
+          final CommandRunner cr = runnerFor(client);
 
-          final running = cr.run('app.getText', {
+          final Future<Map<String, dynamic>> running = cr.run('app.getText', {
             'appId': 'app',
             'key': 'k',
             'timeoutMs': '500',
@@ -461,7 +477,7 @@ void main() {
           await pumpEventQueue();
           fake.pauseKind = EventKind.kPauseBreakpoint;
 
-          final error = await refusalFrom(
+          final String error = await refusalFrom(
             running.timeout(const Duration(seconds: 20)),
           );
           expect(error, contains('did not answer within 1s'));
@@ -475,7 +491,10 @@ void main() {
         () async {
           final gate = Completer<void>();
           addTearDown(gate.complete);
-          final (fake, client) = await wedgedClient(
+          final (
+            FakeVmService fake,
+            VmServiceClient client,
+          ) = await wedgedClient(
             'ext.rules_flutter.getText',
             gate,
           );
@@ -489,9 +508,9 @@ void main() {
           final isolateGate = Completer<void>();
           addTearDown(isolateGate.complete);
           fake.getIsolateGate = isolateGate;
-          final cr = runnerFor(client);
+          final CommandRunner cr = runnerFor(client);
 
-          final error = await refusalFrom(
+          final String error = await refusalFrom(
             cr
                 .run('app.getText', {'appId': 'app', 'key': 'k'})
                 .timeout(const Duration(seconds: 20)),
@@ -521,13 +540,13 @@ void main() {
       test('says when the pause state could not be read either', () async {
         final gate = Completer<void>();
         addTearDown(gate.complete);
-        final (fake, client) = await wedgedClient(
+        final (FakeVmService fake, VmServiceClient client) = await wedgedClient(
           'ext.rules_flutter.getText',
           gate,
         );
-        final cr = runnerFor(client);
+        final CommandRunner cr = runnerFor(client);
 
-        final running = cr.run('app.getText', {
+        final Future<Map<String, dynamic>> running = cr.run('app.getText', {
           'appId': 'app',
           'key': 'k',
           'timeoutMs': '500',
@@ -541,7 +560,7 @@ void main() {
         addTearDown(isolateGate.complete);
         fake.getIsolateGate = isolateGate;
 
-        final error = await refusalFrom(
+        final String error = await refusalFrom(
           running.timeout(const Duration(seconds: 20)),
         );
         expect(error, contains('did not answer within 1s'));
@@ -587,12 +606,18 @@ void main() {
       final cr = CommandRunner();
       setUpAgentCommands(cr, (appId) => sessions[appId]);
 
-      final a = await cr.run('app.getText', {'appId': 'app_A', 'key': 'k'});
-      final b = await cr.run('app.getText', {'appId': 'app_B', 'key': 'k'});
+      final Map<String, dynamic> a = await cr.run('app.getText', {
+        'appId': 'app_A',
+        'key': 'k',
+      });
+      final Map<String, dynamic> b = await cr.run('app.getText', {
+        'appId': 'app_B',
+        'key': 'k',
+      });
 
       expect(a['text'], 'RELOADED ONE');
       expect(b['text'], 'Hello from Flutter iOS!');
-      for (final appId in fakes.keys) {
+      for (final String appId in fakes.keys) {
         expect(
           fakes[appId]!.extensionCalls
               .map((c) => c.method)
@@ -643,7 +668,9 @@ void main() {
       // call to reach key validation by faking the session lookup. The
       // session-presence check is covered by the unknown-appId test above.
       // Here we just assert that with appId+missing key we don't crash.
-      final error = await refusalFrom(cr.run('app.tap', {'appId': 'nope'}));
+      final String error = await refusalFrom(
+        cr.run('app.tap', {'appId': 'nope'}),
+      );
       // Either kind of error is acceptable; the contract is "no crash".
       expect(error, isNotNull);
     });
@@ -678,13 +705,15 @@ void main() {
       }
 
       test('holds the command until the app is drivable', () async {
-        final session = await starting();
+        final DeviceSession session = await starting();
         final cr = CommandRunner();
         setUpAgentCommands(cr, (_) => session);
 
         var answered = false;
-        final running = cr.run('app.getText', {'appId': 'app', 'key': 'k'})
-          ..then((_) => answered = true).ignore();
+        final Future<Map<String, dynamic>> running = cr.run('app.getText', {
+          'appId': 'app',
+          'key': 'k',
+        })..then((_) => answered = true).ignore();
         await pumpEventQueue();
 
         expect(
@@ -696,21 +725,23 @@ void main() {
         );
 
         session.drivable.signalReady();
-        final result = await running.timeout(const Duration(seconds: 5));
+        final Map<String, dynamic> result = await running.timeout(
+          const Duration(seconds: 5),
+        );
 
         expect(result.containsKey('error'), isFalse);
         expect(result['text'], 'hi');
       });
 
       test('reports why when the app never renders', () async {
-        final session = await starting();
+        final DeviceSession session = await starting();
         final cr = CommandRunner();
         setUpAgentCommands(cr, (_) => session);
         session.drivable.signalUnavailable(
           'app on macOS had not rendered a frame after 30s',
         );
 
-        final error = await refusalFrom(
+        final String error = await refusalFrom(
           cr
               .run('app.getText', {'appId': 'app', 'key': 'k'})
               .timeout(const Duration(seconds: 5)),
@@ -814,7 +845,7 @@ void main() {
     test(
       'hands the app the chord by DOM code and names the framework route',
       () async {
-        final (fake, session) = await ready(
+        final (FakeVmService fake, DeviceSession session) = await ready(
           MacOSDevice(),
           answer: {
             'sent': [
@@ -829,13 +860,15 @@ void main() {
         final cr = CommandRunner();
         setUpAgentCommands(cr, (_) => session);
 
-        final result = await cr
+        final Map<String, dynamic> result = await cr
             .run('app.pressKey', {'appId': 'app', 'key': 'ControlOrMeta+K'})
             .timeout(const Duration(seconds: 5));
 
-        final call = fake.extensionCalls.singleWhere(
-          (c) => c.method == 'ext.rules_flutter.pressKey',
-        );
+        final ({Map<String, dynamic>? args, String method}) call = fake
+            .extensionCalls
+            .singleWhere(
+              (c) => c.method == 'ext.rules_flutter.pressKey',
+            );
         // ControlOrMeta is Meta for a macOS app.
         expect(call.args, containsPair('code', 'KeyK'));
         expect(call.args, containsPair('modifiers', 'MetaLeft'));
@@ -849,7 +882,9 @@ void main() {
     );
 
     test('sends what a key types, with Shift applied', () async {
-      final (fake, session) = await ready(AndroidDevice());
+      final (FakeVmService fake, DeviceSession session) = await ready(
+        AndroidDevice(),
+      );
       final cr = CommandRunner();
       setUpAgentCommands(cr, (_) => session);
 
@@ -857,20 +892,24 @@ void main() {
           .run('app.pressKey', {'appId': 'app', 'key': 'Shift+Digit1'})
           .timeout(const Duration(seconds: 5));
 
-      final call = fake.extensionCalls.singleWhere(
-        (c) => c.method == 'ext.rules_flutter.pressKey',
-      );
+      final ({Map<String, dynamic>? args, String method}) call = fake
+          .extensionCalls
+          .singleWhere(
+            (c) => c.method == 'ext.rules_flutter.pressKey',
+          );
       expect(call.args, containsPair('code', 'Digit1'));
       expect(call.args, containsPair('modifiers', 'ShiftLeft'));
       expect(call.args, containsPair('text', '!'));
     });
 
     test('refuses an unknown key by name, and presses nothing', () async {
-      final (fake, session) = await ready(MacOSDevice());
+      final (FakeVmService fake, DeviceSession session) = await ready(
+        MacOSDevice(),
+      );
       final cr = CommandRunner();
       setUpAgentCommands(cr, (_) => session);
 
-      final failure = await cr
+      final CommandFailure? failure = await cr
           .run('app.pressKey', {'appId': 'app', 'key': 'Ctrl+K'})
           .then<CommandFailure?>(
             (_) => null,
@@ -888,7 +927,7 @@ void main() {
     });
 
     test('refuses a missing key and a settle it cannot read', () async {
-      final (_, session) = await ready(MacOSDevice());
+      final (_, DeviceSession session) = await ready(MacOSDevice());
       final cr = CommandRunner();
       setUpAgentCommands(cr, (_) => session);
 

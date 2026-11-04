@@ -222,8 +222,8 @@ int zlibInsertString(ZlibRawState s, int str) {
 
 /// Slides the hash chains down by one window half (`slide_hash`).
 void zlibSlideHash(ZlibRawState s) {
-  var n = zlibHashSize;
-  var p = zlibHashSize;
+  int n = zlibHashSize;
+  int p = zlibHashSize;
   do {
     final int m = s.head[--p];
     s.head[p] = m >= zlibWindowSize ? m - zlibWindowSize : 0;
@@ -242,7 +242,7 @@ void zlibSlideHash(ZlibRawState s) {
 /// The raw stream (`wrap == 0`) never updates a checksum, so only the copy
 /// and the input cursor move are ported.
 void zlibReadWindow(ZlibRawState s, int offset, int length) {
-  var len = s.availIn;
+  int len = s.availIn;
   if (len > length) len = length;
   if (len == 0) return;
   s.availIn -= len;
@@ -278,7 +278,7 @@ int _slideWindow(ZlibRawState s, int more) {
 /// longest-match search relies on.
 void zlibFillWindow(ZlibRawState s) {
   do {
-    var more = zlibWindowAllocation - s.lookahead - s.strstart;
+    int more = zlibWindowAllocation - s.lookahead - s.strstart;
     more = _slideWindow(s, more);
     if (s.availIn == 0) break;
 
@@ -288,7 +288,7 @@ void zlibFillWindow(ZlibRawState s) {
     s.lookahead += before - s.availIn;
 
     if (s.lookahead + s.insert >= zlibMinMatch) {
-      var str = s.strstart - s.insert;
+      int str = s.strstart - s.insert;
       s.insH = s.window[str];
       s.insH = zlibUpdateHash(s.insH, s.window[str + 1]);
       while (s.insert != 0) {
@@ -305,12 +305,12 @@ void zlibFillWindow(ZlibRawState s) {
   if (s.highWater < zlibWindowAllocation) {
     final int curr = s.strstart + s.lookahead;
     if (s.highWater < curr) {
-      var init = zlibWindowAllocation - curr;
+      int init = zlibWindowAllocation - curr;
       if (init > zlibWinInit) init = zlibWinInit;
       s.window.fillRange(curr, curr + init, 0);
       s.highWater = curr + init;
     } else if (s.highWater < curr + zlibWinInit) {
-      var init = curr + zlibWinInit - s.highWater;
+      int init = curr + zlibWinInit - s.highWater;
       if (init > zlibWindowAllocation - s.highWater) {
         init = zlibWindowAllocation - s.highWater;
       }

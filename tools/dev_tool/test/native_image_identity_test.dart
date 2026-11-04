@@ -15,7 +15,7 @@ Uint8List machO(List<int> uuid) {
   bytes.setUint32(36, 16, Endian.little);
   bytes.setUint32(48, 0x1b, Endian.little); // LC_UUID
   bytes.setUint32(52, 24, Endian.little);
-  final out = bytes.buffer.asUint8List();
+  final Uint8List out = bytes.buffer.asUint8List();
   out.setRange(56, 72, uuid);
   return out;
 }
@@ -24,13 +24,13 @@ Uint8List machO(List<int> uuid) {
 /// then the GNU build-id.
 Uint8List elf64(List<int> id) {
   const phoff = 64;
-  const noteAt = phoff + 56;
+  const int noteAt = phoff + 56;
   final notes = BytesBuilder()
     ..add(_note('XYZ\u0000', 1, [9, 9, 9, 9]))
     ..add(_note('GNU\u0000', 3, id));
-  final noteBytes = notes.toBytes();
+  final Uint8List noteBytes = notes.toBytes();
   final bytes = ByteData(noteAt + noteBytes.length);
-  final out = bytes.buffer.asUint8List();
+  final Uint8List out = bytes.buffer.asUint8List();
   out.setRange(0, 4, [0x7f, 0x45, 0x4c, 0x46]);
   out[4] = 2; // ELFCLASS64
   out[5] = 1; // little-endian
@@ -76,7 +76,7 @@ void main() {
   });
 
   test('an image with no identity, or no image at all, has none', () {
-    final noUuid = machO(List.filled(16, 0));
+    final Uint8List noUuid = machO(List.filled(16, 0));
     ByteData.sublistView(noUuid).setUint32(48, 0x19, Endian.little);
     expect(nativeImageIdentity(noUuid), isNull);
     expect(
@@ -118,7 +118,7 @@ void main() {
         final lib = Directory('${tmp.path}/z/lib/arm64-v8a')
           ..createSync(recursive: true);
         // Repetitive enough that deflate really compresses it.
-        final image = elf64(List.filled(20, 0xab));
+        final Uint8List image = elf64(List.filled(20, 0xab));
         final padded = Uint8List.fromList([...image, ...List.filled(4096, 0)]);
         File('${lib.path}/libx.so').writeAsBytesSync(padded);
         File('${lib.path}/other.txt').writeAsStringSync('first');
@@ -128,7 +128,7 @@ void main() {
           member: 'lib',
           deflate: deflate,
         );
-        final bytes = await readBundledFile(
+        final Uint8List bytes = await readBundledFile(
           '${tmp.path}/app.apk',
           'lib/arm64-v8a/libx.so',
         );

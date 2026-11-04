@@ -36,7 +36,7 @@ void main() {
       // once, so several entries end in `flutter_assets` and the app's is not
       // first. Position is not information here — only the app knows which
       // build it came from.
-      final chosen = resolveAssetsDir(
+      final String chosen = resolveAssetsDir(
         info: info(
           assetsDir: 'bazel-out/darwin_arm64-dbg-android-ST-a6b/bin/app_flutter_flutter_assets',
         ),
@@ -59,7 +59,7 @@ void main() {
     });
 
     test('accepts the app’s tree when it is the only candidate', () {
-      final chosen = resolveAssetsDir(
+      final String chosen = resolveAssetsDir(
         info: info(),
         candidates: const [
           'bazel-out/ios_sim_arm64-dbg-ST-abc/bin/app_flutter_flutter_assets',
@@ -230,7 +230,7 @@ void main() {
       // `ext.rules_flutter.buildInfo` with its "carries no record" error, and
       // every later read — the assets tree above, most of all — loses the one
       // source that can answer it.
-      final record = {
+      final Map<String, Object> record = {
         'label': '@@//:app_flutter',
         'compilationMode': 'dbg',
         'platformBuildArgs': ['--ios_multi_cpus=sim_arm64'],
@@ -339,7 +339,7 @@ void main() {
       const said =
           'this app carries no rules_flutter.build_info: it was not '
           'built in -c dbg by a rule that bundles assets';
-      final client = await clientThat(error: appRefusal(said));
+      final VmServiceClient client = await clientThat(error: appRefusal(said));
 
       await expectLater(
         readBuildInfo(client),
@@ -358,7 +358,7 @@ void main() {
       // true of the transport and useless about the app. The text is in
       // `details`, and reaching for the wrong one turns every app-side failure
       // into the same meaningless line.
-      final client = await clientThat(
+      final VmServiceClient client = await clientThat(
         error: appRefusal('the app’s actual complaint'),
       );
 
@@ -378,7 +378,7 @@ void main() {
       // A disposed or broken connection also arrives as an RPCError. Reading
       // it as "this app carries no record" would misattribute a tool fault to
       // the app — the same defect, pointed the other way.
-      final client = await clientThat(
+      final VmServiceClient client = await clientThat(
         error: RPCError(buildInfoExtension, -32000, 'Service has disappeared'),
       );
 
@@ -393,7 +393,7 @@ void main() {
         // it. Only the pair — the agent's code AND handler text — is a refusal.
         // Without the code check, a connection fault carrying a `details` would
         // be reported as "this app has no build record".
-        final client = await clientThat(
+        final VmServiceClient client = await clientThat(
           error: RPCError(buildInfoExtension, -32000, 'Service disappeared', {
             'details': 'the DDS connection was closed',
           }),
@@ -408,7 +408,7 @@ void main() {
       // too, for a request it could not route — a stale isolate id, say. Those
       // carry no handler text, and reading one as "this app has no record"
       // would blame the app for the tool's own mistake.
-      final client = await clientThat(
+      final VmServiceClient client = await clientThat(
         error: RPCError(buildInfoExtension, -32602, 'Invalid params'),
       );
 
@@ -416,7 +416,7 @@ void main() {
     });
 
     test('parses the record when the app has one', () async {
-      final client = await clientThat(
+      final VmServiceClient client = await clientThat(
         payload: const {
           'type': '_extensionType',
           'method': buildInfoExtension,
@@ -429,7 +429,7 @@ void main() {
         },
       );
 
-      final parsed = await readBuildInfo(client);
+      final BuildInfo? parsed = await readBuildInfo(client);
 
       expect(parsed?.label, '@@//:app_flutter');
       expect(parsed?.targetPlatform, 'macos');

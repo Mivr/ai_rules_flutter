@@ -87,8 +87,8 @@ bool stampProvesUnchanged({
 Future<Map<String, FileSnapshot>> readFileSnapshots(
   Iterable<String> paths,
 ) async {
-  final readStart = DateTime.now().microsecondsSinceEpoch;
-  final content = await nativeLibsFingerprintOfFiles(paths);
+  final int readStart = DateTime.now().microsecondsSinceEpoch;
+  final Map<String, String> content = await nativeLibsFingerprintOfFiles(paths);
   final snapshots = <String, FileSnapshot>{};
   for (final path in paths) {
     snapshots[path] = FileSnapshot(
@@ -129,8 +129,8 @@ Future<List<String>> findMovedFiles({
   final restamped = <String, String>{};
   final moved = <String>[];
   for (final path in paths) {
-    final stat = await File(path).stat();
-    final known = live[path];
+    final FileStat stat = await File(path).stat();
+    final FileSnapshot? known = live[path];
     if (stat.type == FileSystemEntityType.notFound) {
       if (known == null || !known.isMissing) {
         if (readMissing) {
@@ -141,7 +141,7 @@ Future<List<String>> findMovedFiles({
       }
       continue;
     }
-    final stamp = stampForStat(stat);
+    final String stamp = stampForStat(stat);
     if (known == null ||
         known.isMissing ||
         stamp != known.stamp ||
@@ -157,10 +157,12 @@ Future<List<String>> findMovedFiles({
   // The moment each file's content is read, taken before the read: a file
   // whose mtime is not older than this by more than the window may have been
   // written in the same tick, after the read.
-  final readStart = DateTime.now().microsecondsSinceEpoch;
-  final content = await nativeLibsFingerprintOfFiles(restamped.keys);
-  for (final entry in restamped.entries) {
-    final path = entry.key;
+  final int readStart = DateTime.now().microsecondsSinceEpoch;
+  final Map<String, String> content = await nativeLibsFingerprintOfFiles(
+    restamped.keys,
+  );
+  for (final MapEntry<String, String> entry in restamped.entries) {
+    final String path = entry.key;
     if (content[path] != live[path]?.content) {
       moved.add(path);
     } else {

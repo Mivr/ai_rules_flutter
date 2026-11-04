@@ -43,12 +43,12 @@ VersionRequest resolveVersionRequest(List<String> args) {
     );
     exit(1);
   }
-  final version = args[0];
+  final String version = args[0];
   // Locate the Flutter repo. BUILD_WORKSPACE_DIRECTORY is set by `bazel run`.
-  final workspaceDir =
+  final String workspaceDir =
       Platform.environment['BUILD_WORKSPACE_DIRECTORY'] ??
       Directory.current.path;
-  final flutterRepo =
+  final String flutterRepo =
       Platform.environment['FLUTTER_REPO'] ??
       '$workspaceDir/references/flutter';
   return VersionRequest(
@@ -81,7 +81,7 @@ Future<EngineRevisions> readEngineRevisions(
   String flutterRepo,
 ) async {
   // Get engine revision from the Flutter tag.
-  final gitResult = Process.runSync(
+  final ProcessResult gitResult = Process.runSync(
     'git',
     ['show', '$version:bin/internal/engine.version'],
     workingDirectory: flutterRepo,
@@ -93,11 +93,11 @@ Future<EngineRevisions> readEngineRevisions(
     stderr.writeln('Make sure the tag exists: git fetch --tags');
     exit(1);
   }
-  final engineRev = (gitResult.stdout as String).trim();
+  final String engineRev = (gitResult.stdout as String).trim();
   print('Engine revision: $engineRev');
 
   // Get material fonts URL from the Flutter repo.
-  final materialFontsResult = Process.runSync(
+  final ProcessResult materialFontsResult = Process.runSync(
     'git',
     ['show', '$version:bin/internal/material_fonts.version'],
     workingDirectory: flutterRepo,
@@ -108,7 +108,7 @@ Future<EngineRevisions> readEngineRevisions(
     );
     exit(1);
   }
-  final materialFontsUrl = (materialFontsResult.stdout as String).trim();
+  final String materialFontsUrl = (materialFontsResult.stdout as String).trim();
   print('Material fonts URL: $materialFontsUrl');
   return EngineRevisions(
     engineRev: engineRev,
@@ -176,7 +176,7 @@ class HashTarget {
 Future<String?> hashUrlInto(HttpClient client, HashTarget target) async {
   stdout.write('  ${target.label} ... ');
   try {
-    final sha = await _downloadAndHash(client, target.url);
+    final String sha = await _downloadAndHash(client, target.url);
     print(sha);
     return sha;
   } catch (e) {
@@ -195,14 +195,14 @@ Future<ArtifactOutcome> downloadAllChecksums(
 ) async {
   final checksums = <String, String>{};
   final failures = <String>[];
-  for (final artifact in artifacts) {
-    final known = spec.pinned[artifact];
+  for (final String artifact in artifacts) {
+    final String? known = spec.pinned[artifact];
     if (known != null) {
       checksums[artifact] = known;
       print('  $artifact ... $known (pinned)');
       continue;
     }
-    final sha = await hashUrlInto(
+    final String? sha = await hashUrlInto(
       client,
       HashTarget(
         label: artifact,
@@ -229,7 +229,7 @@ Future<ArtifactOutcome> downloadAllChecksums(
       '${spec.pinnedSource} (pinned)',
     );
   } else {
-    final sha = await hashUrlInto(
+    final String? sha = await hashUrlInto(
       client,
       HashTarget(
         label: 'flutter-${spec.version}.tar.gz (source)',
@@ -246,12 +246,12 @@ Future<ArtifactOutcome> downloadAllChecksums(
   }
 
   // Download material fonts and compute checksum.
-  final pinnedFonts = spec.pinned['material_fonts.zip'];
+  final String? pinnedFonts = spec.pinned['material_fonts.zip'];
   if (pinnedFonts != null) {
     checksums['material_fonts.zip'] = pinnedFonts;
     print('  material_fonts.zip ... $pinnedFonts (pinned)');
   } else {
-    final sha = await hashUrlInto(
+    final String? sha = await hashUrlInto(
       client,
       HashTarget(
         label: 'material_fonts.zip',
@@ -285,7 +285,7 @@ Future<void> reportSysrootChecksums(
   print('Checking Linux sysroot checksums...');
   final sysrootsRef =
       '$version:engine/src/build/linux/sysroot_scripts/sysroots.json';
-  final sysrootsResult = Process.runSync(
+  final ProcessResult sysrootsResult = Process.runSync(
     'git',
     ['show', sysrootsRef],
     workingDirectory: flutterRepo,
@@ -295,7 +295,9 @@ Future<void> reportSysrootChecksums(
     // actual committed values, not hardcoded copies. Deliberately outside the
     // try below, which reports whatever it catches as a sysroots.json parse
     // failure: a versions.bzl that can't be read is a different fact.
-    final currentChecksums = readCurrentSysrootChecksums(workspaceDir);
+    final Map<String, String> currentChecksums = readCurrentSysrootChecksums(
+      workspaceDir,
+    );
 
     // The try covers the decode alone, which is the only step its message
     // describes. Reading the entries outside it is what lets them throw:
@@ -310,8 +312,11 @@ Future<void> reportSysrootChecksums(
     }
 
     if (sysroots != null) {
-      final newChecksums = readEngineSysrootChecksums(sysroots, sysrootsRef);
-      final changed =
+      final Map<String, String> newChecksums = readEngineSysrootChecksums(
+        sysroots,
+        sysrootsRef,
+      );
+      final bool changed =
           newChecksums['amd64'] != currentChecksums['amd64'] ||
           newChecksums['arm64'] != currentChecksums['arm64'];
       if (changed) {
@@ -381,9 +386,9 @@ String renderVersionSnippet({
   );
   out.writeln('');
   out.writeln('    "$version": {');
-  for (final section in artifactSections) {
+  for (final ArtifactSection section in artifactSections) {
     out.writeln('        # ${section.comment}');
-    for (final path in section.paths) {
+    for (final String path in section.paths) {
       out.writeln(line(path));
     }
   }
@@ -414,13 +419,13 @@ class ArtifactChecksumException implements Exception {
 }
 
 Future<String> _downloadAndHash(HttpClient client, String url) async {
-  final uri = Uri.parse(url);
-  final request = await client.getUrl(uri);
-  final response = await request.close();
+  final Uri uri = Uri.parse(url);
+  final HttpClientRequest request = await client.getUrl(uri);
+  final HttpClientResponse response = await request.close();
 
   // Follow redirects manually if needed.
   if (response.statusCode == 302 || response.statusCode == 301) {
-    final location = response.headers['location']?.first;
+    final String? location = response.headers['location']?.first;
     if (location != null) {
       await response.drain<void>();
       return _downloadAndHash(client, location);
@@ -433,13 +438,15 @@ Future<String> _downloadAndHash(HttpClient client, String url) async {
   }
 
   // Download to a temp file, then compute SHA-256 using a platform-appropriate tool.
-  final tempDir = await Directory.systemTemp.createTemp('flutter_hash_');
+  final Directory tempDir = await Directory.systemTemp.createTemp(
+    'flutter_hash_',
+  );
   final tempFile = File('${tempDir.path}/artifact');
-  final sink = tempFile.openWrite();
+  final IOSink sink = tempFile.openWrite();
   await response.pipe(sink);
 
   try {
-    final hash = await _sha256OfFile(tempFile.path);
+    final String hash = await _sha256OfFile(tempFile.path);
     return hash;
   } finally {
     await tempDir.delete(recursive: true);
@@ -460,14 +467,14 @@ Future<String> _downloadAndHash(HttpClient client, String url) async {
 /// at the moment that distinction matters most.
 Map<String, String> readCurrentSysrootChecksums(String workspaceDir) {
   final path = '$workspaceDir/flutter/private/versions.bzl';
-  final content = File(path).readAsStringSync();
+  final String content = File(path).readAsStringSync();
 
   // Bound the scan to this block's own braces, anchored at the top-level
   // assignment. Scanning from the marker to end of file instead would let any
   // later block carrying these keys overwrite the real values and win silently;
   // anchoring at line start keeps a differently-named block that merely ends in
   // this name (`OLD_LINUX_SYSROOT_CHECKSUMS`) from claiming the match.
-  final block = RegExp(
+  final RegExpMatch? block = RegExp(
     r'^LINUX_SYSROOT_CHECKSUMS\s*=\s*\{([^}]*)\}',
     multiLine: true,
   ).firstMatch(content);
@@ -513,14 +520,14 @@ Map<String, String> readEngineSysrootChecksums(
 ) {
   final result = <String, String>{};
   for (final arch in const ['amd64', 'arm64']) {
-    final entry = sysroots['bullseye_$arch'];
+    final dynamic entry = sysroots['bullseye_$arch'];
     if (entry == null) {
       throw FormatException(
         'No "bullseye_$arch" entry in $source '
         '(found: ${sysroots.keys.join(', ')})',
       );
     }
-    final sha = entry is Map ? entry['Sha256Sum'] : null;
+    final dynamic sha = entry is Map ? entry['Sha256Sum'] : null;
     if (sha is! String) {
       throw FormatException(
         'No string "Sha256Sum" for "bullseye_$arch" in $source',
@@ -534,11 +541,15 @@ Map<String, String> readEngineSysrootChecksums(
 Future<String> _sha256OfFile(String path) async {
   if (Platform.isWindows) {
     // certutil outputs multiple lines; the hash is on the second line.
-    final result = await Process.run('certutil', ['-hashfile', path, 'SHA256']);
+    final ProcessResult result = await Process.run('certutil', [
+      '-hashfile',
+      path,
+      'SHA256',
+    ]);
     if (result.exitCode != 0) {
       throw ArtifactChecksumException('certutil failed: ${result.stderr}');
     }
-    final lines = (result.stdout as String).trim().split('\n');
+    final List<String> lines = (result.stdout as String).trim().split('\n');
     if (lines.length < 2) {
       throw ArtifactChecksumException('Unexpected certutil output');
     }

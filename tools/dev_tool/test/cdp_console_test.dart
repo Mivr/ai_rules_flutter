@@ -17,7 +17,7 @@ class _FakeCdpEndpoint {
   new _(this._server) {
     var next = 0;
     _server.listen((request) async {
-      final socket = await WebSocketTransformer.upgrade(request);
+      final WebSocket socket = await WebSocketTransformer.upgrade(request);
       _accepted.add(socket);
       _slot(next++).complete(socket);
     });
@@ -49,7 +49,7 @@ class _FakeCdpEndpoint {
   /// not enough: a still-open one keeps the test binary's event loop alive.
   Future<void> stop() async {
     await _server.close(force: true);
-    for (final socket in _accepted) {
+    for (final WebSocket socket in _accepted) {
       await socket.close();
     }
   }
@@ -265,7 +265,7 @@ void main() {
     Future<HttpServer> serveCdpJson(
       List<dynamic> Function(int call) listing,
     ) async {
-      final server = await HttpServer.bind('127.0.0.1', 0);
+      final HttpServer server = await HttpServer.bind('127.0.0.1', 0);
       addTearDown(() => server.close(force: true));
       var calls = 0;
       server.listen((request) async {
@@ -292,7 +292,7 @@ void main() {
       // A cross-origin-isolated app forces a browsing-context-group swap, and
       // for a moment the app's own page is listed with an empty URL. Sampling
       // once catches that about half the time.
-      final cdp = await serveCdpJson(
+      final HttpServer cdp = await serveCdpJson(
         (call) => call == 0
             ? [
                 {
@@ -325,7 +325,9 @@ void main() {
     });
 
     test('throws with the listing when the app page never appears', () async {
-      final cdp = await serveCdpJson((_) => [extensionPage, blankPage]);
+      final HttpServer cdp = await serveCdpJson(
+        (_) => [extensionPage, blankPage],
+      );
 
       await expectLater(
         resolveCdpPageTarget(
@@ -353,7 +355,7 @@ void main() {
     });
 
     test('gives up at the timeout rather than polling on', () async {
-      final cdp = await serveCdpJson((_) => const <dynamic>[]);
+      final HttpServer cdp = await serveCdpJson((_) => const <dynamic>[]);
       final stopwatch = Stopwatch()..start();
       await expectLater(
         resolveCdpPageTarget(
@@ -377,8 +379,8 @@ void main() {
       // "the page is not listed yet" and must not be retried into a long
       // silence: the whole timeout would otherwise be spent on a port nothing
       // is listening to.
-      final dead = await HttpServer.bind('127.0.0.1', 0);
-      final port = dead.port;
+      final HttpServer dead = await HttpServer.bind('127.0.0.1', 0);
+      final int port = dead.port;
       await dead.close(force: true);
 
       final stopwatch = Stopwatch()..start();
@@ -416,7 +418,7 @@ void main() {
         consoleEvent('log', [stringArg('hello from the page')]),
         logs,
       );
-      final line = logs.read(0).lines.single;
+      final AppLogLine line = logs.read(0).lines.single;
       expect(line.text, 'hello from the page');
       expect(line.isError, isFalse);
     });
@@ -484,7 +486,7 @@ void main() {
       }, logs);
       // A stack trace keeps its line structure rather than arriving as one
       // unreadable blob.
-      final lines = logs.read(0).lines;
+      final List<AppLogLine> lines = logs.read(0).lines;
       expect(lines.map((l) => l.text), ['Error: boom', '  at main']);
       expect(lines.every((l) => l.isError), isTrue);
     });
@@ -534,9 +536,11 @@ void main() {
 
     test('a dropped event is logged, not swallowed', () async {
       final records = <LogRecord>[];
-      final rootLevel = Logger.root.level;
+      final Level rootLevel = Logger.root.level;
       Logger.root.level = Level.ALL;
-      final sub = Logger.root.onRecord.listen(records.add);
+      final StreamSubscription<LogRecord> sub = Logger.root.onRecord.listen(
+        records.add,
+      );
       try {
         handleCdpConsoleMessage({
           'method': 'Runtime.consoleAPICalled',

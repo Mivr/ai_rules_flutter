@@ -34,12 +34,14 @@ void main() {
     () async {
       // The directory holding the binary *and* its runfiles tree, linked as a
       // unit: the runfiles are found next to the path the tool was run by.
-      final built = File(await ensureBuiltDevTool()).parent.path;
-      final scratch = Directory.systemTemp.createTempSync('launch_path_');
+      final String built = File(await ensureBuiltDevTool()).parent.path;
+      final Directory scratch = Directory.systemTemp.createTempSync(
+        'launch_path_',
+      );
       addTearDown(() => scratch.deleteSync(recursive: true));
       final link = Link(p.join(scratch.path, 'tool'))..createSync(built);
 
-      final dt = await spawnBoundToTest(
+      final DevToolProcess dt = await spawnBoundToTest(
         spawn: () async => DevToolProcess(
           await Process.start(
             p.join(link.path, p.basename(await ensureBuiltDevTool())),
@@ -65,15 +67,15 @@ void main() {
       );
       link.deleteSync();
 
-      final start = await dt.waitForEvent(
+      final Map<String, dynamic> start = await dt.waitForEvent(
         'app.start',
         timeout: const Duration(minutes: 2),
       );
-      final appId = start['params']?['appId'] as String? ?? dt.appId!;
+      final String appId = start['params']?['appId'] as String? ?? dt.appId!;
       await dt.waitForHttpControl();
 
       // The VM service connection: what hung.
-      final text = await dt.httpCommand('app.getText', {
+      final Map<String, dynamic> text = await dt.httpCommand('app.getText', {
         'appId': appId,
         'key': 'e2e_define_label',
         'timeoutMs': '30000',
@@ -86,7 +88,8 @@ void main() {
 
       // A bundled helper, resolved after the launch path is gone.
       await dt.nativeScreenshotWhenOnScreen(appId);
-      final shot = await dt.httpNativeScreenshotReply(appId);
+      final ({List<int> bytes, String? detail, String? settled}) shot = await dt
+          .httpNativeScreenshotReply(appId);
       expectRendered(shot.bytes, what: 'the app captured after the path moved');
 
       await dt.sendCommand(1, 'daemon.shutdown');

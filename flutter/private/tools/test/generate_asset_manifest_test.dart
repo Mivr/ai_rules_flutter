@@ -10,22 +10,22 @@ import '../generate_asset_manifest.dart' as manifest;
 void main() {
   group('encodeStandardMessage', () {
     test('encodes null to empty bytes', () {
-      final result = manifest.encodeStandardMessage(null);
+      final Uint8List result = manifest.encodeStandardMessage(null);
       expect(result, isEmpty);
     });
 
     test('encodes bool true to tag 1', () {
-      final result = manifest.encodeStandardMessage(true);
+      final Uint8List result = manifest.encodeStandardMessage(true);
       expect(result[0], 1); // _tagTrue
     });
 
     test('encodes bool false to tag 2', () {
-      final result = manifest.encodeStandardMessage(false);
+      final Uint8List result = manifest.encodeStandardMessage(false);
       expect(result[0], 2); // _tagFalse
     });
 
     test('encodes int32 to tag 3 + 4 bytes', () {
-      final result = manifest.encodeStandardMessage(42);
+      final Uint8List result = manifest.encodeStandardMessage(42);
       expect(result[0], 3); // _tagInt32
       expect(result.length, 5); // 1 tag + 4 bytes
       // Decode the int32 value.
@@ -34,14 +34,14 @@ void main() {
     });
 
     test('encodes string to tag 7 + length + UTF-8 bytes', () {
-      final result = manifest.encodeStandardMessage('hello');
+      final Uint8List result = manifest.encodeStandardMessage('hello');
       expect(result[0], 7); // _tagString
       expect(result[1], 5); // length of "hello" in UTF-8
       expect(utf8.decode(result.sublist(2)), 'hello');
     });
 
     test('encodes list to tag 12 + length + elements', () {
-      final result = manifest.encodeStandardMessage([true, false]);
+      final Uint8List result = manifest.encodeStandardMessage([true, false]);
       expect(result[0], 12); // _tagList
       expect(result[1], 2); // 2 elements
       expect(result[2], 1); // true
@@ -49,7 +49,7 @@ void main() {
     });
 
     test('encodes map to tag 13 + length + key-value pairs', () {
-      final result = manifest.encodeStandardMessage({'a': true});
+      final Uint8List result = manifest.encodeStandardMessage({'a': true});
       expect(result[0], 13); // _tagMap
       expect(result[1], 1); // 1 entry
       // Key: string "a"
@@ -62,13 +62,13 @@ void main() {
 
     test('encodes nested asset manifest structure', () {
       // Simulate a real asset manifest: Map<String, List<Map<String, Object>>>
-      final manifestData = {
+      final Map<String, List<Map<String, Object>>> manifestData = {
         'assets/logo.png': [
           {'asset': 'assets/logo.png'},
           {'asset': 'assets/2.0x/logo.png', 'dpr': 2.0},
         ],
       };
-      final result = manifest.encodeStandardMessage(manifestData);
+      final Uint8List result = manifest.encodeStandardMessage(manifestData);
       // Just verify it encodes without error and starts with map tag.
       expect(result[0], 13); // _tagMap
       expect(result.length, greaterThan(10));
@@ -76,12 +76,12 @@ void main() {
 
     test('writeSize encodes 1-byte, 2-byte, 4-byte sizes', () {
       // 1-byte: size < 254 — encode a short string
-      final short = manifest.encodeStandardMessage('hi');
+      final Uint8List short = manifest.encodeStandardMessage('hi');
       expect(short[1], 2); // size fits in 1 byte
 
       // 2-byte: size 254..65535 — encode a long string
-      final mediumStr = 'x' * 300;
-      final medium = manifest.encodeStandardMessage(mediumStr);
+      final String mediumStr = 'x' * 300;
+      final Uint8List medium = manifest.encodeStandardMessage(mediumStr);
       expect(medium[1], 254); // marker for 2-byte size
 
       // 4-byte: would need a huge string (65536+), skip for perf.
@@ -411,14 +411,17 @@ cat > "\$out"
     });
 
     test('header is host-independent (OS 255, MTIME 0, no flags)', () async {
-      final bytes = await _buildNotices(tempDir, notices: 'inline license');
+      final Uint8List bytes = await _buildNotices(
+        tempDir,
+        notices: 'inline license',
+      );
       _expectHostIndependentHeader(bytes);
       expect(gzip.decode(bytes), equals(utf8.encode('inline license')));
     });
 
     test('round-trips inline notices', () async {
       const text = 'Copyright 2026 Example\nAll rights reserved.';
-      final bytes = await _buildNotices(tempDir, notices: text);
+      final Uint8List bytes = await _buildNotices(tempDir, notices: text);
       _expectHostIndependentHeader(bytes);
       expect(utf8.decode(gzip.decode(bytes)), equals(text));
     });
@@ -427,7 +430,7 @@ cat > "\$out"
       final first = File('${tempDir.path}/LICENSE_A')..writeAsStringSync('AAA');
       final second = File('${tempDir.path}/LICENSE_B')
         ..writeAsStringSync('BBB');
-      final bytes = await _buildNotices(
+      final Uint8List bytes = await _buildNotices(
         tempDir,
         licenseFiles: [first.path, '${tempDir.path}/MISSING', second.path],
       );
@@ -436,7 +439,7 @@ cat > "\$out"
     });
 
     test('empty notices still decode to empty text', () async {
-      final bytes = await _buildNotices(tempDir);
+      final Uint8List bytes = await _buildNotices(tempDir);
       _expectHostIndependentHeader(bytes);
       expect(gzip.decode(bytes), isEmpty);
     });

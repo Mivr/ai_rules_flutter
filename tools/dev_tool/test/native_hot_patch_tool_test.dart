@@ -22,7 +22,10 @@ void main() {
 }''';
 
     test('reads every field', () {
-      final m = NativeHotPatchManifest.parse('m.hot_patch.json', valid);
+      final NativeHotPatchManifest m = NativeHotPatchManifest.parse(
+        'm.hot_patch.json',
+        valid,
+      );
       expect(m.library, 'bazel-out/arm64-dbg/bin/libadd.so');
       expect(m.sources, ['native/add.c', 'native/add.h']);
       expect(m.command, ['bazel-out/host/bin/patcher', '--crate', 'add']);
@@ -106,7 +109,7 @@ void main() {
         executionRoot: '/exec/root',
         run: (exe, args, {required workingDirectory}) async {
           calls.add((exe, args, workingDirectory));
-          final command = args.firstWhere(stdoutByCommand.containsKey);
+          final String command = args.firstWhere(stdoutByCommand.containsKey);
           return ProcessResult(1, 0, stdoutByCommand[command], '');
         },
       );
@@ -124,7 +127,8 @@ void main() {
     );
 
     test('runs the manifest command from the execution root', () async {
-      final t = toolAnsweringEach({
+      final ({List<(String, List<String>, String)> calls, NativePatchTool tool})
+      t = toolAnsweringEach({
         'snapshot': '{"status":"ok"}\n',
         'patch': '{"status":"unchanged"}\n',
       });
@@ -167,7 +171,8 @@ void main() {
 
     test('a snapshot that fails stops the launch with the builder\'s own '
         'sentence', () async {
-      final t = toolAnswering(
+      final ({List<(String, List<String>, String)> calls, NativePatchTool tool})
+      t = toolAnswering(
         1,
         '{"status":"failed","message":"test_api was built with debuginfo=0"}',
         stderr: 'noise',
@@ -262,7 +267,11 @@ void main() {
           'exited 2',
         ),
       ]) {
-        final result = await patchWith(exit, out, stderr: err);
+        final PatchBuilderAnswer result = await patchWith(
+          exit,
+          out,
+          stderr: err,
+        );
         expect(
           result,
           isA<PatchFailed>().having(

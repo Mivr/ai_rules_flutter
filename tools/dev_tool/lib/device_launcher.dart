@@ -22,6 +22,8 @@ import 'package:flutter_bazel_dev_tool/session.dart';
 import 'package:flutter_bazel_dev_tool/session_host.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 
+typedef _Connected = ({VmServiceClient? client, String? failureReason});
+
 /// What the VM-service connect produced: the client, the owned DDS, and why
 /// there is no client.
 typedef _VmConnection = ({
@@ -51,7 +53,7 @@ class DeviceLauncher {
   /// merely degraded. `--allow-no-vm-service` opts into continuing anyway.
 
   Future<DeviceSession> launch(Device device) async {
-    final appId = '${plan.target}_${device.name}'.replaceAll(
+    final String appId = '${plan.target}_${device.name}'.replaceAll(
       RegExp(r'[^a-zA-Z0-9]'),
       '_',
     );
@@ -73,11 +75,15 @@ class DeviceLauncher {
       'device': device.name,
     });
 
-    final appInstance = await _launchAppInstance(device, appId);
+    final AppInstance appInstance = await _launchAppInstance(device, appId);
     _announceWebUrl(device, appId);
-    final connection = await _connectVmService(device, appId, appInstance);
-    final vmClient = connection.client;
-    final dds = connection.dds;
+    final _VmConnection connection = await _connectVmService(
+      device,
+      appId,
+      appInstance,
+    );
+    final VmServiceClient? vmClient = connection.client;
+    final DartDevelopmentService? dds = connection.dds;
     await _ensureVmService(
       device,
       appInstance,
@@ -124,7 +130,7 @@ class DeviceLauncher {
     // Attached before the launch so startup output — including whatever an
     // app prints on its way to crashing before it ever binds a VM service —
     // is visible as it happens rather than after discovery gives up.
-    final logSink = appLogSinkFor(
+    final AppLogSink logSink = appLogSinkFor(
       protocol: host.protocol,
       appId: appId,
       deviceName: device.name,
@@ -159,7 +165,7 @@ class DeviceLauncher {
       // Not a nullable read to skip past: both of `WebDevice.launch`'s branches
       // set the URL before returning, so a null here is a device that launched
       // without serving anything.
-      final url = device.appUrl;
+      final String? url = device.appUrl;
       if (url == null) {
         throw DevToolException(
           'The browser launched on ${device.name} but the run does not know '
@@ -171,8 +177,8 @@ class DeviceLauncher {
       // wants to drive Chrome itself. Chrome picks the port (the tool passes
       // `--remote-debugging-port=0`), so nothing else can tell a client where
       // it is.
-      final cdpPort = device.cdpPort;
-      final page = device.pageWebSocketDebuggerUrl;
+      final int? cdpPort = device.cdpPort;
+      final String? page = device.pageWebSocketDebuggerUrl;
       plan.logger.info({
         'message': 'web_app_url',
         'text':
@@ -196,7 +202,7 @@ class DeviceLauncher {
   /// Connect to the VM service through DDS, retrying a slow browser.
   ///
   /// A null client means the service never answered; the reason says why.
-  Future<({VmServiceClient? client, String? failureReason})> _connectWithRetry(
+  Future<_Connected> _connectWithRetry(
     Device device,
     Uri serviceUri,
   ) async {
@@ -262,7 +268,7 @@ class DeviceLauncher {
     DartDevelopmentService? dds;
     String? vmFailureReason;
     if (appInstance.vmServiceUri != null) {
-      final rawUri = appInstance.vmServiceUri!;
+      final Uri rawUri = appInstance.vmServiceUri!;
       try {
         dds = await DartDevelopmentService.startDartDevelopmentService(
           rawUri,
@@ -283,7 +289,7 @@ class DeviceLauncher {
       }
 
       if (dds != null) {
-        final serviceUri = dds.uri!;
+        final Uri serviceUri = dds.uri!;
         plan.logger.info({
           'message': 'vm_service',
           'text': 'VM service (via DDS) at $serviceUri (${device.name})',
@@ -298,7 +304,10 @@ class DeviceLauncher {
           ),
           serviceUri,
         );
-        final connected = await _connectWithRetry(device, serviceUri);
+        final _Connected connected = await _connectWithRetry(
+          device,
+          serviceUri,
+        );
         vmClient = connected.client;
         vmFailureReason = connected.failureReason ?? vmFailureReason;
       }
@@ -306,7 +315,7 @@ class DeviceLauncher {
       // The reason carries the note for [_ensureVmService]; the log line
       // keeps the original sentence, with the note appended when there is
       // one, so a multi-device run still names the device.
-      final note = appInstance.vmServiceDiscoveryNote;
+      final String? note = appInstance.vmServiceDiscoveryNote;
       vmFailureReason = note ?? 'no VM service URI was discovered at launch';
       plan.logger.severe({
         'message': 'vm_service_uri_not_found',

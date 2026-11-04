@@ -148,7 +148,7 @@ class AppLogStream {
         // Snapshot before subscribing: any line added between the snapshot and
         // the subscription would otherwise be delivered twice.
         final replay = List<AppLogLine>.of(_buffer);
-        final replayedThrough = _nextCursor;
+        final int replayedThrough = _nextCursor;
         for (final line in replay) {
           out.add(line);
         }
@@ -188,22 +188,22 @@ class AppLogStream {
   /// line and reports the gap in [LogPage.missed]; it is never silently
   /// treated as if it had been contiguous.
   LogPage read(int cursor, {int limit = _maxPageSize}) {
-    final effectiveLimit = limit <= 0
+    final int effectiveLimit = limit <= 0
         ? 0
         : (limit > _maxPageSize ? _maxPageSize : limit);
     if (_buffer.isEmpty || effectiveLimit == 0) {
       return LogPage(lines: const [], nextCursor: _nextCursor, missed: 0);
     }
 
-    final oldest = _buffer.first.index;
+    final int oldest = _buffer.first.index;
 
     if (cursor < 0) {
       // Tail: take from the end, so a limit smaller than the requested window
       // keeps the *newest* lines rather than the oldest of that window.
-      final want = -cursor;
+      final int want = -cursor;
       final take = want < effectiveLimit ? want : effectiveLimit;
-      final all = _buffer.toList(growable: false);
-      final from = all.length > take ? all.length - take : 0;
+      final List<AppLogLine> all = _buffer.toList(growable: false);
+      final int from = all.length > take ? all.length - take : 0;
       return LogPage(
         lines: all.sublist(from),
         nextCursor: _nextCursor,
@@ -211,10 +211,10 @@ class AppLogStream {
       );
     }
 
-    final missed = cursor < oldest ? oldest - cursor : 0;
+    final int missed = cursor < oldest ? oldest - cursor : 0;
     final start = cursor < oldest ? oldest : cursor;
     final selected = <AppLogLine>[];
-    for (final line in _buffer) {
+    for (final AppLogLine line in _buffer) {
       if (line.index < start) continue;
       if (selected.length >= effectiveLimit) break;
       selected.add(line);
@@ -291,7 +291,7 @@ AppLogPump pumpProcessLines(
   String? Function(String line)? transform,
 }) {
   void handle(String line, {required bool isError}) {
-    final mapped = transform == null ? line : transform(line);
+    final String? mapped = transform == null ? line : transform(line);
     if (mapped == null) return;
     out.add(mapped, isError: isError);
   }

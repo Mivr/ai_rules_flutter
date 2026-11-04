@@ -1,6 +1,8 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
@@ -28,9 +30,9 @@ void main() {
     test(
       'a save during web assembly still drives a reload',
       () async {
-        final ws = await editableWorkspace('web_example');
-        final appMain = ws.file('lib/main.dart');
-        final original = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('web_example');
+        final File appMain = ws.file('lib/main.dart');
+        final String original = appMain.readAsStringSync();
         const anchor =
             "const Text('You have pushed the button this many times:')";
         expect(
@@ -46,7 +48,7 @@ void main() {
               'earlier run; restore it before running this test',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':app_wasm',
           device: 'chrome',
@@ -58,10 +60,10 @@ void main() {
           timeout: const Duration(minutes: 5),
         );
 
-        final before = dt.events.length;
+        final int before = dt.events.length;
         // An anchor that matched nothing would make this a copy, and every
         // assertion below would then hold against a tree nobody edited.
-        final edited = original.replaceFirst(
+        final String edited = original.replaceFirst(
           anchor,
           "const Text('WEB_WATCH_SAVED')",
         );
@@ -77,22 +79,23 @@ void main() {
         // sources — polled against a deadline generous enough that reaching it
         // means no event is coming, rather than a budget on how fast one
         // arrives.
-        final event = await dt.waitForEventWhere(
+        final Map<String, dynamic> event = await dt.waitForEventWhere(
           'app.reloadResult',
           after: before,
           what: 'a watcher-driven reload recompiling package:web_example/',
           timeout: const Duration(minutes: 4),
           test: (params) {
-            final result = (params['result'] as Map?) ?? const {};
+            final Map<dynamic, dynamic> result =
+                (params['result'] as Map?) ?? const {};
             if (result['succeeded'] != true) return true;
-            final files = result['filesRecompiled'];
+            final dynamic files = result['filesRecompiled'];
             return files is List &&
                 files.any(
                   (f) => f is String && f.startsWith('package:web_example/'),
                 );
           },
         );
-        final result = (event['params']!['result'] as Map)
+        final Map<String, dynamic> result = (event['params']!['result'] as Map)
             .cast<String, dynamic>();
 
         // NOT asserted to have succeeded, and the reason is the point of the
@@ -115,11 +118,11 @@ void main() {
         // And the page really is showing it. Not sufficient on its own — see
         // the note above — but a reload reported against a page that never
         // changed is exactly what this must not accept.
-        final start = await dt.waitForEvent(
+        final Map<String, dynamic> start = await dt.waitForEvent(
           'app.start',
           timeout: const Duration(minutes: 5),
         );
-        final appId = start['params']?['appId'] as String? ?? dt.appId!;
+        final String appId = start['params']?['appId'] as String? ?? dt.appId!;
         // The reload above happened before the app existed, so the agent
         // extension it is asked through is not up yet. Waited for by its own
         // events rather than guessed at.
@@ -128,7 +131,7 @@ void main() {
           timeout: const Duration(minutes: 5),
         );
         await dt.waitForHttpControl(timeout: const Duration(minutes: 2));
-        final found = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> found = await dt.httpCommand('app.waitFor', {
           'appId': appId,
           'text': 'WEB_WATCH_SAVED',
           'timeoutMs': '30000',

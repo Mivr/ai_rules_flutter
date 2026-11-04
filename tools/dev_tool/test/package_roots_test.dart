@@ -53,7 +53,7 @@ void main() {
   test(
     'moves a root off the per-command execroot onto the repository tree',
     () {
-      final result = stabilize([
+      final StabilizedPackageConfig result = stabilize([
         {
           'name': 'flutter',
           'rootUri': '../../../external/deps__flutter',
@@ -76,7 +76,7 @@ void main() {
     // These address live source through the compiler's `--filesystem-root`
     // machinery. Rewriting one to a path would break the mixed-scheme
     // resolution a source-assembled app depends on.
-    final result = stabilize([
+    final StabilizedPackageConfig result = stabilize([
       {'name': 'dep_lib', 'rootUri': 'org-dartlang-app:///dep_lib'},
     ]);
 
@@ -94,8 +94,8 @@ void main() {
     // Resolved, because the rewrite resolves the config's own directory first
     // and macOS puts the system temp root behind a `/var` -> `/private/var`
     // symlink.
-    final expected = appRoot.resolveSymbolicLinksSync();
-    final result = stabilize([
+    final String expected = appRoot.resolveSymbolicLinksSync();
+    final StabilizedPackageConfig result = stabilize([
       {'name': 'hello_world', 'rootUri': 'app.pkgsrcs', 'packageUri': 'lib/'},
     ]);
 
@@ -136,20 +136,20 @@ void main() {
   });
 
   test('rewrites every root in one pass', () {
-    final result = stabilize([
+    final StabilizedPackageConfig result = stabilize([
       {'name': 'flutter', 'rootUri': '../../../external/deps__flutter'},
       {'name': 'dep_lib', 'rootUri': 'org-dartlang-app:///dep_lib'},
       {'name': 'app', 'rootUri': '.'},
     ]);
 
     expect(result.repointed, ['flutter', 'app']);
-    final roots = {
+    final Map<dynamic, String> roots = {
       for (final p in packagesOf(result.path))
         p['name']: p['rootUri'] as String,
     };
     expect(roots['dep_lib'], 'org-dartlang-app:///dep_lib');
     expect(roots['flutter'], isNot(contains('execroot')));
-    final resolvedBin = bin.resolveSymbolicLinksSync();
+    final String resolvedBin = bin.resolveSymbolicLinksSync();
     expect(
       Uri.parse(roots['app']!).toFilePath(),
       anyOf(resolvedBin, '$resolvedBin/'),

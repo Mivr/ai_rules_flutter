@@ -12,6 +12,7 @@ import 'dart:typed_data';
 import 'macho_constants.dart';
 import 'macho_parse.dart'
     show
+        CommandRange,
         LoadCommand,
         buildLcSymtab,
         isSingleRangeLinkeditCommand,
@@ -103,9 +104,9 @@ StrippedSymbols stripLocalSymbols(
   Uint8List inputBytes,
   List<LoadCommand> commands,
 ) {
-  final symtabIndex = commands.indexWhere((c) => c.cmd == lcSymtab);
+  final int symtabIndex = commands.indexWhere((c) => c.cmd == lcSymtab);
   if (symtabIndex < 0) return StrippedSymbols(inputBytes, commands);
-  final table = _readSymtab(inputBytes, commands[symtabIndex]);
+  final _SymtabTable table = _readSymtab(inputBytes, commands[symtabIndex]);
   return _StripPlan(
     input: inputBytes,
     commands: commands,
@@ -139,15 +140,13 @@ _SymtabTable _readSymtab(Uint8List inputBytes, LoadCommand symtabLc) {
     throw const FormatException('Truncated LC_SYMTAB load command.');
   }
   final bd = ByteData.sublistView(symtabLc.bytes);
-  final symoff = bd.getUint32(8, Endian.little);
-  final nsyms = bd.getUint32(12, Endian.little);
-  final stroff = bd.getUint32(16, Endian.little);
-  final strsize = bd.getUint32(20, Endian.little);
+  final int symoff = bd.getUint32(8, Endian.little);
+  final int nsyms = bd.getUint32(12, Endian.little);
+  final int stroff = bd.getUint32(16, Endian.little);
+  final int strsize = bd.getUint32(20, Endian.little);
   if (symoff + nsyms * 16 > inputBytes.length ||
       stroff + strsize > inputBytes.length) {
-    throw const FormatException(
-      'LC_SYMTAB points past the end of the file.',
-    );
+    throw const FormatException('LC_SYMTAB points past the end of the file.');
   }
   final entries = <_NlistEntry>[];
   for (var i = 0; i < nsyms; i++) {
@@ -170,15 +169,15 @@ _NlistEntry _readNlistEntry(
   int strsize,
   int index,
 ) {
-  final at = symoff + index * 16;
+  final int at = symoff + index * 16;
   final bd = ByteData.sublistView(inputBytes, at, at + 16);
-  final strx = bd.getUint32(0, Endian.little);
+  final int strx = bd.getUint32(0, Endian.little);
   if (strx >= strsize) {
     throw FormatException(
       'Symbol table entry $index names a string past the string table.',
     );
   }
-  var end = stroff + strx;
+  int end = stroff + strx;
   while (end < stroff + strsize && inputBytes[end] != 0) {
     end++;
   }
@@ -228,18 +227,15 @@ class _KeptSymbols {
 
   /// Maps each survivor's old table index to its new one.
   Map<int, int> indexRemap() {
-    final kept = ordered;
+    final List<_NlistEntry> kept = ordered;
     return {for (var i = 0; i < kept.length; i++) kept[i].index: i};
   }
 
   /// The compacted symbol and string tables holding just the survivors.
   ({Uint8List symtab, _KeptStrings strings}) tables() {
-    final kept = ordered;
-    final strings = _buildKeptStrings(kept);
-    return (
-      symtab: _buildKeptSymtab(kept, strings.offsets),
-      strings: strings,
-    );
+    final List<_NlistEntry> kept = ordered;
+    final _KeptStrings strings = _buildKeptStrings(kept);
+    return (symtab: _buildKeptSymtab(kept, strings.offsets), strings: strings);
   }
 }
 
@@ -273,7 +269,7 @@ Uint8List _buildKeptSymtab(List<_NlistEntry> ordered, List<int> strOffsets) {
   final out = Uint8List(ordered.length * 16);
   final bd = ByteData.sublistView(out);
   for (var i = 0; i < ordered.length; i++) {
-    final entry = ordered[i];
+    final _NlistEntry entry = ordered[i];
     bd.setUint32(i * 16, strOffsets[i], Endian.little);
     bd.setUint8(i * 16 + 4, entry.nType);
     bd.setUint8(i * 16 + 5, entry.nSect);
@@ -322,13 +318,13 @@ _RemappedDysymtab _remapDysymtab(
     throw const FormatException('Truncated LC_DYSYMTAB load command.');
   }
   final bd = ByteData.sublistView(dysymtabLc.bytes);
-  final ntoc = bd.getUint32(36, Endian.little);
-  final nmodtab = bd.getUint32(44, Endian.little);
-  final nextrefsyms = bd.getUint32(52, Endian.little);
-  final indirectsymoff = bd.getUint32(56, Endian.little);
-  final nindirectsyms = bd.getUint32(60, Endian.little);
-  final nextrel = bd.getUint32(68, Endian.little);
-  final nlocrel = bd.getUint32(76, Endian.little);
+  final int ntoc = bd.getUint32(36, Endian.little);
+  final int nmodtab = bd.getUint32(44, Endian.little);
+  final int nextrefsyms = bd.getUint32(52, Endian.little);
+  final int indirectsymoff = bd.getUint32(56, Endian.little);
+  final int nindirectsyms = bd.getUint32(60, Endian.little);
+  final int nextrel = bd.getUint32(68, Endian.little);
+  final int nlocrel = bd.getUint32(76, Endian.little);
   if (ntoc != 0 ||
       nmodtab != 0 ||
       nextrefsyms != 0 ||
@@ -383,7 +379,7 @@ Uint8List _remapIndirectTable(
   final inBd = ByteData.sublistView(inputBytes, offset, offset + count * 4);
   final outBd = ByteData.sublistView(out);
   for (var i = 0; i < count; i++) {
-    final entry = inBd.getUint32(i * 4, Endian.little);
+    final int entry = inBd.getUint32(i * 4, Endian.little);
     if ((entry & indirectSymbolSpecialMask) != 0) {
       outBd.setUint32(i * 4, entry, Endian.little);
       continue;
@@ -397,7 +393,10 @@ Uint8List _remapIndirectTable(
 LoadCommand? _findLinkeditSegment(List<LoadCommand> commands) {
   for (final lc in commands) {
     if (lc.cmd != lcSegment64 || lc.bytes.length < 72) continue;
-    final name = ascii.decode(lc.bytes.sublist(8, 24)).split('\x00').first;
+    final String name = ascii
+        .decode(lc.bytes.sublist(8, 24))
+        .split('\x00')
+        .first;
     if (name == '__LINKEDIT') return lc;
   }
   return null;
@@ -441,7 +440,7 @@ void _collectTablePayloads(
       _collectNotePayload(inputBytes, lc, into, linkeditOff);
       continue;
     }
-    for (final range in movedTableRanges(lc)) {
+    for (final CommandRange range in movedTableRanges(lc)) {
       if (range.size == 0) continue;
       if (range.offset + range.size > inputBytes.length) {
         throw FormatException(
@@ -475,7 +474,7 @@ void _collectNotePayload(
   List<_LinkeditPayload> into,
   int linkeditOff,
 ) {
-  final range = notePayloadRange(lc);
+  final CommandRange range = notePayloadRange(lc);
   if (range.size == 0) return;
   if (!rangeWithinFile(range.offset, range.size, inputBytes.length)) {
     throw FormatException(
@@ -510,8 +509,9 @@ void _alignSignaturePayload(
 ) {
   for (final lc in commands) {
     if (lc.cmd != lcCodeSignature || lc.bytes.length < 16) continue;
-    final dataoff = ByteData.sublistView(lc.bytes).getUint32(8, Endian.little);
-    final datasize = ByteData.sublistView(lc.bytes)
+    final int dataoff = ByteData.sublistView(lc.bytes)
+        .getUint32(8, Endian.little);
+    final int datasize = ByteData.sublistView(lc.bytes)
         .getUint32(12, Endian.little);
     if (datasize == 0) continue;
     for (final payload in payloads) {
@@ -547,7 +547,7 @@ void _throwOnUnmovedLinkeditRanges(
         continue;
     }
     if (isSingleRangeLinkeditCommand(lc.cmd)) continue;
-    for (final range in accountedRangesOf(lc)) {
+    for (final CommandRange range in accountedRangesOf(lc)) {
       if (range.size == 0) continue;
       if (range.offset + range.size > linkeditOff) {
         throw FormatException(
@@ -573,7 +573,7 @@ void _checkNoPayloadPastLinkedit(
     if (lc.cmd != lcSegment64 || lc.bytes.length < 72) continue;
     if (identical(lc, linkedit)) continue;
     final bd = ByteData.sublistView(lc.bytes);
-    final name = segmentNameOf(lc);
+    final String name = segmentNameOf(lc);
     if (name == '__LINKEDIT') {
       throw const FormatException(
         'Cannot strip local symbols: more than one __LINKEDIT segment '
@@ -586,9 +586,9 @@ void _checkNoPayloadPastLinkedit(
       bd.getUint64(48, Endian.little),
       'segment $name',
     );
-    final nsects = bd.getUint32(64, Endian.little);
+    final int nsects = bd.getUint32(64, Endian.little);
     for (var s = 0; s < nsects; s++) {
-      final sectOff = 72 + s * 80;
+      final int sectOff = 72 + s * 80;
       if (sectOff + 80 > lc.bytes.length) break;
       final sectBd = ByteData.sublistView(lc.bytes, sectOff, sectOff + 80);
       if (isZeroFillSectionType(sectionTypeOf(bd, sectOff))) {
@@ -704,7 +704,7 @@ class _StripPlan {
         kept.undefined.length,
       );
     }
-    final linkedit = _findLinkeditSegment(commands);
+    final LoadCommand? linkedit = _findLinkeditSegment(commands);
     if (linkedit == null) return _layInPlace(remapped);
     return _layCompacting(linkedit, remapped);
   }
@@ -719,8 +719,8 @@ class _StripPlan {
   /// otherwise launder a past-the-end input range into looking valid to the
   /// output audit.
   void _throwOnInputRangesPastEnd() {
-    for (final lc in commands) {
-      for (final range in accountedRangesOf(lc)) {
+    for (final LoadCommand lc in commands) {
+      for (final CommandRange range in accountedRangesOf(lc)) {
         if (range.size == 0) continue;
         if (!rangeWithinFile(range.offset, range.size, input.length)) {
           throw FormatException(
@@ -737,9 +737,9 @@ class _StripPlan {
   /// freed tail is zeroed. Used only for binaries without a `__LINKEDIT`
   /// segment.
   StrippedSymbols _layInPlace(_RemappedDysymtab? remapped) {
-    final newSymtab = tables.symtab;
-    final newStrings = tables.strings.bytes;
-    final oldEnd = table.stroff + table.strsize;
+    final Uint8List newSymtab = tables.symtab;
+    final Uint8List newStrings = tables.strings.bytes;
+    final int oldEnd = table.stroff + table.strsize;
     if (table.symoff + newSymtab.length + newStrings.length > oldEnd) {
       throw const FormatException(
         'Cannot strip local symbols without a __LINKEDIT segment to shrink.',
@@ -748,7 +748,7 @@ class _StripPlan {
     _throwOnInPlaceOverlap(remapped);
     final out = Uint8List.fromList(input);
     out.setRange(table.symoff, table.symoff + newSymtab.length, newSymtab);
-    final newStroff = table.symoff + newSymtab.length;
+    final int newStroff = table.symoff + newSymtab.length;
     out.setRange(newStroff, newStroff + newStrings.length, newStrings);
     out.fillRange(newStroff + newStrings.length, oldEnd, 0);
     if (remapped?.indirectBytes != null) {
@@ -793,10 +793,10 @@ class _StripPlan {
   /// live where the old tables were not. The rewritten tables must also never
   /// overlap each other.
   void _throwOnInPlaceOverlap(_RemappedDysymtab? remapped) {
-    final oldEnd = table.stroff + table.strsize;
-    final oldSize = oldEnd - table.symoff;
-    final indirectLen = remapped?.indirectBytes?.length ?? 0;
-    final indirectOff = remapped?.indirectOffset ?? 0;
+    final int oldEnd = table.stroff + table.strsize;
+    final int oldSize = oldEnd - table.symoff;
+    final int indirectLen = remapped?.indirectBytes?.length ?? 0;
+    final int indirectOff = remapped?.indirectOffset ?? 0;
     final touched = InPlaceTouchedSpans(
       tableOffset: table.symoff,
       tableSize: oldSize,
@@ -804,7 +804,7 @@ class _StripPlan {
       indirectSize: indirectLen,
     );
     for (var i = 0; i < commands.length; i++) {
-      final lc = commands[i];
+      final LoadCommand lc = commands[i];
       if (lc.cmd == lcSymtab || i == dysymtabIndex) {
         continue;
       }
@@ -812,14 +812,9 @@ class _StripPlan {
         throwOnInPlaceSegmentOverlap(lc, touched);
         continue;
       }
-      for (final range in accountedRangesOf(lc)) {
+      for (final CommandRange range in accountedRangesOf(lc)) {
         if (range.size == 0) continue;
-        if (rangesIntersect(
-              range.offset,
-              range.size,
-              table.symoff,
-              oldSize,
-            ) ||
+        if (rangesIntersect(range.offset, range.size, table.symoff, oldSize) ||
             (indirectLen > 0 &&
                 rangesIntersect(
                   range.offset,
@@ -836,7 +831,7 @@ class _StripPlan {
       }
     }
     if (remapped == null || remapped.indirectBytes == null) return;
-    final newStrOff = table.symoff + tables.symtab.length;
+    final int newStrOff = table.symoff + tables.symtab.length;
     if (rangesIntersect(
           remapped.indirectOffset,
           remapped.indirectBytes!.length,
@@ -865,7 +860,7 @@ class _StripPlan {
     _RemappedDysymtab? remapped,
   ) {
     final linkeditBd = ByteData.sublistView(linkedit.bytes);
-    final linkeditOff = linkeditBd.getUint64(40, Endian.little).toInt();
+    final int linkeditOff = linkeditBd.getUint64(40, Endian.little).toInt();
     _checkNoPayloadPastLinkedit(commands, linkedit, linkeditOff);
     final symPayload = _LinkeditPayload(
       oldOffset: table.symoff,
@@ -890,7 +885,7 @@ class _StripPlan {
     _collectTablePayloads(input, commands, payloads, linkeditOff);
     _alignSignaturePayload(commands, payloads);
     _throwOnUnmovedLinkeditRanges(commands, linkeditOff);
-    final newLinkeditSize = _layoutLinkeditPayloads(
+    final int newLinkeditSize = _layoutLinkeditPayloads(
       payloads,
       linkeditOff,
       input.length,
@@ -948,7 +943,7 @@ class _StripPlan {
     var seenSymtab = false;
     var seenDysymtab = false;
     for (var i = 0; i < commands.length; i++) {
-      final lc = commands[i];
+      final LoadCommand lc = commands[i];
       if (i == symtabIndex && !seenSymtab) {
         seenSymtab = true;
         updated.add(
@@ -965,9 +960,8 @@ class _StripPlan {
         seenDysymtab = true;
         final bytes = Uint8List.fromList(remapped.commandBytes);
         if (remapped.indirectBytes != null) {
-          ByteData.sublistView(
-            bytes,
-          ).setUint32(56, newIndirectOff, Endian.little);
+          ByteData.sublistView(bytes)
+              .setUint32(56, newIndirectOff, Endian.little);
         }
         updated.add(LoadCommand(lc.cmd, bytes));
         continue;
@@ -1003,9 +997,9 @@ class _StripPlan {
 LoadCommand _relocatedTableCommand(LoadCommand lc, Map<int, int> movedOffsets) {
   final bytes = Uint8List.fromList(lc.bytes);
   final bd = ByteData.sublistView(bytes);
-  for (final range in movedTableRanges(lc)) {
+  for (final CommandRange range in movedTableRanges(lc)) {
     if (range.size == 0) continue;
-    final fresh = movedOffsets[range.offset];
+    final int? fresh = movedOffsets[range.offset];
     if (fresh == null) {
       throw FormatException(
         'Cannot strip local symbols: load command '

@@ -80,7 +80,7 @@ class ShutdownSignalHandler {
       signals.listen(_handle);
 
   Future<void> _handle(ProcessSignal signal) async {
-    final code = exitCodeForSignal(signal);
+    final int code = exitCodeForSignal(signal);
     if (_shuttingDown) {
       // Asked twice. The graceful path is bounded and does finish, but a bound
       // is still seconds of a wedged `adb` or an unresponsive browser, and

@@ -42,7 +42,7 @@ Outcome runOf(
         'test': {'id': id, 'name': name},
       }),
     );
-    final error = errors[name];
+    final String? error = errors[name];
     if (error != null) {
       outcome.consume(
         json.encode({
@@ -81,7 +81,7 @@ void main() {
         // `passed` is empty here — every test that executed failed — and
         // reading that as "nothing ran" sends the reader off to check paths
         // and tags that are correct.
-        final outcome = runOf({'the one test': 'fail'}, verdict: false);
+        final Outcome outcome = runOf({'the one test': 'fail'}, verdict: false);
 
         expect(outcome.executed, 1, reason: 'a failing test executed');
         expect(outcome.diagnosis, isNotNull);
@@ -96,7 +96,7 @@ void main() {
       // The other branch: with `passed` empty and skips present, an all-skipped
       // message would claim nothing executed while a failure sits in the same
       // report.
-      final outcome = runOf({
+      final Outcome outcome = runOf({
         'failing': 'fail',
         'skipped one': 'skip',
         'skipped two': 'skip',
@@ -110,7 +110,7 @@ void main() {
 
     test('nothing selected is still reported as nothing selected', () {
       // No events at all between the runner starting and its verdict.
-      final outcome = runOf(const {}, exitCode: 79);
+      final Outcome outcome = runOf(const {}, exitCode: 79);
 
       expect(outcome.executed, 0);
       expect(outcome.diagnosis, contains('nothing was selected to run'));
@@ -119,7 +119,10 @@ void main() {
 
     test('an all-skipped run is refused despite dart test exiting 0', () {
       // The hole this runner exists for: `dart test` calls this a pass.
-      final outcome = runOf({'macOS only': 'skip', 'also macOS only': 'skip'});
+      final Outcome outcome = runOf({
+        'macOS only': 'skip',
+        'also macOS only': 'skip',
+      });
 
       expect(outcome.executed, 0);
       expect(outcome.diagnosis, contains('not one test actually ran'));
@@ -130,7 +133,7 @@ void main() {
       // No `done` event: the runner died partway. The count quoted back must
       // be everything that executed, since the prefix is what the reader is
       // being told not to trust.
-      final outcome = runOf(
+      final Outcome outcome = runOf(
         {'passing': 'pass', 'failing': 'fail'},
         verdict: null,
         exitCode: 255,
@@ -145,14 +148,14 @@ void main() {
       () {
         // A stray async error or a late teardown throws after the test's own
         // `testDone`, so the run fails with every test green.
-        final outcome = runOf({'passing': 'pass'}, verdict: false);
+        final Outcome outcome = runOf({'passing': 'pass'}, verdict: false);
 
         expect(outcome.diagnosis, contains('without a failing test'));
       },
     );
 
     test('a real pass has no diagnosis', () {
-      final outcome = runOf({'passing': 'pass', 'skipped': 'skip'});
+      final Outcome outcome = runOf({'passing': 'pass', 'skipped': 'skip'});
 
       expect(outcome.ok, isTrue);
       expect(outcome.diagnosis, isNull);
@@ -186,7 +189,7 @@ void main() {
 
   group('Outcome.summary', () {
     test('counts passed separately from failed', () {
-      final outcome = runOf(
+      final Outcome outcome = runOf(
         {
           'passing': 'pass',
           'failing': 'fail',
@@ -313,7 +316,7 @@ void main() {
     }
 
     test('a declared skip is listed with the reason it declared', () {
-      final outcome = declarationSkip('no Android device attached');
+      final Outcome outcome = declarationSkip('no Android device attached');
       expect(outcome.skipReport, [
         'e2e: skipped — Android e2e renders — no Android device attached',
       ]);
@@ -390,7 +393,7 @@ void main() {
   /// `--require-ran`: a passing run still fails unless the named tests ran.
   group('Outcome.requireRan', () {
     test('a run that ran the required tests still passes', () {
-      final outcome = runOf(
+      final Outcome outcome = runOf(
         {
           'iOS Simulator e2e renders': 'pass',
           'macOS e2e renders': 'pass',
@@ -403,7 +406,7 @@ void main() {
     });
 
     test('several substrings must each be met', () {
-      final passing = runOf(
+      final Outcome passing = runOf(
         {
           'iOS Simulator e2e renders': 'pass',
           'asset reload on iOS': 'pass',
@@ -412,7 +415,7 @@ void main() {
       );
       expect(passing.ok, isTrue);
 
-      final missing = runOf(
+      final Outcome missing = runOf(
         {
           'iOS Simulator e2e renders': 'pass',
           'macOS e2e renders': 'pass',
@@ -425,7 +428,7 @@ void main() {
     });
 
     test('an unmatched substring names itself and says nothing matched', () {
-      final outcome = runOf(
+      final Outcome outcome = runOf(
         {
           'macOS e2e renders': 'pass',
         },
@@ -469,7 +472,7 @@ void main() {
     test('a matching skip poisons a matching pass', () {
       // The suite ran something with the name in it, but not all of it: one
       // of the required tests never executed, so the requirement is unmet.
-      final outcome = runOf(
+      final Outcome outcome = runOf(
         {
           'iOS Simulator e2e renders': 'pass',
           'iOS Simulator e2e restarts': 'skip',
@@ -482,7 +485,7 @@ void main() {
     });
 
     test('a failed match refuses the run and is still named', () {
-      final outcome = runOf(
+      final Outcome outcome = runOf(
         {
           'iOS Simulator e2e renders': 'fail',
         },
@@ -502,7 +505,7 @@ void main() {
         // Round 1 on macOS: with `--require-ran=iOS` unmet, two macOS
         // failures printed only a name — the early requirement return hid
         // what they said. Every failing outcome names every failed test.
-        final outcome = runOf(
+        final Outcome outcome = runOf(
           {
             'macOS e2e renders': 'fail',
             'asset reload e2e reaches the app': 'fail',
@@ -528,7 +531,7 @@ void main() {
     );
 
     test('a truncated run still names the failures it saw', () {
-      final outcome = runOf(
+      final Outcome outcome = runOf(
         {
           'macOS e2e renders': 'fail',
           'iOS Simulator e2e renders': 'pass',
@@ -550,7 +553,7 @@ void main() {
     });
 
     test('matching is case-sensitive', () {
-      final outcome = runOf(
+      final Outcome outcome = runOf(
         {
           'iOS Simulator e2e renders': 'pass',
         },
@@ -587,12 +590,13 @@ void main() {
   /// through verbatim and in order.
   group('splitRunnerArgs', () {
     test('consumes require-ran and forwards the rest untouched', () {
-      final split = splitRunnerArgs([
-        '--require-ran=iOS',
-        '--plain-name=macOS e2e',
-        'test/e2e/plugin_example_e2e_test.dart',
-        '--require-ran=asset',
-      ]);
+      final ({List<String> forwarded, List<String> requireRan}) split =
+          splitRunnerArgs([
+            '--require-ran=iOS',
+            '--plain-name=macOS e2e',
+            'test/e2e/plugin_example_e2e_test.dart',
+            '--require-ran=asset',
+          ]);
 
       expect(split.requireRan, ['iOS', 'asset']);
       expect(split.forwarded, [
@@ -602,7 +606,8 @@ void main() {
     });
 
     test('no flag means no requirements and identical forwarding', () {
-      final split = splitRunnerArgs(['--tags=e2e', 'test/e2e/']);
+      final ({List<String> forwarded, List<String> requireRan}) split =
+          splitRunnerArgs(['--tags=e2e', 'test/e2e/']);
 
       expect(split.requireRan, isEmpty);
       expect(split.forwarded, ['--tags=e2e', 'test/e2e/']);

@@ -30,6 +30,7 @@ library;
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 
 final DynamicLibrary _libc = DynamicLibrary.process();
 
@@ -77,7 +78,7 @@ void main(List<String> args) {
   }
 
   if (_setpgid(0, 0) != 0) {
-    final errno = _errnoLocation().value;
+    final int errno = _errnoLocation().value;
     stderr.writeln(
       'process_group_exec: could not give ${args.first} a process group of '
       'its own: ${_describe(errno)}',
@@ -85,7 +86,7 @@ void main(List<String> args) {
     exit(71); // EX_OSERR
   }
 
-  final argv = _malloc(
+  final Pointer<Pointer<Uint8>> argv = _malloc(
     sizeOf<Pointer<Uint8>>() * (args.length + 1),
   ).cast<Pointer<Uint8>>();
   for (var i = 0; i < args.length; i++) {
@@ -95,7 +96,7 @@ void main(List<String> args) {
 
   // Returns only if the program could not be started.
   _execvp(argv[0], argv);
-  final errno = _errnoLocation().value;
+  final int errno = _errnoLocation().value;
   stderr.writeln(
     'process_group_exec: could not run ${args.first}: ${_describe(errno)}',
   );
@@ -106,8 +107,8 @@ void main(List<String> args) {
 /// [value] as a NUL-terminated string in memory this process never frees:
 /// it either becomes the program or exits.
 Pointer<Uint8> _cString(String value) {
-  final bytes = utf8.encode(value);
-  final pointer = _malloc(bytes.length + 1).cast<Uint8>();
+  final Uint8List bytes = utf8.encode(value);
+  final Pointer<Uint8> pointer = _malloc(bytes.length + 1).cast<Uint8>();
   pointer.asTypedList(bytes.length + 1)
     ..setAll(0, bytes)
     ..[bytes.length] = 0;
@@ -115,7 +116,7 @@ Pointer<Uint8> _cString(String value) {
 }
 
 String _describe(int errno) {
-  final message = _strerror(errno);
+  final Pointer<Uint8> message = _strerror(errno);
   var length = 0;
   while (message[length] != 0) {
     length++;

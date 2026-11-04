@@ -28,6 +28,8 @@ import 'package:flutter_bazel_dev_tool/hot_reload/compiler.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/session_reloader.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
 
+typedef _TargetUnits = List<SessionReloader>;
+
 /// Outcome of a reload or restart request.
 sealed class ReloadOutcome {
   const new();
@@ -123,9 +125,9 @@ class ReloadOrchestrator {
   /// the process has, and under-claiming costs one redundant re-send on the
   /// next reload rather than a dropped edit.
   void syncLiveApps(List<AppInstance> live) {
-    final byId = {for (final a in live) a.id: a};
-    for (final unit in units) {
-      final replacement = byId[unit.id];
+    final Map<String, AppInstance> byId = {for (final a in live) a.id: a};
+    for (final SessionReloader unit in units) {
+      final AppInstance? replacement = byId[unit.id];
       unit.connected = replacement != null;
       if (replacement != null) unit.app = replacement;
     }
@@ -133,7 +135,7 @@ class ReloadOrchestrator {
 
   /// The unit driving [app], which must be one of [units].
   SessionReloader unitFor(AppInstance app) {
-    for (final u in units) {
+    for (final SessionReloader u in units) {
       if (u.app.id == app.id) return u;
     }
     throw StateError(
@@ -183,10 +185,10 @@ class ReloadOrchestrator {
     }
     // Resolved before any work, so an unknown target fails loudly rather than
     // after a compile has already run.
-    final targetUnits = [for (final t in targets) unitFor(t)];
+    final _TargetUnits targetUnits = [for (final t in targets) unitFor(t)];
 
     // One snapshot, shared by every target: what disk said at this instant.
-    final snap = workspace.snapshot();
+    final SourceVersions snap = workspace.snapshot();
     final isRestart = mode == ApplyMode.hotRestart;
 
     // What each target lacks, judged against its own record. Deliberately not
@@ -201,7 +203,7 @@ class ReloadOrchestrator {
             : u.pendingAt(snap, declared: declared),
     };
 
-    final working = [
+    final _TargetUnits working = [
       for (final u in targetUnits)
         if (isRestart || work[u]!.isNotEmpty) u,
     ];
@@ -214,18 +216,18 @@ class ReloadOrchestrator {
       // from the unit rather than re-derived, so the words are the compiler's
       // own.
       for (final unit in targetUnits) {
-        final failure = unit.baselineFailure;
+        final String? failure = unit.baselineFailure;
         if (failure != null) return ReloadCompileFailed(failure);
       }
       return const ReloadNoChange();
     }
 
     // Judged before anything is applied, against the still-old records.
-    final isEmpty = working.every(
+    final bool isEmpty = working.every(
       (u) => work[u]!.every((f) => snap.versionOf(f) == u.applied.versionOf(f)),
     );
 
-    final compiled = await Future.wait([
+    final List<CompileOutcome> compiled = await Future.wait([
       for (final u in working)
         u.compile(invalidated: work[u]!, entrypoint: entrypoint, mode: mode),
     ]);
@@ -233,13 +235,15 @@ class ReloadOrchestrator {
     // Every target compiles the same disk, so a failure is a property of the
     // source and they agree in practice — but the rule is atomic regardless:
     // nothing is applied anywhere, and every pending compile is discarded.
-    final failure = compiled.whereType<CompileFailed>().firstOrNull;
+    final CompileFailed? failure = compiled
+        .whereType<CompileFailed>()
+        .firstOrNull;
     if (failure != null) {
       await Future.wait([for (final u in working) u.discard()]);
       return ReloadCompileFailed(failure.diagnostics);
     }
 
-    final results = await Future.wait([
+    final List<ApplyOutcome> results = await Future.wait([
       for (var i = 0; i < working.length; i++)
         working[i].applyAndSettle(
           (compiled[i] as CompileSucceeded).dillPath,
@@ -252,9 +256,7 @@ class ReloadOrchestrator {
     final perApp = <String, ApplyOutcome>{
       for (var i = 0; i < working.length; i++) working[i].id: results[i],
     };
-    if (!results.every((r) => r is Applied)) {
-      return ReloadApplyFailed(perApp);
-    }
+    if (!results.every((r) => r is Applied)) return ReloadApplyFailed(perApp);
 
     return ReloadApplied(
       filesRecompiled: {for (final u in working) ...work[u]!},

@@ -16,6 +16,8 @@ import 'package:flutter_bazel_dev_tool/temp_dir.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:path/path.dart' as p;
 
+typedef _Unpacked = ({String appPath, Directory dir});
+
 final _logger = Logger('dev_tool.device');
 
 /// macOS desktop device.
@@ -84,7 +86,7 @@ class MacOSDevice extends Device {
   /// Undo a launch that did not return: the app it started, which runs out of
   /// the extracted copy, and then that copy.
   Future<void> releaseLaunch() async {
-    final process = _launching;
+    final Process? process = _launching;
     _launching = null;
     if (process != null) {
       await stopProcess('macOS app', process, teardownBound);
@@ -96,7 +98,7 @@ class MacOSDevice extends Device {
     // Extract .app from .zip if needed (Bazel macOS bundles are zipped).
     String resolvedPath = appPath;
     if (appPath.endsWith('.zip')) {
-      final unpacked = await _extractAppFromZip(appPath);
+      final _Unpacked unpacked = await _extractAppFromZip(appPath);
       resolvedPath = unpacked.appPath;
       _scratch.hold(unpacked.dir);
     }
@@ -105,19 +107,25 @@ class MacOSDevice extends Device {
     String executable;
     if (resolvedPath.endsWith('.app')) {
       // The executable is at Contents/MacOS/<name>.
-      final bundleName = resolvedPath.split('/').last.replaceAll('.app', '');
+      final String bundleName = resolvedPath
+          .split('/')
+          .last
+          .replaceAll('.app', '');
       executable = '$resolvedPath/Contents/MacOS/$bundleName';
     } else {
       executable = resolvedPath;
     }
 
-    final process = _launching = await _startProcess(
+    final Process process = _launching = await _startProcess(
       executable,
       [],
     );
 
-    final logs = startProcessLogs(process, onLog);
-    final discovery = await discoverDesktopVmService(logs, process);
+    final AppLogStream logs = startProcessLogs(process, onLog);
+    final VmServiceDiscovery discovery = await discoverDesktopVmService(
+      logs,
+      process,
+    );
     if (resolvedPath.endsWith('.app')) {
       await _bringToFront(resolvedPath, process.pid);
     }
@@ -163,7 +171,7 @@ class MacOSDevice extends Device {
   Future<void> _bringToFront(String bundlePath, int pid) async {
     final failure = <String, Object?>{'bundle': bundlePath, 'pid': pid};
     try {
-      final opened = await _runProcess('open', [bundlePath]);
+      final ProcessResult opened = await _runProcess('open', [bundlePath]);
       if (opened.exitCode == 0) return;
       failure['openExitCode'] = opened.exitCode;
       failure['openStderr'] = '${opened.stderr}'.trim();
@@ -171,7 +179,7 @@ class MacOSDevice extends Device {
       failure['openError'] = '$e';
     }
     try {
-      final result = await runProcessBounded(
+      final ProcessResult result = await runProcessBounded(
         (exe, args, _) =>
             (_injectedActivationStart ?? Process.start)(exe, args),
         'osascript',
@@ -245,7 +253,7 @@ class MacOSDevice extends Device {
     if (vmClient != null) {
       return vmClient.screenshot(outputPath);
     }
-    final resolved = resolveRunfileWithManifest(
+    final ResolvedRunfile? resolved = resolveRunfileWithManifest(
       'rules_flutter/tools/macos_screenshot/screenshot',
     );
     if (resolved == null) {
@@ -254,7 +262,7 @@ class MacOSDevice extends Device {
         'Build first: bazel build //tools/dev_tool:flutter_bazel',
       );
     }
-    final result = await runProcessBounded(
+    final ProcessResult result = await runProcessBounded(
       _startScreenshotProcess,
       resolved.path,
       [
@@ -289,12 +297,12 @@ class MacOSDevice extends Device {
   ///
   /// Returns the directory as well as the bundle: the caller runs the app out
   /// of it, so it is the caller — not this function — that knows when it can go.
-  Future<({String appPath, Directory dir})> _extractAppFromZip(
+  Future<_Unpacked> _extractAppFromZip(
     String zipPath,
   ) async {
-    final tempDir = await createTempDir('flutter_macos_');
+    final Directory tempDir = await createTempDir('flutter_macos_');
     try {
-      final result = await _runProcess('unzip', [
+      final ProcessResult result = await _runProcess('unzip', [
         '-oq',
         zipPath,
         '-d',
@@ -304,7 +312,7 @@ class MacOSDevice extends Device {
         throw StateError('Failed to extract zip: ${result.stderr}');
       }
       // Find the .app bundle inside.
-      final apps = tempDir
+      final List<FileSystemEntity> apps = tempDir
           .listSync()
           .where((e) => e.path.endsWith('.app'))
           .toList();
@@ -365,7 +373,7 @@ class LinuxDevice extends Device {
 
   /// Undo a launch that did not return: kill the app it started.
   Future<void> releaseLaunch() async {
-    final process = _launching;
+    final Process? process = _launching;
     _launching = null;
     if (process != null) {
       await stopProcess('Linux app', process, teardownBound);
@@ -376,13 +384,16 @@ class LinuxDevice extends Device {
     // Bundle directories contain the executable at <dir>/<name>.
     String executable = appPath;
     if (FileSystemEntity.isDirectorySync(appPath)) {
-      final dirName = p.basename(appPath);
+      final String dirName = p.basename(appPath);
       executable = p.join(appPath, dirName);
     }
 
-    final process = _launching = await _startProcess(executable, []);
-    final logs = startProcessLogs(process, onLog);
-    final discovery = await discoverDesktopVmService(logs, process);
+    final Process process = _launching = await _startProcess(executable, []);
+    final AppLogStream logs = startProcessLogs(process, onLog);
+    final VmServiceDiscovery discovery = await discoverDesktopVmService(
+      logs,
+      process,
+    );
     // The shutdown may have arrived while discovery ran: refuse the launch
     // rather than hand back an app nobody will stop.
     throwIfLaunchAbandoned();
@@ -411,7 +422,7 @@ class LinuxDevice extends Device {
     if (vmClient != null) {
       return vmClient.screenshot(outputPath);
     }
-    final result = await _runProcess('scrot', [outputPath]);
+    final ProcessResult result = await _runProcess('scrot', [outputPath]);
     if (result.exitCode != 0) {
       throw StateError('scrot failed: ${result.stderr}');
     }
@@ -478,7 +489,7 @@ class WindowsDevice extends Device {
 
   /// Undo a launch that did not return: kill the staged app it started.
   Future<void> releaseLaunch() async {
-    final process = _launching;
+    final Process? process = _launching;
     _launching = null;
     if (process != null) {
       await stopProcess('Windows app', process, teardownBound);
@@ -494,18 +505,21 @@ class WindowsDevice extends Device {
     // action does exactly that on any rebuild, which `app.restart` performs
     // before it swaps the kernel in. macOS and Linux let a running image be
     // unlinked and replaced, so only Windows needs the copy.
-    final launchPath = _stage(appPath);
+    final String launchPath = _stage(appPath);
 
     // Bundle directories contain the executable at <dir>/<name>.exe.
     String executable = launchPath;
     if (FileSystemEntity.isDirectorySync(launchPath)) {
-      final dirName = p.basename(launchPath);
+      final String dirName = p.basename(launchPath);
       executable = p.join(launchPath, '$dirName.exe');
     }
 
-    final process = _launching = await _startProcess(executable, []);
-    final logs = startProcessLogs(process, onLog);
-    final discovery = await discoverDesktopVmService(logs, process);
+    final Process process = _launching = await _startProcess(executable, []);
+    final AppLogStream logs = startProcessLogs(process, onLog);
+    final VmServiceDiscovery discovery = await discoverDesktopVmService(
+      logs,
+      process,
+    );
     // The shutdown may have arrived while discovery ran: refuse the launch
     // rather than hand back an app nobody will stop.
     throwIfLaunchAbandoned();
@@ -526,21 +540,23 @@ class WindowsDevice extends Device {
   /// the previous one is removed, so a relaunch never runs yesterday's assets.
   String _stage(String appPath) {
     _clearStaging();
-    final staging = _makeStagingDir();
+    final Directory staging = _makeStagingDir();
     _staged = staging;
 
-    final source = FileSystemEntity.typeSync(appPath);
+    final FileSystemEntityType source = FileSystemEntity.typeSync(appPath);
     if (source != FileSystemEntityType.directory) {
-      final dest = p.join(staging.path, p.basename(appPath));
+      final String dest = p.join(staging.path, p.basename(appPath));
       File(appPath).copySync(dest);
       return dest;
     }
 
     final dest = Directory(p.join(staging.path, p.basename(appPath)))
       ..createSync(recursive: true);
-    for (final entity in Directory(appPath).listSync(recursive: true)) {
-      final relative = p.relative(entity.path, from: appPath);
-      final target = p.join(dest.path, relative);
+    for (final FileSystemEntity entity in Directory(
+      appPath,
+    ).listSync(recursive: true)) {
+      final String relative = p.relative(entity.path, from: appPath);
+      final String target = p.join(dest.path, relative);
       if (entity is Directory) {
         Directory(target).createSync(recursive: true);
       } else if (entity is File) {
@@ -552,7 +568,7 @@ class WindowsDevice extends Device {
   }
 
   void _clearStaging() {
-    final staged = _staged;
+    final Directory? staged = _staged;
     _staged = null;
     if (staged != null && staged.existsSync()) {
       staged.deleteSync(recursive: true);
@@ -597,7 +613,7 @@ class WindowsDevice extends Device {
     }
     // GDI CopyFromScreen cannot capture D3D/Flutter surfaces.
     // Use DXGI Desktop Duplication via the bundled native helper.
-    final resolved = resolveRunfileWithManifest(
+    final ResolvedRunfile? resolved = resolveRunfileWithManifest(
       'rules_flutter/tools/windows_screenshot/screenshot',
     );
     if (resolved == null) {
@@ -606,7 +622,7 @@ class WindowsDevice extends Device {
         'Build first: bazel build //tools/dev_tool:flutter_bazel',
       );
     }
-    final result = await runProcessBounded(
+    final ProcessResult result = await runProcessBounded(
       _startScreenshotProcess,
       resolved.path,
       [outputPath],

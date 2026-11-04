@@ -129,7 +129,7 @@ class NativeLibsWatch {
   /// and then its *contents* decide — a rebuild that produced identical bytes is
   /// not a change, and reporting one would withhold a reload that was safe.
   Future<NativeLibsVerdict> verdict() async {
-    final movedContracts = await _moved(_allContracts);
+    final List<String> movedContracts = await _moved(_allContracts);
     if (movedContracts.isNotEmpty) {
       // Named by library rather than by contract file alone: the reader's first
       // question is which of their native deps this is about, and a generator's
@@ -146,17 +146,17 @@ class NativeLibsWatch {
     // A library is behind either because a build moved it, or because one of
     // its own sources moved and nothing rebuilt it — which is the only signal
     // there is in an app whose reload runs no build.
-    final movedSources = await _moved(
+    final List<String> movedSources = await _moved(
       sources.values.expand((files) => files),
     );
-    final movedLibs = {
+    final List<String> movedLibs = {
       ...await _moved(contracts.keys),
       for (final entry in sources.entries)
         if (entry.value.any(movedSources.contains)) entry.key,
     }.toList()..sort();
     if (movedLibs.isEmpty) return const NativeLibsCurrent();
 
-    final unverifiable = [
+    final List<String> unverifiable = [
       for (final lib in movedLibs)
         if (contracts[lib]!.isEmpty) lib,
     ];
@@ -179,7 +179,7 @@ class NativeLibsWatch {
   /// bytes and withhold over an image that caught up long before, and that next
   /// reload need not have touched anything native at all.
   Future<void> markPatched(Set<String> fileNames) async {
-    final patched = [
+    final List<String> patched = [
       for (final library in contracts.keys)
         if (fileNames.contains(library.split('/').last)) library,
     ];

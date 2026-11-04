@@ -29,7 +29,7 @@ import '../test_support.dart' as support;
 class _FakeVmService {
   new _(this._server) {
     _server.listen((request) async {
-      final socket = await WebSocketTransformer.upgrade(request);
+      final WebSocket socket = await WebSocketTransformer.upgrade(request);
       // `collectCoverage` closes the socket from its `finally`, including
       // while unwinding a failure, so a mid-conversation close is expected
       // rather than an error.
@@ -37,8 +37,8 @@ class _FakeVmService {
         (raw) {
           final message = json.decode(raw as String) as Map<String, dynamic>;
           final method = message['method'] as String;
-          final id = message['id'];
-          final handler = handlers[method];
+          final dynamic id = message['id'];
+          final Map<String, dynamic> Function()? handler = handlers[method];
           if (handler == null) {
             socket.add(
               json.encode({
@@ -470,7 +470,9 @@ void main() {
     });
 
     test('deletes a real temp file', () {
-      final tmpDir = Directory.systemTemp.createTempSync('cleanup_test_');
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'cleanup_test_',
+      );
       try {
         final file = File('${tmpDir.path}/x.dill')..writeAsStringSync('dill');
         support.cleanupQuietly(file.deleteSync);

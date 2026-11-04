@@ -51,7 +51,7 @@ String _workflow({
   final allowedToFail = continueOnError
       ? '\n        continue-on-error: true'
       : '';
-  final list = targets.join(' ');
+  final String list = targets.join(' ');
   final success = failOnSuccess
       ? '''
             if out=\$(bazel build "\$target" 2>&1); then
@@ -87,7 +87,7 @@ void main() {
     });
 
     test('ignores a commented-out target and format placeholders', () {
-      final fixtures = findHostileFixtures(_source);
+      final Set<String> fixtures = findHostileFixtures(_source);
       expect(fixtures, isNot(contains('_web_guard_hostile_commented')));
       expect(fixtures, isNot(contains('_web_guard_hostile_%s_js')));
       expect(fixtures, isNot(contains('_web_guard_hostile_')));
@@ -108,7 +108,7 @@ void main() {
     });
 
     test('names a fixture dropped from the guard step', () {
-      final errors = checkWebGuardCoverage(
+      final List<String> errors = checkWebGuardCoverage(
         fixtures: _fixtures,
         workflows: {
           'ci.yaml': _workflow(
@@ -128,7 +128,7 @@ void main() {
     });
 
     test('does not let a dart2js twin cover its default-compiler fixture', () {
-      final errors = checkWebGuardCoverage(
+      final List<String> errors = checkWebGuardCoverage(
         fixtures: {'_web_guard_hostile_file', '_web_guard_hostile_file_js'},
         workflows: {
           'ci.yaml': _workflow(
@@ -143,7 +143,7 @@ void main() {
     });
 
     test('fails when the step stops pinning the guard message', () {
-      final errors = checkWebGuardCoverage(
+      final List<String> errors = checkWebGuardCoverage(
         fixtures: _fixtures,
         workflows: {
           'ci.yaml': _workflow(
@@ -156,7 +156,7 @@ void main() {
     });
 
     test('fails when the step no longer fails a successful build', () {
-      final errors = checkWebGuardCoverage(
+      final List<String> errors = checkWebGuardCoverage(
         fixtures: _fixtures,
         workflows: {
           'ci.yaml': _workflow(
@@ -169,7 +169,7 @@ void main() {
     });
 
     test('fails when the step is allowed to fail', () {
-      final errors = checkWebGuardCoverage(
+      final List<String> errors = checkWebGuardCoverage(
         fixtures: _fixtures,
         workflows: {
           'ci.yaml': _workflow(
@@ -182,7 +182,7 @@ void main() {
     });
 
     test('fails when the step is skipped', () {
-      final errors = checkWebGuardCoverage(
+      final List<String> errors = checkWebGuardCoverage(
         fixtures: _fixtures,
         workflows: {
           'ci.yaml': _workflow(targets: _fixtures.toList(), skip: true),
@@ -192,7 +192,7 @@ void main() {
     });
 
     test('ignores a commented-out fixture line in the workflow', () {
-      final workflow =
+      final String workflow =
           _workflow(
             targets: _fixtures
                 .where((f) => f != '_web_guard_hostile_app_scheme')
@@ -202,7 +202,7 @@ void main() {
             '          # //flutter/tests:_web_guard_hostile_app_scheme\n'
                 '          done',
           );
-      final errors = checkWebGuardCoverage(
+      final List<String> errors = checkWebGuardCoverage(
         fixtures: _fixtures,
         workflows: {'ci.yaml': workflow},
       );

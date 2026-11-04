@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_bazel_dev_tool/hot_reload/asset_bundle.dart';
 import 'package:flutter_bazel_dev_tool/hot_reload/flutter_error_report.dart';
@@ -13,6 +14,8 @@ import 'package:flutter_bazel_dev_tool/running_code.dart';
 import 'package:path/path.dart' as p;
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
+
+typedef _Sub = StreamSubscription<Event>;
 
 final _logger = Logger('dev_tool.vm_service');
 
@@ -463,8 +466,12 @@ class VmServiceClient {
     if (_retired) throw StateError(_retiredMessage);
     _wantsDevFS = createDevFS;
     _hungUp = false;
-    final attempt = ++_connectAttempt;
-    final inner = _connect(serviceUri, attempt, createDevFS: createDevFS);
+    final int attempt = ++_connectAttempt;
+    final Future<void> inner = _connect(
+      serviceUri,
+      attempt,
+      createDevFS: createDevFS,
+    );
     try {
       await inner.timeout(connectTimeout);
     } on TimeoutException {
@@ -487,7 +494,7 @@ class VmServiceClient {
   /// re-read while it waits. Returns whether [vm] named a `main`.
   bool _adoptMainIsolate(VM vm) {
     String? found;
-    for (final isolateRef in vm.isolates ?? <IsolateRef>[]) {
+    for (final IsolateRef isolateRef in vm.isolates ?? <IsolateRef>[]) {
       if (isolateRef.name == 'main') {
         found = isolateRef.id;
         break;
@@ -505,12 +512,12 @@ class VmServiceClient {
     _httpAddress = serviceUri;
 
     // Convert http(s) URI to ws URI for VM service.
-    final wsUri = serviceUri.replace(
+    final Uri wsUri = serviceUri.replace(
       scheme: serviceUri.scheme == 'https' ? 'wss' : 'ws',
       path: '${serviceUri.path}ws',
     );
 
-    final svc = await _connector(wsUri.toString());
+    final VmService svc = await _connector(wsUri.toString());
     if (attempt != _connectAttempt) {
       // [connect]'s deadline gave up on this dial. Publishing it now would hand
       // the client a connection its caller was told it did not get.
@@ -683,13 +690,9 @@ class VmServiceClient {
   /// render: `VmServiceAppInstance` already turns a [StateError] from this
   /// client into a failed apply naming its message.
   Future<void> _reconnect(int replacing) {
-    if (_retired) {
-      return Future.error(StateError(_retiredMessage));
-    }
-    if (_gone.isCompleted) {
-      return Future.error(StateError(_goneMessage));
-    }
-    final pending = _reconnecting;
+    if (_retired) return Future.error(StateError(_retiredMessage));
+    if (_gone.isCompleted) return Future.error(StateError(_goneMessage));
+    final Future<void>? pending = _reconnecting;
     if (pending != null) return pending;
     if (_service != null && _connectAttempt != replacing) {
       return Future<void>.value();
@@ -740,7 +743,7 @@ class VmServiceClient {
 
   /// Ensure the VM is publishing [streamId]. Idempotent across reconnects.
   Future<void> _ensureStream(String streamId) async {
-    final svc = _service;
+    final VmService? svc = _service;
     if (svc == null) return;
     try {
       await svc.streamListen(streamId);
@@ -765,7 +768,7 @@ class VmServiceClient {
   /// emits them in that order (`chrome_proxy_service.dart:385` then `:331`),
   /// as does the VM — so the exit is what opens the window.
   void _onIsolateEvent(Event event) {
-    final id = event.isolate?.id;
+    final String? id = event.isolate?.id;
     if (id == null) return;
     switch (event.kind) {
       case EventKind.kIsolateExit:
@@ -773,7 +776,7 @@ class VmServiceClient {
       case EventKind.kIsolateStart:
         if (_mainIsolateId == null) _setMainIsolate(id);
       case EventKind.kServiceExtensionAdded:
-        final rpc = event.extensionRPC;
+        final String? rpc = event.extensionRPC;
         if (id == _mainIsolateId && rpc != null) _noteExtension(rpc);
     }
   }
@@ -862,16 +865,16 @@ class VmServiceClient {
     // tool's command pool is serialized, so one silent read stalls a whole
     // run's worth of commands.
     final spent = Stopwatch()..start();
-    final budget = timeout ?? serviceExtensionTimeout;
+    final Duration budget = timeout ?? serviceExtensionTimeout;
     Duration left() {
-      final remaining = budget - spent.elapsed;
+      final Duration remaining = budget - spent.elapsed;
       return remaining.isNegative ? Duration.zero : remaining;
     }
 
     // Subscribed before the seed round-trip, so a registration landing during
     // it is caught rather than falling between the two.
     final registered = Completer<void>();
-    final sub = _extensionAdded.stream.listen((rpc) {
+    final StreamSubscription<String> sub = _extensionAdded.stream.listen((rpc) {
       if (rpc == method && !registered.isCompleted) registered.complete();
     });
     try {
@@ -920,7 +923,7 @@ class VmServiceClient {
   /// first connection every registration is in the past — so the event stream
   /// alone would never mention them.
   Future<void> _seedExtensionRpcs() async {
-    final id = _mainIsolateId;
+    final String? id = _mainIsolateId;
     if (id == null) return;
     final Isolate isolate;
     try {
@@ -946,7 +949,7 @@ class VmServiceClient {
     // The isolate may have rotated while this was in flight, in which case what
     // came back describes one that is already gone.
     if (_mainIsolateId != id) return;
-    for (final rpc in isolate.extensionRPCs ?? const <String>[]) {
+    for (final String rpc in isolate.extensionRPCs ?? const <String>[]) {
       _noteExtension(rpc);
     }
   }
@@ -1016,9 +1019,9 @@ class VmServiceClient {
 
         // Subscribe before deliver() so no event between reloadSources and the
         // rebuilt frame can be missed.
-        final sub = _service!.onExtensionEvent.listen(watch.onEvent);
+        final _Sub sub = _service!.onExtensionEvent.listen(watch.onEvent);
         try {
-          final refusal = await deliver();
+          final String? refusal = await deliver();
           if (refusal != null) {
             if (delivered)
               return _deliveredThenLost(refusal, codeAfterDelivery);
@@ -1026,7 +1029,7 @@ class VmServiceClient {
           }
           watch.applied = true;
           delivered = true;
-          final after = await _runAfterDelivery(
+          final ApplyVerdict? after = await _runAfterDelivery(
             afterDelivery,
             watch,
             codeAfterDelivery,
@@ -1103,7 +1106,7 @@ class VmServiceClient {
     } finally {
       waitOver.complete();
     }
-    final reported = watch.capturedError;
+    final FlutterErrorReport? reported = watch.capturedError;
     if (reported != null) return VerdictAppErrored(reported);
     if (watch.drew) return const VerdictApplied();
     return VerdictApplied(
@@ -1143,13 +1146,14 @@ class VmServiceClient {
       ]) {
         if (!await _registeredBefore(method, until)) return null;
       }
-      final reply = await Future.any<Map<String, dynamic>?>([
-        callServiceExtension(
-          'ext.rules_flutter.renderState',
-          args: {'timeoutMs': '${frameTimeout.inMilliseconds}'},
-        ),
-        until.then((_) => null),
-      ]);
+      final Map<String, dynamic>? reply =
+          await Future.any<Map<String, dynamic>?>([
+            callServiceExtension(
+              'ext.rules_flutter.renderState',
+              args: {'timeoutMs': '${frameTimeout.inMilliseconds}'},
+            ),
+            until.then((_) => null),
+          ]);
       // Verbose: asked on every reload, and an answer only matters when it
       // turns out wrong — which is when this line is the one that says so.
       _logger.fine({
@@ -1186,7 +1190,7 @@ class VmServiceClient {
   Future<bool> _registeredBefore(String method, Future<void> until) async {
     if (_extensionRpcs.contains(method)) return true;
     final registered = Completer<bool>();
-    final sub = _extensionAdded.stream.listen((rpc) {
+    final StreamSubscription<String> sub = _extensionAdded.stream.listen((rpc) {
       if (rpc == method && !registered.isCompleted) registered.complete(true);
     });
     unawaited(
@@ -1299,7 +1303,7 @@ class VmServiceClient {
     // the old one no longer names anything.
     _assetDirectorySent = false;
     try {
-      final response = await _service!.callServiceExtension(
+      final Response response = await _service!.callServiceExtension(
         '_createDevFS',
         args: {'fsName': _devFSName},
       );
@@ -1313,7 +1317,7 @@ class VmServiceClient {
             '_deleteDevFS',
             args: {'fsName': _devFSName},
           );
-          final response = await _service!.callServiceExtension(
+          final Response response = await _service!.callServiceExtension(
             '_createDevFS',
             args: {'fsName': _devFSName},
           );
@@ -1355,19 +1359,19 @@ class VmServiceClient {
 
     final client = HttpClient();
     try {
-      final request = await client.putUrl(_httpAddress!);
+      final HttpClientRequest request = await client.putUrl(_httpAddress!);
       request.headers.removeAll(HttpHeaders.acceptEncodingHeader);
       request.headers.add('dev_fs_name', _devFSName);
       request.headers.add(
         'dev_fs_uri_b64',
         base64.encode(utf8.encode(devFSPath)),
       );
-      final bytes = await file.readAsBytes();
+      final Uint8List bytes = await file.readAsBytes();
       request.add(gzip.encode(bytes));
-      final response = await request.close().timeout(
+      final HttpClientResponse response = await request.close().timeout(
         const Duration(seconds: 30),
       );
-      final body = await response.transform(utf8.decoder).join();
+      final String body = await response.transform(utf8.decoder).join();
 
       if (response.statusCode == HttpStatus.ok) {
         return _devFSBaseUri!.resolve(devFSPath);
@@ -1408,18 +1412,16 @@ class VmServiceClient {
   /// with the devFS URI. This works for all platforms including
   /// physical iOS devices.
   Future<ApplyVerdict> hotReload(String dillPath) async {
-    if (_httpAddress == null) {
-      throw StateError(_noConnectionMessage);
-    }
+    if (_httpAddress == null) throw StateError(_noConnectionMessage);
 
     try {
       return await _applyAndVerify(
         () async {
           // Upload the dill to the VM's in-memory devFS.
           const entryPath = 'main.dart.incremental.dill';
-          final devFSUri = await _uploadToDevFS(dillPath, entryPath);
+          final Uri? devFSUri = await _uploadToDevFS(dillPath, entryPath);
           if (devFSUri == null) return _devFSUploadRefusal;
-          final result = await _service!.reloadSources(
+          final ReloadReport result = await _service!.reloadSources(
             _mainIsolateId!,
             rootLibUri: devFSUri.toString(),
           );
@@ -1504,11 +1506,11 @@ class VmServiceClient {
     Set<String> changed,
   ) async {
     for (final archivePath in changed) {
-      final local = p.joinAll([assetsDir, ...p.url.split(archivePath)]);
+      final String local = p.joinAll([assetsDir, ...p.url.split(archivePath)]);
       // Absent means deleted from the bundle. Nothing to send; the evict
       // below still drops the app's cached copy.
       if (!File(local).existsSync()) continue;
-      final uploaded = await _uploadToDevFS(
+      final Uri? uploaded = await _uploadToDevFS(
         local,
         '$_devFSAssetsDir/$archivePath',
       );
@@ -1619,10 +1621,8 @@ class VmServiceClient {
     Set<String> changed, {
     Set<String> shaders = const {},
   }) async {
-    if (_httpAddress == null) {
-      throw StateError(_noConnectionMessage);
-    }
-    final assetsDir = assetDirectory;
+    if (_httpAddress == null) throw StateError(_noConnectionMessage);
+    final String? assetsDir = assetDirectory;
     if (assetsDir == null || assetsDir.isEmpty) {
       throw StateError('reloadAssets needs assetDirectory to be set');
     }
@@ -1748,11 +1748,11 @@ class VmServiceClient {
     if (_service == null || _mainIsolateId == null) {
       return StartPausedState.unknown;
     }
-    final deadline = DateTime.now().add(timeout);
+    final DateTime deadline = DateTime.now().add(timeout);
     var everRead = false;
     while (true) {
       try {
-        final isolate = await _callService(
+        final Isolate isolate = await _callService(
           (s) => s.getIsolate(_mainIsolateId!),
         );
         everRead = true;
@@ -1800,18 +1800,18 @@ class VmServiceClient {
     Duration budget,
     Future<void>? until,
   ) async {
-    final known = _mainIsolateId;
+    final String? known = _mainIsolateId;
     if (known != null) return (isolateId: known, failure: null);
-    final deadline = _now().add(budget);
+    final DateTime deadline = _now().add(budget);
     Object? failure;
     var warned = false;
     var abandoned = false;
-    final abandon = until?.then((_) => abandoned = true);
+    final Future<bool>? abandon = until?.then((_) => abandoned = true);
     try {
       while (!abandoned &&
           _mainIsolateId == null &&
           _now().isBefore(deadline)) {
-        final svc = _service;
+        final VmService? svc = _service;
         // A connection dropped mid-wait ends it: nothing starts on a dead
         // socket, and the frame phase reconnects on its own reads from here.
         if (svc == null) break;
@@ -1884,7 +1884,7 @@ class VmServiceClient {
     Duration timeout = const Duration(seconds: 15),
     Future<void>? until,
   }) async {
-    final service = _service;
+    final VmService? service = _service;
     if (service == null) return false;
 
     // One budget for the whole question, spent by the isolate wait first and
@@ -1893,7 +1893,7 @@ class VmServiceClient {
     // one wait, so the phases share rather than stack.
     final spent = Stopwatch()..start();
     Duration left() {
-      final remaining = timeout - spent.elapsed;
+      final Duration remaining = timeout - spent.elapsed;
       return remaining.isNegative ? Duration.zero : remaining;
     }
 
@@ -1902,15 +1902,16 @@ class VmServiceClient {
     // have adopted it. The outer cap is the hanging read's, not the budget's:
     // a `getVM` over a socket that went quiet without closing raises nothing,
     // and without it one silent read holds the whole wait past its timeout.
-    final seen = await _waitForMainIsolate(
-      left(),
-      until,
-    ).timeout(left(), onTimeout: () => (isolateId: null, failure: null));
-    final isolateId = seen.isolateId;
+    final ({Object? failure, String? isolateId}) seen =
+        await _waitForMainIsolate(
+          left(),
+          until,
+        ).timeout(left(), onTimeout: () => (isolateId: null, failure: null));
+    final String? isolateId = seen.isolateId;
     if (isolateId == null) {
       // A recorded fault is why, and a caller reading "had not rendered"
       // needs the real fault instead — the queryFailure rule one phase down.
-      final failure = seen.failure;
+      final Object? failure = seen.failure;
       if (failure != null) throw failure;
       return false;
     }
@@ -1919,7 +1920,9 @@ class VmServiceClient {
 
     // Subscribed before the query is asked, so a frame drawn between the two
     // is caught by one or the other rather than falling between them.
-    final frames = service.onExtensionEvent.listen((e) {
+    final _Sub frames = service.onExtensionEvent.listen((
+      e,
+    ) {
       if (e.extensionKind == 'Flutter.FirstFrame' ||
           e.extensionKind == 'Flutter.FirstFrameRasterized') {
         wait.answer(true);
@@ -1927,14 +1930,14 @@ class VmServiceClient {
     });
     unawaited(_pollForFirstFrame(wait, isolateId));
 
-    final abandon = until?.then((_) => wait.answer(false));
+    final Future<void>? abandon = until?.then((_) => wait.answer(false));
 
     try {
-      final painted = await wait.rendered.future.timeout(
+      final bool painted = await wait.rendered.future.timeout(
         left(),
         onTimeout: () => false,
       );
-      final failure = wait.queryFailure;
+      final Object? failure = wait.queryFailure;
       if (!painted && failure != null) throw failure;
       return painted;
     } finally {
@@ -1975,7 +1978,7 @@ class VmServiceClient {
     // read again.
     while (!wait.settled && !wait.rendered.isCompleted) {
       try {
-        final resp = await _callService(
+        final Response resp = await _callService(
           (s) => s.callServiceExtension(
             'ext.flutter.didSendFirstFrameEvent',
             isolateId: isolateId,
@@ -2018,7 +2021,7 @@ class VmServiceClient {
 
     await waitForFirstFrame();
 
-    final response = await _callService(
+    final Response response = await _callService(
       (s) => s.callServiceExtension(
         '_flutter.screenshot',
         isolateId: _mainIsolateId,
@@ -2026,16 +2029,14 @@ class VmServiceClient {
     );
 
     final data = response.json?['screenshot'] as String?;
-    if (data == null) {
-      throw StateError('_flutter.screenshot returned no data');
-    }
+    if (data == null) throw StateError('_flutter.screenshot returned no data');
 
     return base64.decode(data);
   }
 
   /// Capture a screenshot and save to [outputPath].
   Future<void> screenshot(String outputPath) async {
-    final bytes = await screenshotBytes();
+    final List<int> bytes = await screenshotBytes();
     await File(outputPath).writeAsBytes(bytes);
   }
 
@@ -2070,9 +2071,7 @@ class VmServiceClient {
   /// `catch` would make a second view failing come back as a refusal — the
   /// verdict meaning nothing landed — while the first runs the new code.
   Future<ApplyVerdict> hotRestart(String dillPath) async {
-    if (_httpAddress == null) {
-      throw StateError(_noConnectionMessage);
-    }
+    if (_httpAddress == null) throw StateError(_noConnectionMessage);
 
     // Set by the delivery below and read by the step after it. Plain fields
     // rather than `late final` because [_applyAndVerify] may replay the whole
@@ -2080,14 +2079,14 @@ class VmServiceClient {
     var views = const <({String id, String? isolateId})>[];
     var mainUri = '';
     try {
-      final verdict = await _applyAndVerify(
+      final ApplyVerdict verdict = await _applyAndVerify(
         () async {
           // Upload the full kernel to devFS as the new main — under whichever
           // name the app is not running from; see [_runningKernel].
-          final entryPath = _runningKernel == _restartKernels.$1
+          final String entryPath = _runningKernel == _restartKernels.$1
               ? _restartKernels.$2
               : _restartKernels.$1;
-          final devFSUri = await _uploadToDevFS(dillPath, entryPath);
+          final Uri? devFSUri = await _uploadToDevFS(dillPath, entryPath);
           if (devFSUri == null) return _devFSUploadRefusal;
           mainUri = devFSUri.toString();
 
@@ -2101,7 +2100,7 @@ class VmServiceClient {
         afterDelivery: (
           step: 'restarting the app\'s remaining views',
           run: () async {
-            for (final view in views.skip(1)) {
+            for (final ({String id, String? isolateId}) view in views.skip(1)) {
               await _restartView(view, mainUri);
             }
           },
@@ -2141,7 +2140,7 @@ class VmServiceClient {
     ({String id, String? isolateId}) view,
     String mainUri,
   ) async {
-    final isolateId = view.isolateId;
+    final String? isolateId = view.isolateId;
     if (isolateId != null) await _resumeIfPaused(isolateId);
     await _service!.callMethod(
       '_flutter.runInView',
@@ -2159,8 +2158,10 @@ class VmServiceClient {
 
   /// The Flutter views (`_flutter.listViews`) with their UI isolate ids.
   Future<List<({String id, String? isolateId})>> _listViews() async {
-    final resp = await _callService((s) => s.callMethod('_flutter.listViews'));
-    final views = (resp.json?['views'] as List?) ?? const [];
+    final Response resp = await _callService(
+      (s) => s.callMethod('_flutter.listViews'),
+    );
+    final List<dynamic> views = (resp.json?['views'] as List?) ?? const [];
     return [
       for (final v in views)
         if ((v as Map)['type'] == 'FlutterView')
@@ -2184,8 +2185,8 @@ class VmServiceClient {
   /// restart hangs with nothing said about the resume that failed first.
   Future<void> _resumeIfPaused(String isolateId) async {
     try {
-      final isolate = await _service!.getIsolate(isolateId);
-      final kind = isolate.pauseEvent?.kind;
+      final Isolate isolate = await _service!.getIsolate(isolateId);
+      final String? kind = isolate.pauseEvent?.kind;
       if (kind != null && kind.startsWith('Pause')) {
         await _service!.resume(isolateId);
       }
@@ -2212,8 +2213,8 @@ class VmServiceClient {
   /// point to hang a barrier on, which is what the stream is for.
   Future<void> _refreshMainIsolate() async {
     try {
-      final vm = await _callService((s) => s.getVM());
-      final isolates = vm.isolates ?? const <IsolateRef>[];
+      final VM vm = await _callService((s) => s.getVM());
+      final List<IsolateRef> isolates = vm.isolates ?? const <IsolateRef>[];
       for (final ref in isolates) {
         if (ref.name == 'main') {
           _setMainIsolate(ref.id);
@@ -2252,12 +2253,9 @@ class VmServiceClient {
     if (_service == null || _mainIsolateId == null) {
       throw StateError(_noConnectionMessage);
     }
-    final response = await _callService(
-      (s) => s.callServiceExtension(
-        method,
-        isolateId: _mainIsolateId,
-        args: args,
-      ),
+    final Response response = await _callService(
+      (s) =>
+          s.callServiceExtension(method, isolateId: _mainIsolateId, args: args),
     );
     return response.json;
   }
@@ -2275,11 +2273,8 @@ class VmServiceClient {
       throw StateError(_noConnectionMessage);
     }
     try {
-      final current = await _callService(
-        (s) => s.callServiceExtension(
-          method,
-          isolateId: _mainIsolateId,
-        ),
+      final Response current = await _callService(
+        (s) => s.callServiceExtension(method, isolateId: _mainIsolateId),
       );
       final enabled = current.json?['enabled'] == 'true';
       await _callService(
@@ -2325,13 +2320,9 @@ class VmServiceClient {
   /// lets a reconnect that already happened be recognised as one, instead of a
   /// healthy socket being discarded to dial for a second.
   Future<T> _withReconnect<T>(Future<T> Function() operation) async {
-    if (_httpAddress == null) {
-      throw StateError(_noConnectionMessage);
-    }
-    if (_service == null) {
-      await _reconnect(_connectAttempt);
-    }
-    final attempt = _connectAttempt;
+    if (_httpAddress == null) throw StateError(_noConnectionMessage);
+    if (_service == null) await _reconnect(_connectAttempt);
+    final int attempt = _connectAttempt;
     try {
       return await operation();
     } on RPCError catch (e) {

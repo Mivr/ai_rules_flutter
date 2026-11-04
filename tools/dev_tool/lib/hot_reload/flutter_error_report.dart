@@ -36,7 +36,7 @@ class FlutterErrorReport {
   /// How many errors the app has reported since the last reload. A second
   /// failure with the count still climbing means the reload did not fix it.
   int? get errorsSinceReload {
-    final value = data['errorsSinceReload'];
+    final dynamic value = data['errorsSinceReload'];
     return value is int ? value : null;
   }
 
@@ -44,9 +44,9 @@ class FlutterErrorReport {
   /// schema-checked, and a malformed field must not take down the reload that
   /// was reporting it.
   String? _string(String key) {
-    final value = data[key];
+    final dynamic value = data[key];
     if (value is! String) return null;
-    final trimmed = value.trim();
+    final String trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
   }
 

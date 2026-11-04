@@ -6,12 +6,12 @@ import 'package:test/test.dart';
 void main() {
   group('AttachCommand.parser', () {
     test('requires --target', () {
-      final results = AttachCommand.parser.parse([]);
+      final ArgResults results = AttachCommand.parser.parse([]);
       expect(results.wasParsed('target'), isFalse);
     });
 
     test('accepts multiple --debug-url flags', () {
-      final results = AttachCommand.parser.parse([
+      final ArgResults results = AttachCommand.parser.parse([
         '-t',
         '//:app',
         '--debug-url',
@@ -26,7 +26,7 @@ void main() {
     });
 
     test('defaults --machine to false', () {
-      final results = AttachCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = AttachCommand.parser.parse(['-t', '//:app']);
       expect(results['machine'], isFalse);
     });
 
@@ -60,12 +60,12 @@ void main() {
     });
 
     test('defaults --devtools to true', () {
-      final results = AttachCommand.parser.parse(['-t', '//:app']);
+      final ArgResults results = AttachCommand.parser.parse(['-t', '//:app']);
       expect(results['devtools'], isTrue);
     });
 
     test('accepts --no-devtools', () {
-      final results = AttachCommand.parser.parse([
+      final ArgResults results = AttachCommand.parser.parse([
         '-t',
         '//:app',
         '--no-devtools',
@@ -103,7 +103,7 @@ void main() {
         AttachCommand.parser.parse(['-t', '//:app'])['build-arg'],
         isEmpty,
       );
-      final results = AttachCommand.parser.parse([
+      final ArgResults results = AttachCommand.parser.parse([
         '-t',
         '//:app',
         '--build-arg',

@@ -62,7 +62,7 @@ String? skipReason(Uint8List bytes) {
   if (bytes[4] != 2) {
     return 'not a 64-bit ELF file';
   }
-  final machine = ByteData.sublistView(
+  final int machine = ByteData.sublistView(
     bytes,
   ).getUint16(18, Endian.little);
   if (machine != kMachineX86_64) {
@@ -114,14 +114,14 @@ int? fileOffsetOf(
   int vaddr,
 ) {
   for (var i = 0; i < programs.num; i++) {
-    final off = programs.off + i * programs.entsize;
+    final int off = programs.off + i * programs.entsize;
     checkRange(bytes, off, 56, 'program header $i');
     if (view.getUint32(off, Endian.little) != 1) {
       continue;
     }
-    final fileOff = view.getUint64(off + 8, Endian.little);
-    final virtAddr = view.getUint64(off + 16, Endian.little);
-    final fileSize = view.getUint64(off + 32, Endian.little);
+    final int fileOff = view.getUint64(off + 8, Endian.little);
+    final int virtAddr = view.getUint64(off + 16, Endian.little);
+    final int fileSize = view.getUint64(off + 32, Endian.little);
     if (fileOff > bytes.length || fileSize > bytes.length) {
       throw const PatchFailure(
         'PT_LOAD segment points outside the file; '
@@ -164,15 +164,15 @@ String readCString(Uint8List bytes, int start, int limit) {
   SectionTable sections,
 ) {
   for (var i = 0; i < sections.num; i++) {
-    final header = sections.off + i * sections.entsize;
+    final int header = sections.off + i * sections.entsize;
     checkRange(bytes, header, 64, 'section header $i');
-    final kind = view.getUint32(header + 4, Endian.little);
+    final int kind = view.getUint32(header + 4, Endian.little);
     if (kind != 2 && kind != 11) {
       continue;
     }
-    final tableOff = view.getUint64(header + 24, Endian.little);
-    final tableSize = view.getUint64(header + 32, Endian.little);
-    final strIndex = view.getUint32(header + 40, Endian.little);
+    final int tableOff = view.getUint64(header + 24, Endian.little);
+    final int tableSize = view.getUint64(header + 32, Endian.little);
+    final int strIndex = view.getUint32(header + 40, Endian.little);
     if (strIndex >= sections.num) {
       throw PatchFailure(
         'symbol table $i links string table $strIndex '
@@ -180,13 +180,13 @@ String readCString(Uint8List bytes, int start, int limit) {
         'update the patch for this snapshot layout',
       );
     }
-    final strHeader = sections.off + strIndex * sections.entsize;
+    final int strHeader = sections.off + strIndex * sections.entsize;
     checkRange(bytes, strHeader, 64, 'string table header');
-    final strOff = view.getUint64(strHeader + 24, Endian.little);
+    final int strOff = view.getUint64(strHeader + 24, Endian.little);
     checkRange(bytes, tableOff, tableSize, 'symbol table $i');
     for (var entry = tableOff; entry < tableOff + tableSize; entry += 24) {
       checkRange(bytes, entry, 24, 'symbol table entry');
-      final nameOff = view.getUint32(entry, Endian.little);
+      final int nameOff = view.getUint32(entry, Endian.little);
       if (readCString(bytes, strOff + nameOff, bytes.length) !=
           kFindPubspecSymbol) {
         continue;
@@ -202,8 +202,8 @@ String readCString(Uint8List bytes, int start, int limit) {
 
 /// True when a call followed by `mov 0x45(%rbp),%r?` starts at [j].
 bool isCallSite(MatchView view, int j) {
-  final at = view.base + j;
-  final bytes = view.bytes;
+  final int at = view.base + j;
+  final Uint8List bytes = view.bytes;
   return bytes[at] == 0xe8 &&
       bytes[at + 5] == 0x48 &&
       bytes[at + 6] == 0x8b &&
@@ -212,8 +212,8 @@ bool isCallSite(MatchView view, int j) {
 
 /// True when the `return null` epilogue starts at [j].
 bool isReturnNull(MatchView view, int j) {
-  final at = view.base + j;
-  final bytes = view.bytes;
+  final int at = view.base + j;
+  final Uint8List bytes = view.bytes;
   return bytes[at] == 0x49 &&
       bytes[at + 1] == 0x8b &&
       bytes[at + 2] == 0x86 &&
@@ -262,15 +262,22 @@ int onlyMatch(
 /// or either pattern does not apply exactly once.
 Uint8List patchElfBytes(Uint8List bytes) {
   final view = ByteData.sublistView(bytes);
-  final tables = readTables(bytes, view);
-  final symbol = findPubspecSymbol(bytes, view, tables.sections);
+  final ({ProgramTable programs, SectionTable sections}) tables = readTables(
+    bytes,
+    view,
+  );
+  final ({int size, int value})? symbol = findPubspecSymbol(
+    bytes,
+    view,
+    tables.sections,
+  );
   if (symbol == null) {
     throw const PatchFailure(
       "symbol '$kFindPubspecSymbol' not found in x86-64 ELF snapshot; "
       'update the patch for this snapshot version',
     );
   }
-  final fnOff = fileOffsetOf(bytes, view, tables.programs, symbol.value);
+  final int? fnOff = fileOffsetOf(bytes, view, tables.programs, symbol.value);
   if (fnOff == null) {
     throw const PatchFailure(
       "symbol '$kFindPubspecSymbol' maps to no PT_LOAD segment; "
@@ -278,23 +285,23 @@ Uint8List patchElfBytes(Uint8List bytes) {
     );
   }
   checkRange(bytes, fnOff, symbol.size, 'findPubspec function body');
-  final scan = (bytes: bytes, base: fnOff);
-  final callAt = onlyMatch(
+  final ({int base, Uint8List bytes}) scan = (bytes: bytes, base: fnOff);
+  final int callAt = onlyMatch(
     scan,
     0,
     min(80, symbol.size - 8),
     isCallSite,
     'call-site rewrite',
   );
-  final patchAt = callAt + 5;
-  final retNullAt = onlyMatch(
+  final int patchAt = callAt + 5;
+  final int retNullAt = onlyMatch(
     scan,
     symbol.size - 80,
     symbol.size - 12,
     isReturnNull,
     'return-null epilogue',
   );
-  final rel = retNullAt - (patchAt + 5);
+  final int rel = retNullAt - (patchAt + 5);
   final out = Uint8List.fromList(bytes);
   out[patchAt] = 0xe9;
   ByteData.sublistView(out).setInt32(patchAt + 1, rel, Endian.little);
@@ -309,14 +316,14 @@ int runPatch(List<String> args) {
     stderr.writeln('usage: patch.dart <dartdev_aot.dart.snapshot>');
     return 2;
   }
-  final path = args[0];
+  final String path = args[0];
   final file = File(path);
   if (!file.existsSync()) {
     stdout.writeln('dartdev patch: $path is absent; nothing to patch');
     return 0;
   }
-  final original = file.readAsBytesSync();
-  final reason = skipReason(original);
+  final Uint8List original = file.readAsBytesSync();
+  final String? reason = skipReason(original);
   if (reason != null) {
     stdout.writeln('dartdev patch: leaving $path unchanged ($reason)');
     return 0;

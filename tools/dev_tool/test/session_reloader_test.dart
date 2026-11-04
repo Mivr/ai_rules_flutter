@@ -50,7 +50,7 @@ void main() {
     String uriFor(String relPath) => 'package:app/$relPath';
 
     void seed() {
-      final snap = workspace.snapshot();
+      final SourceVersions snap = workspace.snapshot();
       unit.applied.markApplied(snap, files: snap.fileUris.toSet());
     }
 
@@ -109,7 +109,7 @@ void main() {
         'the apply fails', () async {
       unit.baselineFailure = 'main.dart:1:8: Error: Bad syntax';
 
-      final failed = await unit.compile(
+      final CompileOutcome failed = await unit.compile(
         invalidated: {uriFor('main.dart')},
         entrypoint: 'e',
         mode: ApplyMode.hotReload,
@@ -158,9 +158,9 @@ void main() {
       'a successful apply commits the compiler AND advances the record',
       () async {
         writeFile('main.dart', 'v1');
-        final snap = workspace.snapshot();
+        final SourceVersions snap = workspace.snapshot();
 
-        final outcome = await unit.applyAndSettle(
+        final ApplyOutcome outcome = await unit.applyAndSettle(
           '/tmp/d.dill',
           mode: ApplyMode.hotReload,
           snapshot: snap,
@@ -179,10 +179,10 @@ void main() {
       'a refused apply rolls the compiler back and leaves the record',
       () async {
         writeFile('main.dart', 'v1');
-        final snap = workspace.snapshot();
+        final SourceVersions snap = workspace.snapshot();
         app.nextOutcome = const ApplyFailed('device said no');
 
-        final outcome = await unit.applyAndSettle(
+        final ApplyOutcome outcome = await unit.applyAndSettle(
           '/tmp/d.dill',
           mode: ApplyMode.hotReload,
           snapshot: snap,
@@ -209,12 +209,12 @@ void main() {
         // running, so its baseline would describe a program no app has and the
         // next reload's delta would be computed against that fiction.
         writeFile('main.dart', 'v1');
-        final snap = workspace.snapshot();
+        final SourceVersions snap = workspace.snapshot();
         app.nextOutcome = const AppliedThenThrew(
           FlutterErrorReport({'description': 'Null is not a String'}),
         );
 
-        final outcome = await unit.applyAndSettle(
+        final ApplyOutcome outcome = await unit.applyAndSettle(
           '/tmp/d.dill',
           mode: ApplyMode.hotReload,
           snapshot: snap,
@@ -253,7 +253,7 @@ void main() {
           FlutterErrorReport({'description': 'boom'}),
         );
 
-        final snap = workspace.snapshot();
+        final SourceVersions snap = workspace.snapshot();
         await unit.applyAndSettle(
           '/tmp/d.dill',
           mode: ApplyMode.hotRestart,
@@ -276,7 +276,7 @@ void main() {
       writeFile('main.dart', 'v1');
       app.nextOutcome = const ApplyTimedOut();
 
-      final outcome = await unit.applyAndSettle(
+      final ApplyOutcome outcome = await unit.applyAndSettle(
         '/tmp/d.dill',
         mode: ApplyMode.hotReload,
         snapshot: workspace.snapshot(),
@@ -295,7 +295,7 @@ void main() {
       File(p.join(tmp.path, 'lib', 'gone.dart')).deleteSync();
       writeFile('main.dart', 'v1');
 
-      final snap = workspace.snapshot();
+      final SourceVersions snap = workspace.snapshot();
       await unit.applyAndSettle(
         '/tmp/d.dill',
         mode: ApplyMode.hotRestart,
@@ -359,9 +359,9 @@ void main() {
             );
           }
 
-          final x = makeUnit('x');
-          final y = makeUnit('y');
-          final launched = {
+          final SessionReloader x = makeUnit('x');
+          final SessionReloader y = makeUnit('y');
+          final Map<String, LibImage> launched = {
             for (final uri in tree.versions.keys) uri: tree.imageOf(uri),
           };
 
@@ -394,7 +394,7 @@ void main() {
           );
 
           for (final unit in [x, y]) {
-            final live = liveImageOf(
+            final Map<String, LibImage> live = liveImageOf(
               unit.app as FakeAppInstance,
               tree: tree,
               launchedWith: launched,
@@ -477,10 +477,10 @@ void main() {
         113,
         'Isolate must be runnable',
       );
-      final unit = await reloaderOver(fake);
-      final snap = workspace.snapshot();
+      final SessionReloader unit = await reloaderOver(fake);
+      final SourceVersions snap = workspace.snapshot();
 
-      final outcome = await unit.applyAndSettle(
+      final ApplyOutcome outcome = await unit.applyAndSettle(
         dillPath,
         mode: ApplyMode.hotReload,
         snapshot: snap,

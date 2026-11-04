@@ -54,7 +54,7 @@ _StubArgs _parseStubArgs(List<String> args) {
   var typeStr = 'dylib';
   final flags = FlagCursor(args);
   while (flags.moveNext()) {
-    final arg = flags.current;
+    final String arg = flags.current;
     switch (arg) {
       case '--output':
         outputPath = flags.take('--output');
@@ -87,11 +87,11 @@ _StubArgs _parseStubArgs(List<String> args) {
 
 /// Runs the `stub` subcommand: parses [args] and writes a stub Mach-O file.
 void runStub(List<String> args) {
-  final parsed = _parseStubArgs(args);
-  final outputPath = parsed.outputPath;
-  final arch = parsed.arch;
-  final platformName = parsed.platformName;
-  final minOsStr = parsed.minOsStr;
+  final _StubArgs parsed = _parseStubArgs(args);
+  final String? outputPath = parsed.outputPath;
+  final String? arch = parsed.arch;
+  final String? platformName = parsed.platformName;
+  final String? minOsStr = parsed.minOsStr;
   if (parsed.typeStr != 'dylib' && parsed.typeStr != 'execute') {
     usageError('--type must be "dylib" or "execute", got "${parsed.typeStr}"');
   }
@@ -106,14 +106,14 @@ void runStub(List<String> args) {
     );
   }
 
-  final platform = parsePlatform(platformName);
-  final minOs = parsePackedVersion(minOsStr);
-  final sdkVersionStr = parsed.sdkVersionStr;
-  final sdkVersion = sdkVersionStr != null
+  final int platform = parsePlatform(platformName);
+  final int minOs = parsePackedVersion(minOsStr);
+  final String? sdkVersionStr = parsed.sdkVersionStr;
+  final int sdkVersion = sdkVersionStr != null
       ? parsePackedVersion(sdkVersionStr)
       : minOs;
 
-  final bytes = generateStubMachO(
+  final Uint8List bytes = generateStubMachO(
     arch: arch,
     platform: platform,
     minOs: minOs,
@@ -141,12 +141,12 @@ Uint8List generateStubMachO({
   required String installName,
   int fileType = mhDylib,
 }) {
-  final (cputype, cpusubtype) = _stubCpuType(arch);
+  final (int cputype, int cpusubtype) = _stubCpuType(arch);
 
   // Page size: 16 KB (0x4000) for arm64, 4 KB (0x1000) for x86_64.
   final pageSize = arch == 'arm64' ? 0x4000 : 0x1000;
 
-  final commands = _stubCommands(
+  final List<LoadCommand> commands = _stubCommands(
     platform: platform,
     minOs: minOs,
     sdkVersion: sdkVersion,
@@ -160,7 +160,7 @@ Uint8List generateStubMachO({
     sizeofcmds += lc.cmdsize;
   }
 
-  final flags =
+  final int flags =
       mhNoundefs |
       mhDyldlink |
       mhTwolevel |
@@ -179,7 +179,7 @@ Uint8List generateStubMachO({
     ),
   );
 
-  var offset = mhHeaderSize64;
+  int offset = mhHeaderSize64;
   var uuidDataOffset = -1;
   for (final lc in commands) {
     if (lc.cmd == lcUuid) {
@@ -226,7 +226,7 @@ List<LoadCommand> _stubCommands({
   required int pageSize,
 }) {
   // LC_SEGMENT_64 (__TEXT) - 72 bytes (0 sections).
-  final textSeg = buildLcSegment64((
+  final LoadCommand textSeg = buildLcSegment64((
     segname: '__TEXT',
     vmaddr: 0,
     vmsize: pageSize,
@@ -239,7 +239,7 @@ List<LoadCommand> _stubCommands({
   ));
 
   // LC_SEGMENT_64 (__LINKEDIT) - 72 bytes (0 sections).
-  final linkeditSeg = buildLcSegment64((
+  final LoadCommand linkeditSeg = buildLcSegment64((
     segname: '__LINKEDIT',
     vmaddr: pageSize,
     vmsize: pageSize,
@@ -252,15 +252,15 @@ List<LoadCommand> _stubCommands({
   ));
 
   // LC_SYMTAB and LC_DYSYMTAB pointing into __LINKEDIT.
-  final symtab = buildLcSymtab(
+  final LoadCommand symtab = buildLcSymtab(
     symoff: pageSize,
     nsyms: 0,
     stroff: pageSize,
     strsize: _stubLinkeditFileSize,
   );
-  final dysymtab = buildLcDysymtab();
-  final placeholderUuid = buildLcUuid(Uint8List(16));
-  final buildVersion = buildLcBuildVersion(
+  final LoadCommand dysymtab = buildLcDysymtab();
+  final LoadCommand placeholderUuid = buildLcUuid(Uint8List(16));
+  final LoadCommand buildVersion = buildLcBuildVersion(
     platform: platform,
     minos: minOs,
     sdk: sdkVersion,
@@ -310,7 +310,7 @@ void _writeStubHeader(Uint8List out, _StubHeader header) {
 /// Stamps the content-derived UUID at [uuidDataOffset] (or skips when absent).
 void _stampStubUuid(Uint8List out, int uuidDataOffset) {
   if (uuidDataOffset < 0) return;
-  final digest = sha256(out);
+  final Uint8List digest = sha256(out);
   final uuid = Uint8List.fromList(digest.sublist(0, 16));
   uuid[6] = (uuid[6] & 0x0f) | 0x50;
   uuid[8] = (uuid[8] & 0x3f) | 0x80;

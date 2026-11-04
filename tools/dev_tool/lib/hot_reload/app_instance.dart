@@ -109,19 +109,21 @@ class VmServiceAppInstance implements AppInstance {
     String dillPath, {
     required ApplyMode mode,
   }) async {
-    final inner = switch (mode) {
+    final Future<ApplyVerdict> inner = switch (mode) {
       ApplyMode.hotReload => _client.hotReload(dillPath),
       ApplyMode.hotRestart => _client.hotRestart(dillPath),
     };
 
     try {
       return switch (await inner.timeout(rpcTimeout)) {
-        VerdictApplied(:final notShown) => Applied(notShown: notShown),
-        VerdictAppErrored(:final error) => AppliedThenThrew(error),
+        VerdictApplied(:final String? notShown) => Applied(notShown: notShown),
+        VerdictAppErrored(:final FlutterErrorReport error) => AppliedThenThrew(
+          error,
+        ),
         // The client's own reason, whatever the failing step was. Naming one
         // step here would be a guess about a refusal that may never have got as
         // far as the upload.
-        VerdictRefused(:final reason) => ApplyFailed(reason),
+        VerdictRefused(:final String reason) => ApplyFailed(reason),
       };
     } on TimeoutException {
       // The leaked future will resolve when the WebSocket closes during

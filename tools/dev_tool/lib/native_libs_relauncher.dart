@@ -107,14 +107,18 @@ class Relauncher {
         'bazel build failed during restart; see build output.',
       );
     }
-    final fingerprint = await nativeLibsFingerprint(appFile);
-    final patched = patchedLibs?.call() ?? const [];
-    final bundleMoved = !fingerprintsEqual(fingerprint, _live);
+    final Map<String, String> fingerprint = await nativeLibsFingerprint(
+      appFile,
+    );
+    final List<String> patched = patchedLibs?.call() ?? const [];
+    final bool bundleMoved = !fingerprintsEqual(fingerprint, _live);
     if (!bundleMoved && patched.isEmpty) return const RelaunchNotNeeded();
     // The bundle's own difference when it has one. Only when it has none is the
     // patch the reason — an edit patched in and then undone — and then the
     // patched libraries are what the reply has to name.
-    final changed = bundleMoved ? changedLibs(_live, fingerprint) : patched;
+    final List<String> changed = bundleMoved
+        ? changedLibs(_live, fingerprint)
+        : patched;
     logger.info({
       'message': 'native_libs_changed',
       'text': 'Native libraries changed (${changed.join(', ')}); relaunching.',
@@ -128,7 +132,7 @@ class Relauncher {
     // `ready: false` knows to wait instead of reading a `Method not found` as a
     // broken agent surface.
     var allReady = true;
-    for (final session in sessions) {
+    for (final DeviceSession session in sessions) {
       if (session.appInstance.vmServiceUri == null) continue;
       // The session owns the swap: between the old process's death and the
       // replacement's arrival it must not look like the app ended, or the run's
@@ -163,7 +167,7 @@ class Relauncher {
         // left to do is say why, in the log and in the restart's reply, before
         // the run ends with it. A device's launch failures are StateErrors
         // whose message is the whole account; the "Bad state: " prefix is not.
-        final reason = e is StateError ? e.message : '$e';
+        final String reason = e is StateError ? e.message : '$e';
         _recordRelaunchFailure(failures, session, reason);
         continue;
       }
@@ -223,7 +227,7 @@ class Relauncher {
   /// far. Answering before that turns the driver's first call after a relaunch
   /// into `-32601 Method not found`.
   Future<bool> _reconnect(DeviceSession session) async {
-    final uri = session.appInstance.vmServiceUri;
+    final Uri? uri = session.appInstance.vmServiceUri;
     VmServiceClient? client;
     Object? lastConnectFailure;
     if (uri != null) {

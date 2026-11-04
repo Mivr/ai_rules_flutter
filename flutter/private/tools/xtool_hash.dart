@@ -16,11 +16,11 @@ int _rotl32(int val, int shift) =>
 
 /// Computes the 20-byte SHA-1 digest of [data] per RFC 3174.
 Uint8List sha1Bytes(List<int> data) {
-  final msgLen = data.length;
-  final bitLen = msgLen * 8;
+  final int msgLen = data.length;
+  final int bitLen = msgLen * 8;
   // Pad to 64-byte boundary with 0x80 followed by zeros and 64-bit big-endian length.
-  final padLen = ((56 - (msgLen + 1) % 64) + 64) % 64;
-  final totalLen = msgLen + 1 + padLen + 8;
+  final int padLen = ((56 - (msgLen + 1) % 64) + 64) % 64;
+  final int totalLen = msgLen + 1 + padLen + 8;
   final padded = Uint8List(totalLen);
   padded.setRange(0, msgLen, data);
   padded[msgLen] = 0x80;
@@ -66,7 +66,7 @@ Uint8List sha1Bytes(List<int> data) {
         f = b ^ c ^ d;
         k = 0xCA62C1D6;
       }
-      final temp = (_rotl32(a, 5) + f + e + k + w[i]) & 0xFFFFFFFF;
+      final int temp = (_rotl32(a, 5) + f + e + k + w[i]) & 0xFFFFFFFF;
       e = d;
       d = c;
       c = _rotl32(b, 30);

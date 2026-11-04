@@ -48,7 +48,9 @@ class E2eRunOptions {
 ///
 /// Prints usage and exits 2 when no VM name is given.
 E2eRunOptions parseE2eArgs(List<String> args) {
-  final positional = args.where((a) => !a.startsWith('--')).toList();
+  final List<String> positional = args
+      .where((a) => !a.startsWith('--'))
+      .toList();
   if (positional.isEmpty) {
     stderr.writeln(
       'Usage: dart run tools/vm/run_e2e.dart <vm-name> [--windows] '
@@ -56,13 +58,13 @@ E2eRunOptions parseE2eArgs(List<String> args) {
     );
     exit(2);
   }
-  final vmName = positional.first;
-  final isWindows = args.contains('--windows');
-  final keepGoing = args.contains('--keep-going');
-  final foldersArg = args
+  final String vmName = positional.first;
+  final bool isWindows = args.contains('--windows');
+  final bool keepGoing = args.contains('--keep-going');
+  final String foldersArg = args
       .firstWhere((a) => a.startsWith('--folders='), orElse: () => '')
       .replaceFirst('--folders=', '');
-  final folders = foldersArg.isEmpty
+  final List<String> folders = foldersArg.isEmpty
       ? e2eDefaultFolders
       : foldersArg.split(',').map((s) => s.trim()).toList();
   return E2eRunOptions(
@@ -102,7 +104,7 @@ String renderE2eSummary(List<E2eFolderResult> results, bool isWindows) {
   for (final r in results) {
     out.writeln('  ${r.pass ? "PASS" : "FAIL"}  ${r.folder}');
   }
-  final failed = results.where((r) => !r.pass).toList();
+  final List<E2eFolderResult> failed = results.where((r) => !r.pass).toList();
   if (failed.isEmpty) {
     out.writeln('\nAll ${results.length} folders passed.');
   } else {

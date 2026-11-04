@@ -1,6 +1,8 @@
 @Tags(['e2e'])
 library;
 
+import 'dart:io';
+
 import 'package:test/test.dart';
 
 import 'dev_tool_e2e_harness.dart';
@@ -56,9 +58,9 @@ void main() {
     test(
       'a session whose dev build failed reloads once the code is fixed',
       () async {
-        final ws = await editableWorkspace('hello_world');
-        final appMain = ws.file('lib/main.dart');
-        final original = appMain.readAsStringSync();
+        final EditableWorkspace ws = await editableWorkspace('hello_world');
+        final File appMain = ws.file('lib/main.dart');
+        final String original = appMain.readAsStringSync();
         const anchor = "'count: \$_counter'";
         expect(
           original.contains(anchor),
@@ -73,7 +75,7 @@ void main() {
               'earlier run; restore it before running this test',
         );
 
-        final dt = await startDevTool(
+        final DevToolProcess dt = await startDevTool(
           workspace: ws.root,
           target: ':hello_world_macos',
           device: 'macos',
@@ -89,7 +91,7 @@ void main() {
         /// guard exists for — every assertion below would then be made about an
         /// unchanged file, and a "passing" run would prove nothing at all.
         void edit(String replacement) {
-          final after = original.replaceFirst(anchor, replacement);
+          final String after = original.replaceFirst(anchor, replacement);
           expect(
             after,
             isNot(original),
@@ -111,7 +113,7 @@ void main() {
 
         // (1) and (2). The condition really happened, it was reported as the
         // build failure it is, and the caller was told the session survives it.
-        final reported = await dt.waitForStderr(
+        final String reported = await dt.waitForStderr(
           'dev_build_failed',
           timeout: const Duration(minutes: 8),
         );
@@ -133,28 +135,29 @@ void main() {
         // (3) The fix, and the bar. A marker of its own rather than the original
         // text: restoring `original` byte-for-byte would leave a passing
         // assertion that a reload which never happened could also satisfy.
-        final fixed = dt.events.length;
+        final int fixed = dt.events.length;
         edit("'recovered: \$_counter'");
 
-        final reload = await dt.waitForEventWhere(
+        final Map<String, dynamic> reload = await dt.waitForEventWhere(
           'app.reloadResult',
           after: fixed,
           what: 'the watcher-driven reload of the fix',
           timeout: const Duration(minutes: 8),
           test: (params) {
-            final result = (params['result'] as Map?) ?? const {};
+            final Map<dynamic, dynamic> result =
+                (params['result'] as Map?) ?? const {};
             // A failure is matched too, so a run that answers with one fails at
             // the assertion below with its reason rather than at a timeout with
             // nothing.
             if (result['succeeded'] != true) return true;
-            final files = result['filesRecompiled'];
+            final dynamic files = result['filesRecompiled'];
             return files is List &&
                 files.any(
                   (f) => f is String && f.startsWith('package:hello_world/'),
                 );
           },
         );
-        final result = (reload['params']!['result'] as Map)
+        final Map<String, dynamic> result = (reload['params']!['result'] as Map)
             .cast<String, dynamic>();
         expect(
           result['succeeded'],
@@ -168,9 +171,9 @@ void main() {
         // restarted. `app.waitFor` compares the widget's whole string, so this
         // cannot pass by finding nothing.
         await dt.waitForHttpControl(timeout: const Duration(minutes: 2));
-        final appId = dt.appId;
+        final String? appId = dt.appId;
         expect(appId, isNotNull);
-        final shown = await dt.httpCommand('app.waitFor', {
+        final Map<String, dynamic> shown = await dt.httpCommand('app.waitFor', {
           'appId': appId!,
           'text': 'recovered: 0',
           'timeoutMs': '30000',

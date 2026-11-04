@@ -52,7 +52,7 @@ void main() {
     ) async {
       final out = StringBuffer();
       final err = StringBuffer();
-      final code = await runGuarded(argv, out, err);
+      final int code = await runGuarded(argv, out, err);
       return (code: code, out: '$out', err: '$err');
     }
 
@@ -66,7 +66,7 @@ void main() {
           '  stderr.writeln("to stderr");\n'
           '}\n',
         );
-      final r = await run([
+      final ({int code, String err, String out}) r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart']),
         '--',
@@ -89,7 +89,7 @@ void main() {
           '  exit(1);\n'
           '}\n',
         );
-      final r = await run([
+      final ({int code, String err, String out}) r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart']),
         '--',
@@ -107,13 +107,17 @@ void main() {
     });
 
     test('refuses a call with no declared-inputs manifest', () async {
-      final r = await run(['--', Platform.resolvedExecutable, 'x.dart']);
+      final ({int code, String err, String out}) r = await run([
+        '--',
+        Platform.resolvedExecutable,
+        'x.dart',
+      ]);
       expect(r.code, 2);
       expect(r.err, contains('--declared-inputs'));
     });
 
     test('refuses a call with a missing manifest', () async {
-      final r = await run([
+      final ({int code, String err, String out}) r = await run([
         '--declared-inputs',
         '${dir.path}/no-such.manifest',
         '--',
@@ -137,7 +141,7 @@ void main() {}
           '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
           '}\n',
         );
-      final r = await run([
+      final ({int code, String err, String out}) r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart']),
         '--',
@@ -167,7 +171,7 @@ void main() {}
             '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
             '}\n',
           );
-        final r = await run([
+        final ({int code, String err, String out}) r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart']),
           '--',
@@ -208,7 +212,7 @@ void main() {}
             '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
             '}\n',
           );
-        final r = await run([
+        final ({int code, String err, String out}) r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart', 'lib/helper.dart']),
           '--',
@@ -228,7 +232,7 @@ import 'helper.dart' if (dart.library.html) 'file:///etc/hostname';
 import 'helper.dart';
 void main() {}
 """);
-      final r = await run([
+      final ({int code, String err, String out}) r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart', 'lib/helper.dart']),
         '--',
@@ -256,7 +260,7 @@ void main() {}
           '  File(r"${invoked.path}").writeAsStringSync("ran");\n'
           '}\n',
         );
-      final r = await run([
+      final ({int code, String err, String out}) r = await run([
         '--declared-inputs',
         writeManifest(['lib/bad.dart']),
         '--',
@@ -282,7 +286,7 @@ void main() {}
 ''');
         final script = File('${dir.path}/ok.dart')
           ..writeAsStringSync('void main() {}\n');
-        final r = await run([
+        final ({int code, String err, String out}) r = await run([
           '--declared-inputs',
           writeManifest(
             ['lib/main.dart', 'lib/helper.dart'],
