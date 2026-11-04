@@ -6,6 +6,8 @@ Each plugin compiles `.m` sources that use `@import Flutter;` or
 """
 
 load("@rules_flutter//flutter:ios.bzl", "flutter_apple_plugin_library", "flutter_apple_xcframework_import")
+
+# buildifier: disable=bzl-visibility
 load("@rules_flutter//flutter/private:flutter_apple_plugin_library.bzl", "flutter_apple_plugin_objc_library")
 
 package(default_visibility = ["//:__subpackages__"])
