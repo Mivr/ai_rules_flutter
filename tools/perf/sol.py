@@ -154,9 +154,16 @@ def info_argv(out_base, key, batch):
 
 
 def cquery_argv(out_base, target, build_flags, batch):
-    """Full ``bazel cquery`` argv in either mode."""
+    """Full ``bazel cquery`` argv in either mode.
+
+    Lists ``target.files`` (DefaultInfo.files) only: ``--output=files``
+    would add the ``.bazelrc`` ``test`` aspect output groups, whose
+    outputs ``bazel build`` never builds.
+    """
+    expr = '"\\n".join([f.path for f in target.files.to_list()])'
     return (command_prefix(batch) + startup_options(out_base)
-            + ["cquery", "--output=files", target] + list(build_flags))
+            + ["cquery", "--output=starlark", "--starlark:expr=" + expr,
+               target] + list(build_flags))
 
 
 def build_argv(out_base, config, log_path, profile_path, batch):
@@ -337,7 +344,7 @@ def bazel_info(capture, work, out_base, key, batch):
 
 def query_target_files(capture, work, out_base, target, build_flags,
                          batch):
-    """Absolute output paths of a target via `cquery --output=files`.
+    """Absolute default output paths of a target via `cquery --output=starlark`.
 
     Every non-blank line must resolve to an existing path under the
     output base; anything else (a warning leaked into stdout, a format
@@ -349,13 +356,9 @@ def query_target_files(capture, work, out_base, target, build_flags,
                   cwd=work)
     execroot = bazel_info(capture, work, out_base, "execution_root",
                           batch)
-    files = []
-    for line in out.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        path = line if os.path.isabs(line) else os.path.join(execroot, line)
-        files.append(check_under_base(path, out_base, "cquery " + target))
+    listed = [line.strip() for line in out.splitlines() if line.strip()]
+    files = [check_under_base(os.path.join(execroot, line), out_base,
+                              "cquery " + target) for line in listed]
     if not files:
         raise RuntimeError("bazel cquery %s listed no files" % target)
     return files
