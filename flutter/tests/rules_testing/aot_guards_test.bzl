@@ -24,12 +24,12 @@ load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_gen_snapshot_flag
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 
 _PACKAGE = "aot_flags_fixture"
-_MAIN = "lib/language_version_main.dart"
+_MAIN = "lib/guards_main.dart"
 
 def _flags(options, obfuscate = False, split_debug_info = False, strip = True):
     """Runs `flutter_aot_gen_snapshot_flags` against a fake rule context."""
     ctx = struct(
-        label = Label("//flutter/tests:aot_guards_fake"),
+        label = Label("//flutter/tests/rules_testing:aot_guards_fake"),
         attr = struct(
             extra_gen_snapshot_options = options,
             obfuscate = obfuscate,
@@ -123,7 +123,14 @@ def aot_guards_test_suite(name):
     Args:
         name: The test suite name.
     """
-    unittest.suite(name, _sizing_flags_kept_test, _strip_entries_test, _dwarf_kept_once_test)
+    units = {
+        name + "_sizing_flags_kept": _sizing_flags_kept_test,
+        name + "_strip_entries": _strip_entries_test,
+        name + "_dwarf_kept_once": _dwarf_kept_once_test,
+    }
+    for unit_name, unit_rule in units.items():
+        unit_rule(name = unit_name, size = "small")
+    native.test_suite(name = name + "_units", tests = [":" + n for n in units])
 
     _fixture("_guards_non_flag_target", ["strip"])
     _failure_test(name + "_non_flag", "_guards_non_flag_target", _non_flag_entry_impl)
