@@ -14,6 +14,8 @@ void main() {
   _registerGreenExecutionTests();
   _registerFailureAndShutdownTests();
   _registerScratchDeletionTests();
+  _registerTestXmlExpectationTests();
+  _registerCommandFilterTests();
 }
 
 String _writeFakeBazel(Directory dir, String scriptBody) {
@@ -385,5 +387,163 @@ void _registerScratchDeletionTests() {
     });
     deleteScratchTree(root);
     expect(root.existsSync(), isFalse);
+  });
+}
+
+Future<void> _runDemo(
+  Directory root,
+  Directory ws,
+  String fakeBazel, {
+  List<String>? commandFilter,
+}) => runE2e(
+  E2eRunnerOptions(
+    workspacePath: ws.path,
+    bazelBinary: fakeBazel,
+    commandFilter: commandFilter,
+    runtime: (
+      environment: Platform.environment,
+      tempParent: root,
+      isWindows: false,
+      stdoutSink: null,
+      stderrSink: null,
+    ),
+  ),
+);
+
+String _xmlFakeBazelBody(String callsLog) =>
+    '''
+echo "\$*" >> "$callsLog"
+case "\$*" in
+  *" shutdown") exit 0 ;;
+esac
+bep=""
+for arg in "\$@"; do
+  case "\$arg" in
+    --build_event_json_file=*) bep="\${arg#--build_event_json_file=}" ;;
+  esac
+done
+xml="\$PWD/generated_test.xml"
+printf '<testsuite name="integration_test/red_test.dart" failures="1"><testcase name="t"><failure/></testcase></testsuite>' > "\$xml"
+printf '{"testResult":{"testActionOutput":[{"name":"test.xml","uri":"file://%s"}]}}\\n' "\$xml" > "\$bep"
+exit 1
+''';
+
+String _xmlSpec(String needle) =>
+    '''
+schema: mivr-e2e-spec/1
+commands:
+  - name: red twin
+    run: bazel test //:red --test_output=errors
+    expect:
+      non_zero: true
+      test_xml_contains:
+        - '<testsuite name="integration_test/red_test.dart"'
+        - '$needle'
+''';
+
+void _registerTestXmlExpectationTests() {
+  const skip = 'POSIX /bin/sh fake bazel fixture';
+  group('runE2e test_xml_contains', () {
+    test('passes when every substring is in the BEP test.xml', () async {
+      final Directory root = Directory.systemTemp.createTempSync('runner_xml_');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final Directory ws = _createSampleWorkspace(root, _xmlSpec('<failure'));
+      final String bazel = _writeFakeBazel(
+        root,
+        _xmlFakeBazelBody(p.join(root.path, 'calls.log')),
+      );
+      await _runDemo(root, ws, bazel);
+    }, skip: Platform.isWindows ? skip : false);
+
+    test('names spec, command and the missing substring', () async {
+      final Directory root = Directory.systemTemp.createTempSync('runner_xml_');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final Directory ws = _createSampleWorkspace(root, _xmlSpec('MISSING_X'));
+      final String bazel = _writeFakeBazel(
+        root,
+        _xmlFakeBazelBody(p.join(root.path, 'calls.log')),
+      );
+      await expectLater(
+        () => _runDemo(root, ws, bazel),
+        throwsA(
+          isA<E2eRunnerException>()
+              .having(
+                (e) => e.specPath,
+                'specPath',
+                p.join(ws.path, 'e2e.yaml'),
+              )
+              .having((e) => e.commandName, 'commandName', 'red twin')
+              .having((e) => e.message, 'message', contains('MISSING_X')),
+        ),
+      );
+    }, skip: Platform.isWindows ? skip : false);
+  });
+}
+
+const String _filterSpecYaml = '''
+schema: mivr-e2e-spec/1
+commands:
+  - name: first
+    run: bazel build //:first
+  - name: second
+    run: bazel build //:second
+  - name: third
+    run: bazel build //:third
+''';
+
+void _registerCommandFilterTests() {
+  const skip = 'POSIX /bin/sh fake bazel fixture';
+  group('runE2e commandFilter', () {
+    Future<List<String>> run(List<String>? filter, {Object? matcher}) async {
+      final Directory root = Directory.systemTemp.createTempSync('runner_flt_');
+      addTearDown(() => root.deleteSync(recursive: true));
+      final callsLog = File(p.join(root.path, 'calls.log'));
+      final Directory ws = _createSampleWorkspace(root, _filterSpecYaml);
+      final String bazel = _writeFakeBazel(
+        root,
+        'echo "\$*" >> "${callsLog.path}"\nexit 0',
+      );
+      final Future<void> done = _runDemo(
+        root,
+        ws,
+        bazel,
+        commandFilter: filter,
+      );
+      if (matcher != null) {
+        await expectLater(done, throwsA(matcher));
+        expect(callsLog.readAsLinesSync().single, endsWith(' shutdown'));
+        return const [];
+      }
+      await done;
+      return callsLog.readAsLinesSync();
+    }
+
+    test('runs only the named commands in spec order', () async {
+      final List<String> calls = await run(['third', 'first']);
+      expect(calls, hasLength(3));
+      expect(calls[0], contains('//:first'));
+      expect(calls[1], contains('//:third'));
+      expect(calls[2], endsWith(' shutdown'));
+    }, skip: Platform.isWindows ? skip : false);
+
+    test('fails closed on an empty filter naming the spec path', () async {
+      await run(
+        const [],
+        matcher: isA<E2eRunnerException>()
+            .having((e) => e.specPath, 'specPath', endsWith('e2e.yaml'))
+            .having((e) => e.message, 'message', contains('empty')),
+      );
+    }, skip: Platform.isWindows ? skip : false);
+
+    test('fails closed on a name that matches no command', () async {
+      await run(
+        ['first', 'nope'],
+        matcher: isA<E2eRunnerException>().having(
+          (e) => e.message,
+          'message',
+          contains('"nope"'),
+        ),
+      );
+    }, skip: Platform.isWindows ? skip : false);
   });
 }

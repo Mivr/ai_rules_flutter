@@ -55,6 +55,9 @@ commands:
       output_regex:
         - 'passed.*ok'
       test_log_contains: suite_ok
+      test_xml_contains:
+        - '<testsuite name="x"'
+        - failures="0"
   - name: red check
     args:
       - query
@@ -85,6 +88,10 @@ commands:
       expect(second.expect.expectsZeroExit, isTrue);
       expect(second.expect.stdoutContains, ['passed']);
       expect(second.expect.testLogContains, ['suite_ok']);
+      expect(second.expect.testXmlContains, [
+        '<testsuite name="x"',
+        'failures="0"',
+      ]);
 
       final CommandSpec third = spec.commands[2];
       expect(third.expect.nonZero, isTrue);

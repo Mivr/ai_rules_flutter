@@ -30,6 +30,7 @@ const Set<String> _allowedExpectKeys = {
   'stderr_not_contains',
   'output_not_contains',
   'test_log_contains',
+  'test_xml_contains',
 };
 
 const Set<String> _allowedWriteFileKeys = {'path', 'content'};
@@ -105,6 +106,7 @@ typedef PositiveMatchSpec = ({
   List<String> outputContains,
   List<RegExp> outputRegex,
   List<String> testLogContains,
+  List<String> testXmlContains,
 });
 
 /// Negative output matchers for a command in `e2e.yaml`.
@@ -124,6 +126,7 @@ const PositiveMatchSpec _defaultPositiveMatch = (
   outputContains: <String>[],
   outputRegex: <RegExp>[],
   testLogContains: <String>[],
+  testXmlContains: <String>[],
 );
 
 const NegativeMatchSpec _defaultNegativeMatch = (
@@ -175,6 +178,9 @@ class ExpectSpec {
 
   /// Substrings that must appear in collected `test.log` outputs.
   List<String> get testLogContains => positive.testLogContains;
+
+  /// Substrings that must appear in collected JUnit `test.xml` outputs.
+  List<String> get testXmlContains => positive.testXmlContains;
 
   /// Whether this expectation expects the command to exit with code `0`.
   bool get expectsZeroExit => !nonZero && (exitCode == null || exitCode == 0);
@@ -608,6 +614,11 @@ ExpectSpec _parseExpect(Object? raw, SpecErrorContext ctx) {
       testLogContains: _parseStringOrList(
         raw['test_log_contains'],
         'test_log_contains',
+        ctx,
+      ),
+      testXmlContains: _parseStringOrList(
+        raw['test_xml_contains'],
+        'test_xml_contains',
         ctx,
       ),
     ),
