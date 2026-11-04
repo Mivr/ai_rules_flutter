@@ -26,6 +26,7 @@ flutter_application(
 
 dart_test(
     name = "scc_3cycle_test",
+    size = "small",
     srcs = ["test/scc_3cycle_test.dart"],
     main = "test/scc_3cycle_test.dart",
     deps = [
@@ -37,6 +38,7 @@ dart_test(
 
 dart_test(
     name = "asset_bundle_test",
+    size = "small",
     srcs = ["test/asset_bundle_test.dart"],
     data = [":app"],
     main = "test/asset_bundle_test.dart",
@@ -65,6 +67,7 @@ build_test(
 
 dart_test(
     name = "verify_android_apk_test",
+    size = "small",
     srcs = [
         "test/verify_android_apk_test.dart",
         "test/zip_archive.dart",
@@ -110,6 +113,7 @@ flutter_ios_simulator_build_test(
 
 dart_test(
     name = "verify_ios_bundle_test",
+    size = "small",
     srcs = [
         "test/verify_ios_bundle_test.dart",
         "test/zip_archive.dart",
