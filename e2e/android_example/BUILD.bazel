@@ -224,9 +224,23 @@ flutter_android_registrant(
     application = ":app_flutter",
 )
 
+# Payload-free base for the overlay, as flutter_android_app builds its own
+# (flutter/android.bzl): engine + runner lib, but neither the native libs jar
+# nor flutter_assets; the overlay injects those after resource linking.
+android_binary(
+    name = "app_overlay_base",
+    custom_package = "com.example.flutterapp.bazelrunner",
+    manifest = ":bazel_runner_manifest",
+    tags = ["manual"],
+    deps = [
+        ":app_engine",
+        ":bazel_runner_lib",
+    ],
+)
+
 flutter_android_apk_overlay(
     name = "e2e_apk_overlay",
-    binary = ":app_bazel_runner",
+    binary = ":app_overlay_base",
     flutter_assets = ":app_overlay_assets",
     native_libs_jar = ":app_native_libs_jar",
 )
