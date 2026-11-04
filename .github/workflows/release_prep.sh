@@ -108,7 +108,11 @@ DOCS_BIN=$(bazel --output_base="$DOCS_DIR" info bazel-bin)
 DOCS_ARCHIVE="${ARCHIVE%.tar.gz}.docs.tar.gz"
 tar --create --auto-compress --directory "$DOCS_BIN" --file "$DOCS_ARCHIVE" .
 bazel --output_base="$DOCS_DIR" shutdown >/dev/null 2>&1 || true
-if [[ ! -s "$DOCS_ARCHIVE" ]] || ! tar --list --file "$DOCS_ARCHIVE" | grep -q '\.binaryproto$'; then
+# List into a file: under pipefail, `tar --list | grep -q` fails when grep exits
+# on its first match and tar hits EPIPE on a long listing.
+DOCS_LIST="$TMPDIR/docs_list"
+if [[ ! -s "$DOCS_ARCHIVE" ]] || ! tar --list --file "$DOCS_ARCHIVE" >"$DOCS_LIST" ||
+  ! grep -q '\.binaryproto$' "$DOCS_LIST"; then
   echo "release_prep: query '${DOCS_QUERY}' produced empty or missing archive ${DOCS_ARCHIVE}" >&2
   exit 1
 fi
