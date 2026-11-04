@@ -730,9 +730,8 @@ void main() {
     );
 
     test('content change with no digest input is still detected', () async {
-      // The harness's --inject-digest-lie sends a stale digest for a changed
-      // file. The worker never reads request digests — handleRequest takes
-      // only paths — so the lie has nothing to hold onto.
+      // A request that carries no digest for the changed file hashes its
+      // contents, so the edit is seen.
       worker = IncrWorker(
         cwd: h.cwd,
         tempParent: h.cwd,
@@ -748,6 +747,126 @@ void main() {
         sessions.single.commands.where((c) => c.contains('lib/a.dart')),
         hasLength(1),
       );
+    });
+
+    group('request digests decide the recompile', () {
+      const edited = '// a comment\nint get answer => 42;\n';
+      final String fake = 'ab' * 32;
+
+      Map<String, String> digestsOf(Harness h) => {
+        for (final p in h.inputs)
+          p: sha256Hex(File('${h.cwd}/$p').readAsBytesSync()),
+      };
+
+      int deltas() => sessions.single.commands
+          .where((c) => c.contains('lib/a.dart'))
+          .length;
+
+      void edit() {
+        h.write('stage/lib/a.dart', edited);
+        h.write('lib/a.dart', edited);
+      }
+
+      Future<void> coldWith(Map<String, String> digests) async {
+        worker = IncrWorker(
+          cwd: h.cwd,
+          tempParent: h.cwd,
+          sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
+        );
+        final IncrResult result = await worker.handleRequest(
+          h.argv,
+          h.inputs,
+          digests: digests,
+        );
+        expect(result.exitCode, 0, reason: result.output);
+      }
+
+      Future<void> warmWith(Map<String, String> digests) async {
+        final IncrResult result = await worker.handleRequest(
+          h.argv,
+          h.inputs,
+          digests: digests,
+        );
+        expect(result.exitCode, 0, reason: result.output);
+      }
+
+      test('an unchanged digest with changed contents is no change', () async {
+        final Map<String, String> digests = digestsOf(h);
+        await coldWith(digests);
+        edit();
+        await warmWith(digests);
+        expect(deltas(), 0);
+      });
+
+      test('a changed digest is a change without reading contents', () async {
+        final Map<String, String> digests = digestsOf(h);
+        await coldWith(digests);
+        // Contents stay the same: only the digest says the file changed.
+        await warmWith({
+          ...digests,
+          'lib/a.dart': fake,
+          'stage/lib/a.dart': fake,
+        });
+        expect(deltas(), 1);
+      });
+
+      test('a base64 digest is normalised to the stored spelling', () async {
+        final Map<String, String> digests = digestsOf(h);
+        await coldWith(digests);
+        final Map<String, String> b64 = {
+          for (final e in digests.entries)
+            e.key: base64.encode([
+              for (var i = 0; i < 64; i += 2)
+                int.parse(e.value.substring(i, i + 2), radix: 16),
+            ]),
+        };
+        await warmWith(b64);
+        expect(deltas(), 0);
+      });
+
+      for (final MapEntry<String, String?> bad in <String, String?>{
+        'no digest': null,
+        'an empty digest': '',
+        'a malformed digest': 'not-a-digest',
+        'a short hex digest': 'abcd',
+      }.entries) {
+        test('${bad.key} hashes the contents', () async {
+          final Map<String, String> good = digestsOf(h);
+          Map<String, String> withBad() => {
+            ...good,
+            if (bad.value != null) 'lib/a.dart': bad.value!,
+            if (bad.value != null) 'stage/lib/a.dart': bad.value!,
+          }..removeWhere((k, _) => bad.value == null && k.endsWith('a.dart'));
+          await coldWith(good);
+          await warmWith(withBad());
+          expect(deltas(), 0, reason: 'unchanged contents');
+          edit();
+          await warmWith(withBad());
+          expect(deltas(), 1, reason: 'edited contents');
+        });
+      }
+
+      test('a digest for a path outside the request is ignored', () async {
+        final Map<String, String> digests = digestsOf(h);
+        await coldWith(digests);
+        // lib/a.dart is stored but no longer listed; its fake digest must not
+        // be honoured, and a digest for a never-seen path changes nothing.
+        final IncrResult result = await worker.handleRequest(
+          h.argv,
+          [...h.inputs]..remove('lib/a.dart'),
+          digests: {...digests, 'lib/a.dart': fake, 'lib/other.dart': fake},
+        );
+        expect(result.exitCode, 0, reason: result.output);
+        expect(deltas(), 0);
+      });
+
+      test('digests then none, same contents, is no change', () async {
+        await coldWith(digestsOf(h));
+        await warmWith(const {});
+        expect(deltas(), 0);
+        await warmWith(const {});
+        expect(deltas(), 0);
+      });
     });
 
     test('a changed package config restarts the server cold', () async {

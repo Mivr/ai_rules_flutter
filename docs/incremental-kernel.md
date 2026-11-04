@@ -76,6 +76,12 @@ built from Dart (no host Python, no new downloads):
   per action (a fresh process that compiles cold, then applies rule F), so
   the output is identical without any persistent state.
 
+The worker decides what changed from the SHA-256 digests Bazel sends with
+each input in the request (hex or base64), and reads a file's contents only
+for an input with no usable digest (absent, empty or not 32 bytes). The
+trade-off: a wrong digest from Bazel silently skips a recompile. The
+directive guard and the read-set check still read the sources themselves.
+
 Each worker keeps at most one warm server by default. One warm server holds
 about 1.75 GiB of compiler state, so on small machines bound the worker
 processes with `--worker_max_instances=FlutterKernelCompile=N`
