@@ -1843,4 +1843,74 @@ void main() {}
       );
     });
   });
+
+  group('scanFlutterDirectivesAgainst', () {
+    late Directory work;
+    late Directory savedCwd;
+
+    setUp(() {
+      savedCwd = Directory.current;
+      work = Directory.systemTemp.createTempSync('kernel_filter_subset_');
+      Directory.current = work.path;
+    });
+    tearDown(() {
+      Directory.current = savedCwd.path;
+      work.deleteSync(recursive: true);
+    });
+
+    void write(String rel, String content) {
+      File('${work.path}/$rel')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(content);
+    }
+
+    test('checks only the chosen subset against the full declared set', () {
+      write('lib/helper.dart', 'int a = 1;\n');
+      write('lib/a.dart', "import 'helper.dart';\nimport 'gone.dart';\n");
+      write('lib/b.dart', "import 'gone.dart';\n");
+      final all = ['lib/helper.dart', 'lib/a.dart', 'lib/b.dart'];
+      final Map<String, List<String>> verdicts = scanFlutterDirectivesAgainst(
+        ['lib/a.dart'],
+        all,
+        [],
+      );
+      expect(verdicts.keys, ['lib/a.dart']);
+      expect(verdicts['lib/a.dart'], hasLength(1));
+      expect(verdicts['lib/a.dart']!.single, contains('gone.dart'));
+    });
+
+    test('a directive is allowed only while its target is declared', () {
+      write('lib/helper.dart', 'int a = 1;\n');
+      write('lib/a.dart', "import 'helper.dart';\n");
+      final Map<String, List<String>> withHelper = scanFlutterDirectivesAgainst(
+        ['lib/a.dart'],
+        ['lib/helper.dart', 'lib/a.dart'],
+        [],
+      );
+      expect(withHelper['lib/a.dart'], isEmpty);
+      final Map<String, List<String>> without = scanFlutterDirectivesAgainst(
+        ['lib/a.dart'],
+        ['lib/a.dart'],
+        [],
+      );
+      expect(without['lib/a.dart'], hasLength(1));
+    });
+
+    test('per-source scan flattens to the existing full-scan result', () {
+      write('lib/a.dart', "import 'x.dart';\n");
+      write('lib/b.dart', "import 'y.dart';\n");
+      final sources = [
+        'lib/b.dart',
+        'lib/a.dart',
+        'lib/missing.dart',
+      ];
+      final Map<String, List<String>> perSource =
+          scanFlutterDirectivesPerSource(sources, []);
+      expect(perSource.keys.toSet(), {'lib/a.dart', 'lib/b.dart'});
+      expect(
+        [for (final p in perSource.keys.toList()..sort()) ...perSource[p]!],
+        findDisallowedFlutterDirectives(sources, []),
+      );
+    });
+  });
 }
