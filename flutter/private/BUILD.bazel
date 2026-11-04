@@ -835,6 +835,7 @@ bzl_library(
     srcs = ["flutter_pub_apple.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":flutter_pub_apple_byname",
         ":flutter_pub_apple_deps",
         ":flutter_pub_apple_pods",
         ":flutter_pub_plugin_deps",
@@ -843,6 +844,16 @@ bzl_library(
         ":starlark_literal",
         ":swiftpm_manifest",
         ":swiftpm_resolved",
+        ":swiftpm_translate",
+    ],
+)
+
+bzl_library(
+    name = "flutter_pub_apple_byname",
+    srcs = ["flutter_pub_apple_byname.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":swiftpm_manifest_lex",
         ":swiftpm_translate",
     ],
 )

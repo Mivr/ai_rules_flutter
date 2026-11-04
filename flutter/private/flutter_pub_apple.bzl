@@ -16,6 +16,7 @@ load(
     _apple_swiftpm_synthetic_manifest = "apple_swiftpm_synthetic_manifest",
     _select_apple_swiftpm_deps = "select_apple_swiftpm_deps",
 )
+load(":flutter_pub_apple_byname.bzl", "apple_swiftpm_declares_package", "apple_swiftpm_resolve_byname")
 load(":flutter_pub_apple_pods.bzl", "detect_apple_cocoapods_deps")
 load(":flutter_pub_plugin_deps.bzl", "mapped_apple_plugin_deps")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
@@ -675,22 +676,49 @@ def apple_swiftpm_manifest_products(plugin_name, manifest_text, manifest_dir, sr
         the kept `.product` dependencies in manifest order; `pkg_deps`
         are the manifest's `.package(...)` declarations; `target` is the
         manifest target the spoke builds, or None. A manifest the parser
-        cannot read is ok only when it declares no `.package(` at all.
+        cannot read is ok only when its tokens spell no `.package` at all.
+        `products` also holds the `kind == "same"` dependencies that name
+        no target of the manifest: products of another package by name.
     """
     parsed = parse_swiftpm_plugin_package(plugin_name, manifest_text)
     if not parsed.ok:
-        if ".package(" not in manifest_text:
+        if not apple_swiftpm_declares_package(manifest_text):
             return struct(ok = True, error = "", products = [], pkg_deps = [], target = None)
         return struct(ok = False, error = parsed.error, products = [], pkg_deps = [], target = None)
     target = _apple_swiftpm_manifest_target(parsed.model, manifest_dir, srcs_dirs)
     if target == None:
         return struct(ok = True, error = "", products = [], pkg_deps = parsed.model.pkg_deps, target = None)
+    local = [other.name.lower() for other in parsed.model.targets if other.name]
     products = [
         dep
         for dep in target.deps
-        if dep.kind == "product" and _apple_swiftpm_keeps_dep(dep, parsed.model.pkg_deps, platform)
+        if (dep.kind == "product" or (getattr(dep, "by_name", False) and dep.name.lower() not in local)) and _apple_swiftpm_keeps_dep(dep, parsed.model.pkg_deps, platform)
     ]
     return struct(ok = True, error = "", products = products, pkg_deps = parsed.model.pkg_deps, target = target)
+
+def _apple_swiftpm_linked_dep(plugin_name, dep, pkg_deps, product_deps):
+    """The product dependency one kept target dependency links.
+
+    A product reference links as written; a by-name reference becomes the
+    product of the declared package that owns it, or fails the fetch.
+
+    Args:
+        plugin_name: The pub plugin name, for messages.
+        dep: The kept dependency reference (`kind` product or same).
+        pkg_deps: The manifest's parsed `.package(...)` declarations.
+        product_deps: The hub's `<identity>:<product>` -> label map.
+
+    Returns:
+        `struct(ok, error, dep)`.
+    """
+    if dep.kind == "product":
+        return struct(ok = True, error = "", dep = dep)
+
+    def is_mapped(package, product):
+        """Whether the hub maps this product of this package."""
+        return _apple_swiftpm_dep_mapped_label(plugin_name, struct(package = package, name = product), pkg_deps, product_deps) != None
+
+    return apple_swiftpm_resolve_byname(plugin_name, dep, pkg_deps, is_mapped)
 
 def _apple_swiftpm_labels_for_products(plugin_name, manifest_dir, srcs_dirs, platform, pins, prepared, product_deps):
     """Resolve one manifest's kept product dependencies to spoke labels.
@@ -710,7 +738,11 @@ def _apple_swiftpm_labels_for_products(plugin_name, manifest_dir, srcs_dirs, pla
     """
     labels = []
     seen = {}
-    for dep in prepared.products:
+    for listed in prepared.products:
+        linked = _apple_swiftpm_linked_dep(plugin_name, listed, prepared.pkg_deps, product_deps)
+        if not linked.ok:
+            return struct(ok = False, error = linked.error, labels = [])
+        dep = linked.dep
         mapped = _apple_swiftpm_dep_mapped_label(plugin_name, dep, prepared.pkg_deps, product_deps)
         if mapped != None:
             selected = struct(ok = True, error = "", labels = [mapped])
@@ -743,7 +775,7 @@ def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dir
     dependencies and the template's `FlutterFramework` path product are
     skipped, so a manifest from Flutter's plugin template links nothing.
     A manifest the parser cannot read fails only when its text declares
-    a package dependency at all (contains `.package(`): a
+    a package dependency at all (its tokens spell `.package`): a
     dependency-free manifest keeps building exactly as today. The
     resolved-file refusal applies only when a product this platform
     actually links needs a SwiftPM package, and names that package; a

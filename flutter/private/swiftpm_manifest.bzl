@@ -313,10 +313,11 @@ def _swiftpm_parse_target_dep(element, target_name):
     Returns:
         `struct(ok, detail, dep)`: `dep` is `struct(kind, name, package,
         condition)` with `kind` `"same"` or `"product"` and `condition`
-        None or `struct(platforms)`.
+        None or `struct(platforms)`; a `"same"` dep also carries
+        `by_name` (a string or `.byName(name:)`, not `.target(name:)`).
     """
     if len(element) == 1 and element[0].kind == "str":
-        return struct(ok = True, detail = "", dep = struct(kind = "same", name = element[0].text, package = "", condition = None))
+        return struct(ok = True, detail = "", dep = struct(kind = "same", name = element[0].text, package = "", condition = None, by_name = True))
     head = _swiftpm_call_head(element)
     if not head.ok or not head.dotted or head.name not in ["target", "byName", "product"]:
         return struct(ok = False, detail = "expected a target dependency (a string, `.target(name:)`, `.byName(name:)` or `.product(name:package:)`)", dep = None)
@@ -325,7 +326,7 @@ def _swiftpm_parse_target_dep(element, target_name):
         return struct(ok = False, detail = kwargs.detail, dep = None)
     if head.name == "product":
         return _swiftpm_parse_product_dep(kwargs.kwargs, target_name)
-    return _swiftpm_parse_same_dep(kwargs.kwargs, target_name)
+    return _swiftpm_parse_same_dep(kwargs.kwargs, target_name, head.name == "byName")
 
 _SWIFTPM_CONDITION_PLATFORMS = {"iOS": "ios", "macOS": "macos"}
 
@@ -376,12 +377,14 @@ def _swiftpm_parse_dep_condition(kwarg, target_name):
             return struct(ok = False, detail = holder + "expected `.when(platforms:)` entries naming platforms", value = None)
     return struct(ok = True, detail = "", value = struct(platforms = platforms))
 
-def _swiftpm_parse_same_dep(kwargs, target_name):
+def _swiftpm_parse_same_dep(kwargs, target_name, by_name):
     """Read a `.target(name:)` / `.byName(name:)` dependency.
 
     Args:
         kwargs: The call's parsed keyword arguments.
         target_name: The target holding the dependency, for messages.
+        by_name: True for `.byName(name:)`, which SwiftPM may resolve to a
+            product of another package; False for `.target(name:)`.
 
     Returns:
         `struct(ok, detail, dep)`.
@@ -398,7 +401,7 @@ def _swiftpm_parse_same_dep(kwargs, target_name):
     condition = _swiftpm_parse_dep_condition(by_key.get("condition", None), target_name)
     if not condition.ok:
         return struct(ok = False, detail = condition.detail, dep = None)
-    return struct(ok = True, detail = "", dep = struct(kind = "same", name = one.text, package = "", condition = condition.value))
+    return struct(ok = True, detail = "", dep = struct(kind = "same", name = one.text, package = "", condition = condition.value, by_name = by_name))
 
 def _swiftpm_parse_product_dep(kwargs, target_name):
     """Read a `.product(name:package:)` dependency.

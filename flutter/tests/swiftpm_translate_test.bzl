@@ -171,6 +171,9 @@ let package = Package(
     translated = translate_swiftpm_package("broken", "deps", parsed.model, ["broken"], {"Broken": struct(dir = "d", srcs = ["d/a.swift"])})
     asserts.true(env, not translated.ok)
     asserts.true(env, "unknown target" in translated.error)
+    asserts.true(env, "not supported" in translated.error)
+    asserts.true(env, ".product(name:" in translated.error)
+    asserts.true(env, "swift_package_build_files" in translated.error)
     return unittest.end(env)
 
 def _renamed_single_target_product_aliases_test_impl(ctx):
