@@ -31,8 +31,8 @@ flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.7")
 flutter.pub(
     name = "deps",
-    lock = "//:pubspec.lock",
     cycle_breaks = {"cycle_a": ["cycle_b"]},
+    lock = "//:pubspec.lock",
 )
 flutter.pub(
     name = "deps_cycle",
