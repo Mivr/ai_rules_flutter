@@ -1007,6 +1007,29 @@ void main() {
       expect(sessions, isEmpty);
     });
 
+    test(
+      'the guard reads sources even when request digests are equal',
+      () async {
+        final String fake = 'ab' * 32;
+        final Map<String, String> digests = {for (final p in h.inputs) p: fake};
+        final IncrResult first = await worker.handleRequest(
+          h.argv,
+          h.inputs,
+          digests: digests,
+        );
+        expect(first.exitCode, 0);
+        h.write('lib/main.dart', "import 'file:///etc/hostname';\n");
+        h.write('stage/lib/main.dart', "import 'file:///etc/hostname';\n");
+        final IncrResult result = await worker.handleRequest(
+          h.argv,
+          h.inputs,
+          digests: digests,
+        );
+        expect(result.exitCode, 1);
+        expect(result.output, contains('is not a declared input'));
+      },
+    );
+
     test('an undeclared read is refused with the batch message', () async {
       worker = IncrWorker(
         cwd: h.cwd,
