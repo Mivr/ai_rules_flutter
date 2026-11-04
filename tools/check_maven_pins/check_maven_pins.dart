@@ -1,4 +1,4 @@
-/// Validates that Android e2e workspaces have pinned rules_android_maven locks.
+/// Validates that every Maven install in the e2e workspaces is lock-pinned.
 ///
 /// Run from the repo root with no arguments (CI runs it as a job step):
 /// `bazel run //tools/check_maven_pins`.
@@ -8,7 +8,7 @@ import 'dart:io';
 
 import 'pins.dart';
 
-/// CLI entry point for checking `rules_android_maven` lock files.
+/// CLI entry point for checking Maven lock files.
 void main(List<String> args) {
   final String rootPath =
       Platform.environment['BUILD_WORKSPACE_DIRECTORY'] ??
@@ -20,10 +20,12 @@ void main(List<String> args) {
     exit(2);
   }
 
-  final List<String>? workspaces = args.isNotEmpty ? args : null;
+  final List<String> workspaces = args.isNotEmpty
+      ? args
+      : discoverMavenWorkspaces(rootPath);
   final List<String> errors = checkAllWorkspaces(
     rootPath: rootPath,
-    workspaces: workspaces,
+    workspaces: workspaces.isEmpty ? null : workspaces,
   );
 
   if (errors.isNotEmpty) {
@@ -33,8 +35,8 @@ void main(List<String> args) {
     exit(1);
   }
 
-  final int count = workspaces?.length ?? defaultAndroidWorkspaces.length;
   stdout.writeln(
-    'ok: $count Android workspaces have valid rules_android_maven locks',
+    'ok: ${countInstalls(rootPath, workspaces)} maven.install declarations '
+    'in ${workspaces.length} workspaces have valid sha256-pinned locks',
   );
 }
