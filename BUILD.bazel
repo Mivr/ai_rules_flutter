@@ -23,7 +23,10 @@ alias(
 
 exports_files(
     ["analysis_baseline.json"],
-    visibility = ["//lint:__pkg__"],
+    visibility = [
+        "//flutter/tests:__subpackages__",
+        "//lint:__pkg__",
+    ],
 )
 
 package_metadata(

@@ -3,9 +3,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'dev_tool_exception.dart';
-import 'logging.dart';
-import 'runfiles_helper.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
 
 final _logger = Logger('dev_tool.bazel');
 

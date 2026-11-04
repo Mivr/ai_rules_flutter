@@ -13,15 +13,14 @@ library;
 import 'dart:async';
 
 import 'package:dds/dds.dart';
-
-import 'app_log_sink.dart';
-import 'dev_tool_exception.dart';
-import 'device.dart';
-import 'device_web.dart';
-import 'run_plan.dart';
-import 'session.dart';
-import 'session_host.dart';
-import 'vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/app_log_sink.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/device_web.dart';
+import 'package:flutter_bazel_dev_tool/run_plan.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/session_host.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 
 /// What the VM-service connect produced: the client, the owned DDS, and why
 /// there is no client.

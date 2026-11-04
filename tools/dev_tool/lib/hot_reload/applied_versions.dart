@@ -3,7 +3,7 @@
 /// The reload pipeline asks `findChangedFrom(currentSnapshot)` to decide
 /// what to recompile, and calls `markApplied(snapshot, files: ...)` after
 /// a successful apply. Per-file state — never a single global timestamp.
-import 'workspace.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
 
 class AppliedVersions {
   final Map<String, Version> _applied = {};

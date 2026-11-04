@@ -2,7 +2,7 @@
 ///
 /// Abstracts the difference between native (VM) and web (DDC) compilation
 /// so [FrontendServer] can work with either target.
-import 'toolchain_info.dart';
+import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 
 /// What the frontend server needs to compile for a given platform.
 abstract interface class CompilerConfig {

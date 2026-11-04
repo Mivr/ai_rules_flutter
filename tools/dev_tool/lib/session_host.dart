@@ -15,18 +15,18 @@ library;
 import 'dart:async';
 import 'dart:io';
 
-import 'agent_command.dart';
-import 'bazel.dart';
-import 'command_failure.dart';
-import 'command_runner.dart';
-import 'dev_tool_exception.dart';
-import 'http_control_channel.dart';
-import 'logging.dart';
-import 'machine_protocol.dart';
-import 'reload_pipeline.dart';
-import 'session.dart';
-import 'shutdown_signals.dart';
-import 'teardown.dart';
+import 'package:flutter_bazel_dev_tool/agent_command.dart';
+import 'package:flutter_bazel_dev_tool/bazel.dart';
+import 'package:flutter_bazel_dev_tool/command_failure.dart';
+import 'package:flutter_bazel_dev_tool/command_runner.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/http_control_channel.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/machine_protocol.dart';
+import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/shutdown_signals.dart';
+import 'package:flutter_bazel_dev_tool/teardown.dart';
 
 class SessionHost {
   /// Every app this command is driving, in launch (or connect) order.

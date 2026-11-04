@@ -10,15 +10,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/host_tools.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/native_patch_delivery.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 import 'package:path/path.dart' as p;
-
-import 'device.dart';
-import 'host_tools.dart';
-import 'logging.dart';
-import 'native_patch_delivery.dart';
-import 'temp_dir.dart';
-import 'vm_service_client.dart';
-import 'vm_service_discovery.dart';
 
 final _logger = Logger('dev_tool.device');
 

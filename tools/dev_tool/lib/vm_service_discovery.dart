@@ -57,8 +57,8 @@ library;
 
 import 'dart:async';
 
-import 'app_log.dart';
-import 'logging.dart';
+import 'package:flutter_bazel_dev_tool/app_log.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
 
 /// Pattern matching Dart VM service URI announcements from Flutter apps.
 /// Matches Flutter's own `kVMServiceMessageRegExp` from globals.dart.

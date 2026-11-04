@@ -18,18 +18,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/device_android.dart';
+import 'package:flutter_bazel_dev_tool/device_desktop.dart';
+import 'package:flutter_bazel_dev_tool/device_ios.dart';
+import 'package:flutter_bazel_dev_tool/device_ios_sim.dart';
+import 'package:flutter_bazel_dev_tool/device_web.dart';
+import 'package:flutter_bazel_dev_tool/host_tools.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
 import 'package:path/path.dart' as p;
-
-import 'dev_tool_exception.dart';
-import 'device.dart';
-import 'device_web.dart';
-import 'device_ios.dart';
-import 'device_ios_sim.dart';
-import 'device_android.dart';
-import 'device_desktop.dart';
-import 'host_tools.dart';
-import 'logging.dart';
-import 'temp_dir.dart';
 
 final _logger = Logger('dev_tool.device_id');
 

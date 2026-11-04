@@ -16,10 +16,9 @@
 library;
 
 import 'package:args/args.dart';
-
-import 'command_failure.dart';
-import 'dev_tool_exception.dart';
-import 'web_mode.dart';
+import 'package:flutter_bazel_dev_tool/command_failure.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/web_mode.dart';
 
 /// The hostname that binds every interface rather than one address.
 ///

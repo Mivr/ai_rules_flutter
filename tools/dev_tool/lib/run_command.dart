@@ -22,25 +22,24 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
-
-import 'bazel.dart';
-import 'dev_tool_exception.dart';
-import 'device_web.dart';
-import 'hot_reload/file_clock.dart';
-import 'hot_reload/source_watcher.dart';
-import 'logging.dart';
-import 'machine_protocol.dart';
-import 'device_launcher.dart';
-import 'native_assembly_gate.dart';
-import 'native_pipeline_assembler.dart';
-import 'reload_pipeline.dart';
-import 'run_plan.dart';
-import 'web_mode.dart';
-import 'web_options.dart';
-import 'session.dart';
-import 'session_host.dart';
-import 'temp_dir.dart';
-import 'web_pipeline_assembler.dart';
+import 'package:flutter_bazel_dev_tool/bazel.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/device_launcher.dart';
+import 'package:flutter_bazel_dev_tool/device_web.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/file_clock.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/source_watcher.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/machine_protocol.dart';
+import 'package:flutter_bazel_dev_tool/native_assembly_gate.dart';
+import 'package:flutter_bazel_dev_tool/native_pipeline_assembler.dart';
+import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
+import 'package:flutter_bazel_dev_tool/run_plan.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/session_host.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
+import 'package:flutter_bazel_dev_tool/web_mode.dart';
+import 'package:flutter_bazel_dev_tool/web_options.dart';
+import 'package:flutter_bazel_dev_tool/web_pipeline_assembler.dart';
 
 export 'dev_tool_exception.dart' show DevToolException;
 

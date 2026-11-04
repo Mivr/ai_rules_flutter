@@ -5,7 +5,7 @@
 /// 127.0.0.1:49151 that the screenshot tool uses to reach iOS devices.
 import 'dart:io';
 
-import 'runfiles_helper.dart';
+import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
 
 /// Execute the ios-tunnel command.
 ///

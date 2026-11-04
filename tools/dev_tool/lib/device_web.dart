@@ -9,20 +9,20 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'app_log.dart';
-import 'cdp_console.dart';
-import 'compiler_config.dart';
-import 'device.dart';
-import 'host_tools.dart';
-import 'key_press.dart';
-import 'logging.dart';
-import 'reload_strategy.dart';
-import 'teardown.dart';
-import 'temp_dir.dart';
-import 'toolchain_info.dart';
-import 'vm_service_client.dart';
-import 'web_module_server.dart';
-import 'web_options.dart';
+import 'package:flutter_bazel_dev_tool/app_log.dart';
+import 'package:flutter_bazel_dev_tool/cdp_console.dart';
+import 'package:flutter_bazel_dev_tool/compiler_config.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/host_tools.dart';
+import 'package:flutter_bazel_dev_tool/key_press.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
+import 'package:flutter_bazel_dev_tool/teardown.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
+import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/web_module_server.dart';
+import 'package:flutter_bazel_dev_tool/web_options.dart';
 
 final _logger = Logger('dev_tool.device');
 

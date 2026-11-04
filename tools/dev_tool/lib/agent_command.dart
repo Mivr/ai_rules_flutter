@@ -13,18 +13,17 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/command_failure.dart';
+import 'package:flutter_bazel_dev_tool/command_runner.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/device_desktop.dart';
+import 'package:flutter_bazel_dev_tool/device_ios.dart';
+import 'package:flutter_bazel_dev_tool/device_ios_sim.dart';
+import 'package:flutter_bazel_dev_tool/device_web.dart';
+import 'package:flutter_bazel_dev_tool/key_press.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:vm_service/vm_service.dart';
-
-import 'command_failure.dart';
-import 'command_runner.dart';
-import 'device.dart';
-import 'device_web.dart';
-import 'device_ios.dart';
-import 'device_ios_sim.dart';
-import 'device_desktop.dart';
-import 'key_press.dart';
-import 'session.dart';
-import 'vm_service_client.dart';
 
 /// How long an agent command waits: past the app's own deadline for the
 /// dispatch, and for reading the isolate's pause state.

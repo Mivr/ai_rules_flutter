@@ -16,7 +16,7 @@
 /// pipeline's readiness gate, exactly as they do while assembly itself runs.
 library;
 
-import 'session_host.dart';
+import 'package:flutter_bazel_dev_tool/session_host.dart';
 
 /// Start [assemble] once every launched session's first-frame wait has settled.
 ///

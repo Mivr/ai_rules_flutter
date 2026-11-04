@@ -43,8 +43,8 @@
 /// rather than about the bundle on disk.
 library;
 
-import 'file_snapshot.dart';
-import 'native_libs_verdict.dart';
+import 'package:flutter_bazel_dev_tool/file_snapshot.dart';
+import 'package:flutter_bazel_dev_tool/native_libs_verdict.dart';
 
 export 'native_libs_verdict.dart';
 

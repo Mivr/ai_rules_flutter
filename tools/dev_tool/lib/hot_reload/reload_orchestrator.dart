@@ -23,10 +23,10 @@
 /// shared compiler cannot serve independently-targeted apps.
 import 'dart:async';
 
-import 'app_instance.dart';
-import 'compiler.dart';
-import 'session_reloader.dart';
-import 'workspace.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/app_instance.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/compiler.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/session_reloader.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
 
 /// Outcome of a reload or restart request.
 sealed class ReloadOutcome {

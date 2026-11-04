@@ -35,9 +35,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'app_log.dart';
-import 'ios_sim_log_fallback.dart';
-import 'logging.dart';
+import 'package:flutter_bazel_dev_tool/app_log.dart';
+import 'package:flutter_bazel_dev_tool/ios_sim_log_fallback.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
 
 /// One `"key" : value` field of a pretty-printed `log --style json` entry.
 ///

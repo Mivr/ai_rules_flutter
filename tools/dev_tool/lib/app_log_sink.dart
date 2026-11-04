@@ -10,8 +10,8 @@
 /// non-JSON text into that stream and corrupt what the client is reading.
 import 'dart:io';
 
-import 'app_log.dart';
-import 'machine_protocol.dart';
+import 'package:flutter_bazel_dev_tool/app_log.dart';
+import 'package:flutter_bazel_dev_tool/machine_protocol.dart';
 
 /// Receives each line of an app's console output.
 typedef AppLogSink = void Function(AppLogLine line);

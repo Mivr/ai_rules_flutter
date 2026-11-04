@@ -20,7 +20,7 @@
 /// scratch directory is not worth failing an otherwise-good run over.
 import 'dart:io';
 
-import 'logging.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
 
 final _logger = Logger('dev_tool.temp_dir');
 

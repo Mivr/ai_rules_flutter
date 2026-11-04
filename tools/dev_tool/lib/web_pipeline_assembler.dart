@@ -21,34 +21,33 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dwds/dwds.dart' show AppConnection;
+import 'package:flutter_bazel_dev_tool/command_report.dart';
+import 'package:flutter_bazel_dev_tool/compiler_config.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/device_web.dart';
+import 'package:flutter_bazel_dev_tool/frontend_server.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/asset_bundle.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/source_uri_resolver.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/native_libs_watch.dart';
+import 'package:flutter_bazel_dev_tool/outcome_renderer.dart';
+import 'package:flutter_bazel_dev_tool/package_roots.dart';
+import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
+import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
+import 'package:flutter_bazel_dev_tool/run_plan.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/session_host.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
+import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_logs.dart';
+import 'package:flutter_bazel_dev_tool/web_bootstrap.dart';
+import 'package:flutter_bazel_dev_tool/web_expression_compiler.dart';
+import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:path/path.dart' as p;
 import 'package:webkit_inspection_protocol/webkit_inspection_protocol.dart'
     show ChromeConnection;
-
-import 'command_report.dart';
-import 'compiler_config.dart';
-import 'dev_tool_exception.dart';
-import 'device_web.dart';
-import 'frontend_server.dart';
-import 'hot_reload/asset_bundle.dart';
-import 'hot_reload/source_uri_resolver.dart';
-import 'hot_reload/workspace.dart';
-import 'logging.dart';
-import 'native_libs_watch.dart';
-import 'outcome_renderer.dart';
-import 'package_roots.dart';
-import 'reload_pipeline.dart';
-import 'reload_strategy.dart';
-import 'run_plan.dart';
-import 'session.dart';
-import 'session_host.dart';
-import 'temp_dir.dart';
-import 'toolchain_info.dart';
-import 'vm_service_client.dart';
-import 'vm_service_logs.dart';
-import 'web_bootstrap.dart';
-import 'web_expression_compiler.dart';
-import 'web_module_server.dart';
 
 /// The http form of a DDS websocket URI.
 ///

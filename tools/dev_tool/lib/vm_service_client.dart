@@ -6,14 +6,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/hot_reload/asset_bundle.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/flutter_error_report.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/running_code.dart';
 import 'package:path/path.dart' as p;
 import 'package:vm_service/vm_service.dart';
 import 'package:vm_service/vm_service_io.dart';
-
-import 'hot_reload/asset_bundle.dart' show touchesFonts;
-import 'hot_reload/flutter_error_report.dart';
-import 'logging.dart';
-import 'running_code.dart';
 
 final _logger = Logger('dev_tool.vm_service');
 

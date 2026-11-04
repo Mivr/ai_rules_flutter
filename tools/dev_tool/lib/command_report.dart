@@ -6,13 +6,13 @@
 /// `reportReloadCommand`, not from this value a second time.
 library;
 
-import 'hot_reload/app_instance.dart';
-import 'hot_reload/reload_orchestrator.dart';
-import 'native_libs_verdict.dart';
-import 'native_patch_outcome.dart';
-import 'relaunch_outcome.dart';
-import 'reload_strategy.dart';
-import 'running_code.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/app_instance.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/reload_orchestrator.dart';
+import 'package:flutter_bazel_dev_tool/native_libs_verdict.dart';
+import 'package:flutter_bazel_dev_tool/native_patch_outcome.dart';
+import 'package:flutter_bazel_dev_tool/relaunch_outcome.dart';
+import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
+import 'package:flutter_bazel_dev_tool/running_code.dart';
 
 export 'native_libs_verdict.dart';
 export 'native_patch_outcome.dart';

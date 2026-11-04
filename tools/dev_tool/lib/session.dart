@@ -9,19 +9,18 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dds/dds.dart';
-
-import 'command_report.dart';
-import 'command_runner.dart';
-import 'device.dart';
-import 'frontend_server.dart';
-import 'hot_reload/source_uri_resolver.dart';
-import 'hot_reload/readiness_gate.dart';
-import 'hot_reload/source_watcher.dart';
-import 'logging.dart';
-import 'machine_protocol.dart';
-import 'reload_strategy.dart';
-import 'teardown.dart';
-import 'vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/command_report.dart';
+import 'package:flutter_bazel_dev_tool/command_runner.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/frontend_server.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/readiness_gate.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/source_uri_resolver.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/source_watcher.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/machine_protocol.dart';
+import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
+import 'package:flutter_bazel_dev_tool/teardown.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 
 final _logger = Logger('dev_tool.session');
 

@@ -8,14 +8,13 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/native_patch_delivery.dart';
+import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:path/path.dart' as p;
-
-import 'device.dart';
-import 'logging.dart';
-import 'native_patch_delivery.dart';
-import 'runfiles_helper.dart';
-import 'temp_dir.dart';
-import 'vm_service_client.dart';
 
 final _logger = Logger('dev_tool.device');
 

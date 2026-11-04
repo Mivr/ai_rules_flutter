@@ -52,6 +52,7 @@ dart_binary(
     }),
     defines = ["RUNFILES_SOURCE_REPO=" + SOURCE_REPO],
     main = "bin/flutter_bazel.dart",
+    package_name = "flutter_bazel_dev_tool",
     visibility = ["//visibility:public"],
     deps = _LIB_DEPS,
 )

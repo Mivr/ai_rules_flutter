@@ -30,9 +30,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'app_log.dart';
-import 'logging.dart';
-import 'vm_service_discovery.dart';
+import 'package:flutter_bazel_dev_tool/app_log.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 
 /// Runs a helper process and waits for it: `Process.run` in production, the
 /// device's injected runner in tests.

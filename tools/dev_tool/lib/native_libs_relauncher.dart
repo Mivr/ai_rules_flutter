@@ -15,17 +15,17 @@ library;
 
 import 'dart:async';
 
-import 'app_log_sink.dart';
-import 'hot_reload/app_instance.dart' as hr;
-import 'hot_reload/reload_orchestrator.dart';
-import 'logging.dart';
-import 'machine_protocol.dart';
-import 'native_libs_fingerprint.dart';
-import 'native_libs_watch.dart';
-import 'relaunch_outcome.dart';
-import 'session.dart';
-import 'vm_service_client.dart';
-import 'vm_service_discovery.dart';
+import 'package:flutter_bazel_dev_tool/app_log_sink.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/app_instance.dart' as hr;
+import 'package:flutter_bazel_dev_tool/hot_reload/reload_orchestrator.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/machine_protocol.dart';
+import 'package:flutter_bazel_dev_tool/native_libs_fingerprint.dart';
+import 'package:flutter_bazel_dev_tool/native_libs_watch.dart';
+import 'package:flutter_bazel_dev_tool/relaunch_outcome.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 
 class Relauncher {
   /// The launch artifact, both to relaunch from and to fingerprint.

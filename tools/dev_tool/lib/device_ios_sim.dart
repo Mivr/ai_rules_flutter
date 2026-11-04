@@ -8,16 +8,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/app_log.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/device_ios.dart';
+import 'package:flutter_bazel_dev_tool/device_ios_sim_discovery.dart';
+import 'package:flutter_bazel_dev_tool/ios_sim_log_fallback.dart';
+import 'package:flutter_bazel_dev_tool/native_patch_delivery.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 import 'package:path/path.dart' as p;
-
-import 'app_log.dart';
-import 'device.dart';
-import 'device_ios.dart';
-import 'device_ios_sim_discovery.dart';
-import 'ios_sim_log_fallback.dart';
-import 'native_patch_delivery.dart';
-import 'vm_service_client.dart';
-import 'vm_service_discovery.dart';
 
 /// iOS Simulator device (via xcrun simctl).
 class IOSSimulatorDevice extends Device {

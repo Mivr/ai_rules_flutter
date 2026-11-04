@@ -7,13 +7,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/app_log.dart';
+import 'package:flutter_bazel_dev_tool/device_ios.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 import 'package:path/path.dart' as p;
-
-import 'app_log.dart';
-import 'device_ios.dart';
-import 'logging.dart';
-import 'temp_dir.dart';
-import 'vm_service_discovery.dart';
 
 final _logger = Logger('dev_tool.device');
 

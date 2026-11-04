@@ -6,7 +6,7 @@
 /// resulting immutable `{uri → Version}` map.
 import 'dart:io';
 
-import 'source_uri_resolver.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/source_uri_resolver.dart';
 
 /// A point-in-time identity for a file's content.
 ///
