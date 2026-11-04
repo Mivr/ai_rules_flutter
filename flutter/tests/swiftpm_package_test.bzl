@@ -3,7 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:swiftpm_clang.bzl", "swiftpm_clang_module_spec", "swiftpm_generated_modulemap_content")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package")
-load("//flutter/private:swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_files")
+load("//flutter/private:swiftpm_package.bzl", "swiftpm_hoist_package_root", "swiftpm_is_code_file", "swiftpm_select_target_files")
 load("//flutter/private:swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
@@ -538,6 +538,65 @@ _normalizes_relative_paths_test = unittest.make(_normalizes_relative_paths_test_
 _normalized_public_headers_path_test = unittest.make(_normalized_public_headers_path_test_impl)
 _normalized_exclude_and_sources_entries_test = unittest.make(_normalized_exclude_and_sources_entries_test_impl)
 _target_path_spellings_test = unittest.make(_target_path_spellings_test_impl)
+
+def _fake_repo(files):
+    """A mutable fake repository context over a dict of file path -> text."""
+    state = {"files": dict(files)}
+
+    def _children(path):
+        prefix = "" if path == "." else path + "/"
+        names = {}
+        for full in state["files"]:
+            if full.startswith(prefix):
+                rest = full[len(prefix):]
+                names[rest.split("/")[0]] = "/" in rest
+        return [struct(basename = name, is_dir = is_dir) for name, is_dir in sorted(names.items())]
+
+    def _rename(src, dst):
+        moved = {}
+        for full in state["files"]:
+            if full == src or full.startswith(src + "/"):
+                moved[full] = dst + full[len(src):]
+        for old, new in moved.items():
+            state["files"][new] = state["files"].pop(old)
+
+    def _delete(path):
+        for full in list(state["files"]):
+            if full == path or full.startswith(path + "/"):
+                state["files"].pop(full)
+
+    return struct(
+        state = state,
+        path = lambda path: struct(readdir = lambda: _children(path)),
+        rename = _rename,
+        delete = _delete,
+    )
+
+def _hoist_files(revision):
+    top = "BigInt-" + revision
+    return {
+        ".swiftpm_extract/" + top + "/Package.swift": "manifest",
+        ".swiftpm_extract/" + top + "/Sources/BigInt/BigInt.swift": "code",
+    }
+
+def _hoist_strips_top_level_directory_test_impl(ctx):
+    env = unittest.begin(ctx)
+    for revision in ["63feef78" + "0" * 32, "a" * 40]:
+        repo = _fake_repo(_hoist_files(revision))
+        asserts.equals(env, "", swiftpm_hoist_package_root(repo, "bigint"))
+        asserts.equals(env, ["Package.swift", "Sources/BigInt/BigInt.swift"], sorted(repo.state["files"].keys()))
+    return unittest.end(env)
+
+def _hoist_refuses_two_top_level_entries_test_impl(ctx):
+    env = unittest.begin(ctx)
+    files = _hoist_files("a" * 40)
+    files[".swiftpm_extract/README.md"] = "x"
+    error = swiftpm_hoist_package_root(_fake_repo(files), "bigint")
+    asserts.true(env, "expected the archive to hold one top-level directory" in error, error)
+    return unittest.end(env)
+
+_hoist_strips_top_level_directory_test = unittest.make(_hoist_strips_top_level_directory_test_impl)
+_hoist_refuses_two_top_level_entries_test = unittest.make(_hoist_refuses_two_top_level_entries_test_impl)
 _is_code_file_test = unittest.make(_is_code_file_test_impl)
 _skips_non_code_files_test = unittest.make(_skips_non_code_files_test_impl)
 _classifies_c_family_files_test = unittest.make(_classifies_c_family_files_test_impl)
@@ -574,6 +633,8 @@ def swiftpm_package_test_suite(name):
         _escape_still_refused_test,
         _docc_swift_skipped_test,
         _refuses_implicit_resources_test,
+        _hoist_strips_top_level_directory_test,
+        _hoist_refuses_two_top_level_entries_test,
     )
     native.test_suite(
         name = name,

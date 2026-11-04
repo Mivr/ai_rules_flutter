@@ -684,7 +684,9 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
     `<hub>__swiftpm-<identity>` repo per pin. Unpinned entries still get a
     repo: it fails at fetch time (before any download) naming the
     `swift_package_sha256` fix. A `swift_package_build_files` entry swaps
-    the generated BUILD file for a hand-written one.
+    the generated BUILD file for a hand-written one; that file sees the
+    package root (`Package.swift`, `Sources/...`, whatever the revision), for
+    example `glob(["Sources/**/*.swift"])`.
 
     Args:
         hub_name: The hub repository name.

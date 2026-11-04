@@ -17,7 +17,7 @@ Errors are bare details: the caller wraps them with the package identity
 with its hub format). Every detail names the target.
 """
 
-load(":swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
+load(":swiftpm_paths.bzl", "swiftpm_join_path", "swiftpm_normalize_relative_path")
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr")
 
 def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_headers, explicit_map):
@@ -73,17 +73,17 @@ def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_h
                 include_dir = None,
                 umbrella_header = None,
             )
-        public_dir = target_dir if normalized.path == "" else target_dir + "/" + normalized.path
+        public_dir = swiftpm_join_path(target_dir, normalized.path)
     else:
-        public_dir = target_dir + "/include"
+        public_dir = swiftpm_join_path(target_dir, "include")
     if not public_headers:
         return struct(ok = True, detail = "", module_map = None, include_dir = None, umbrella_header = None)
     umbrella_header = None
-    if public_dir + "/" + module_name + ".h" in public_headers:
+    if swiftpm_join_path(public_dir, module_name + ".h") in public_headers:
         umbrella_header = module_name + ".h"
-    elif public_dir + "/" + module_name + "/" + module_name + ".h" in public_headers:
+    elif swiftpm_join_path(public_dir, module_name + "/" + module_name + ".h") in public_headers:
         umbrella_header = module_name + "/" + module_name + ".h"
-    return struct(ok = True, detail = "", module_map = public_dir + "/module.modulemap", include_dir = public_dir, umbrella_header = umbrella_header)
+    return struct(ok = True, detail = "", module_map = swiftpm_join_path(public_dir, "module.modulemap"), include_dir = public_dir, umbrella_header = umbrella_header)
 
 def _swiftpm_clang_language(source):
     """Classify one source file by extension.

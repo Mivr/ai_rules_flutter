@@ -5,6 +5,8 @@ SwiftPM treats every header under the public-headers directory as public.
 so a header there stays public even when `sources:` does not name it.
 """
 
+load(":swiftpm_paths.bzl", "swiftpm_join_path")
+
 def swiftpm_split_headers(public_root, rel_dir, headers, files):
     """Split headers into public and private, and find the explicit map.
 
@@ -29,11 +31,11 @@ def swiftpm_split_headers(public_root, rel_dir, headers, files):
         map or None; `map_in_include` when it lives under the
         public-headers directory rather than the target root.
     """
-    prefix = public_root + "/"
+    prefix = public_root + "/" if public_root else ""
     public_hdrs = sorted([header for header in headers.listed + headers.unlisted if header.startswith(prefix)])
     private_hdrs = sorted([header for header in headers.listed if not header.startswith(prefix)])
-    root_map = rel_dir + "/module.modulemap"
-    public_map = public_root + "/module.modulemap"
+    root_map = swiftpm_join_path(rel_dir, "module.modulemap")
+    public_map = swiftpm_join_path(public_root, "module.modulemap")
     explicit_map = None
     map_in_include = False
     if root_map in files:

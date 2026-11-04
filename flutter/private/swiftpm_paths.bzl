@@ -36,3 +36,23 @@ def swiftpm_normalize_relative_path(path):
             continue
         segments.append(segment)
     return struct(ok = True, error = "", path = "/".join(segments))
+
+def swiftpm_join_path(base, relative):
+    """Join a repo-relative base directory and a normalized relative path.
+
+    The spoke's repository root is the package root, so a target whose
+    directory is the package root has the base `""`; joining must not
+    produce a leading `/` then, and a `""` relative path is the base.
+
+    Args:
+        base: The repo-relative base directory (`""` for the repo root).
+        relative: The normalized path below it (`""` for the base itself).
+
+    Returns:
+        The repo-relative path.
+    """
+    if relative == "":
+        return base
+    if base == "":
+        return relative
+    return base + "/" + relative

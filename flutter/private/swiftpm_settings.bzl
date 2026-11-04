@@ -25,7 +25,7 @@ with its hub format). Every detail names the target and the offending
 setting or condition.
 """
 
-load(":swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
+load(":swiftpm_paths.bzl", "swiftpm_join_path", "swiftpm_normalize_relative_path")
 
 _SWIFTPM_SETTING_CATEGORIES = {
     "cSettings": "c",
@@ -601,7 +601,7 @@ def _swiftpm_clang_entry(target, target_dir, setting):
                 text = "",
                 private_include = False,
             )
-        path = target_dir if normalized.path == "" else target_dir + "/" + normalized.path
+        path = swiftpm_join_path(target_dir, normalized.path)
         return struct(error = "", text = path, private_include = True)
     if setting.value:
         return struct(error = "", text = "-D" + setting.name + "=" + setting.value, private_include = False)

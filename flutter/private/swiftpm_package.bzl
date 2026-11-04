@@ -5,9 +5,12 @@ repo holding the pinned sources and a generated BUILD file. The fetch is
 fail-closed throughout: an unpinned entry fails before any download (naming
 the `swift_package_sha256` fix), the archive must hold one top-level
 directory with the plain `Package.swift` manifest, and every source
-refusal from the translator fails here. A `swift_package_build_files`
-override still downloads the pinned archive but skips the translation,
-writing the hand-written file as-is.
+refusal from the translator fails here. The archive's top-level directory
+becomes the repository root, so the generated BUILD and a
+`swift_package_build_files` override both see `Package.swift` and
+`Sources/...` at the root whatever the revision. An override still
+downloads the pinned archive but skips the translation, writing the
+hand-written file as-is.
 """
 
 load(":download.bzl", "pinned_download_and_extract")
@@ -15,13 +18,17 @@ load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
 load(":swiftpm_clang.bzl", "swiftpm_clang_module_spec", "swiftpm_generated_modulemap_content")
 load(":swiftpm_headers.bzl", "swiftpm_split_headers")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_package")
-load(":swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
+load(":swiftpm_paths.bzl", "swiftpm_join_path", "swiftpm_normalize_relative_path")
 load(
     ":swiftpm_translate.bzl",
     "swiftpm_c99name",
     "swiftpm_reachable_targets",
     "translate_swiftpm_package",
 )
+
+# The archive extracts here first; its single top-level directory (named
+# `<Repo>-<revision>` by GitHub) is then moved up to become the repo root.
+_SWIFTPM_EXTRACT_DIR = ".swiftpm_extract"
 
 _SWIFTPM_DEFAULT_DIRS = ["Sources", "Source", "src", "srcs"]
 
@@ -65,16 +72,17 @@ def _swiftpm_check_entry(identity, target_name, entry, kind):
     return struct(ok = True, error = "", path = normalized.path)
 
 def _swiftpm_package_root(ctx, identity):
-    """Read the archive's single top-level directory as the package root.
+    """Read the extracted archive's single top-level directory.
 
     Args:
         ctx: The repository context.
         identity: The SwiftPM package identity.
 
     Returns:
-        `struct(ok, error, root)`: `root` is the repo-relative directory.
+        `struct(ok, error, root)`: `root` is the directory's basename under
+        the extraction directory.
     """
-    children = ctx.path(".").readdir()
+    children = ctx.path(_SWIFTPM_EXTRACT_DIR).readdir()
     dirs = [child.basename for child in children if child.is_dir]
     if len(children) != 1 or len(dirs) != 1:
         shown = sorted([child.basename for child in children])
@@ -83,7 +91,30 @@ def _swiftpm_package_root(ctx, identity):
         return struct(ok = False, error = _swiftpm_repo_fail(identity, "expected the archive to hold one top-level directory (the package root), got {entries}".format(entries = shown)), root = "")
     return struct(ok = True, error = "", root = dirs[0])
 
-def _swiftpm_manifest_filename(ctx, identity, root):
+def swiftpm_hoist_package_root(ctx, identity):
+    """Move the archive's top-level directory contents to the repo root.
+
+    The spoke's repository root becomes the package root, so the generated
+    BUILD file and a `swift_package_build_files` override both see
+    `Package.swift` and `Sources/...` whatever the pinned revision is.
+
+    Args:
+        ctx: The repository context.
+        identity: The SwiftPM package identity.
+
+    Returns:
+        The fetch failure, or "".
+    """
+    root = _swiftpm_package_root(ctx, identity)
+    if not root.ok:
+        return root.error
+    top = _SWIFTPM_EXTRACT_DIR + "/" + root.root
+    for child in ctx.path(top).readdir():
+        ctx.rename(top + "/" + child.basename, child.basename)
+    ctx.delete(_SWIFTPM_EXTRACT_DIR)
+    return ""
+
+def _swiftpm_manifest_filename(ctx, identity):
     """Require the plain `Package.swift` manifest at the package root.
 
     A versioned `Package@swift-*.swift` sitting next to it fails the
@@ -93,19 +124,18 @@ def _swiftpm_manifest_filename(ctx, identity, root):
     Args:
         ctx: The repository context.
         identity: The SwiftPM package identity.
-        root: The repo-relative package root.
 
     Returns:
         `struct(ok, error, filename)`: the manifest basename.
     """
-    if not ctx.path(root + "/Package.swift").exists:
+    if not ctx.path("Package.swift").exists:
         return struct(ok = False, error = _swiftpm_repo_fail(identity, "no `Package.swift` manifest at the archive top level"), filename = "")
-    versioned = [child.basename for child in ctx.path(root).readdir() if not child.is_dir and child.basename.startswith("Package@swift-") and child.basename.endswith(".swift")]
+    versioned = [child.basename for child in ctx.path(".").readdir() if not child.is_dir and child.basename.startswith("Package@swift-") and child.basename.endswith(".swift")]
     if versioned:
         return struct(ok = False, error = _swiftpm_repo_fail(identity, "versioned manifest(s) ({names}) sit next to `Package.swift`: only the plain manifest is translated, so remove them or point at a hand-written BUILD file with swift_package_build_files[{identity}]".format(names = sorted(versioned), identity = repr(identity))), filename = "")
     return struct(ok = True, error = "", filename = "Package.swift")
 
-def _swiftpm_resolve_target_dir(ctx, identity, root, target):
+def _swiftpm_resolve_target_dir(ctx, identity, target):
     """Resolve one reached target's directory.
 
     An explicit `path:` is normalized first, so `.`, `./` and `""` name the
@@ -116,7 +146,6 @@ def _swiftpm_resolve_target_dir(ctx, identity, root, target):
     Args:
         ctx: The repository context.
         identity: The SwiftPM package identity.
-        root: The repo-relative package root.
         target: The target struct.
 
     Returns:
@@ -126,13 +155,13 @@ def _swiftpm_resolve_target_dir(ctx, identity, root, target):
         checked = _swiftpm_check_entry(identity, target.name, target.path, "`path:`")
         if not checked.ok:
             return struct(ok = False, error = checked.error, rel_dir = "")
-        rel_dir = root if checked.path == "" else root + "/" + checked.path
+        rel_dir = checked.path
         node = ctx.path(rel_dir)
         if not node.exists or not node.is_dir:
             return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} names a missing directory in `path:` ({dir})".format(target = repr(target.name), dir = repr(target.path))), rel_dir = "")
         return struct(ok = True, error = "", rel_dir = rel_dir)
     for base in _SWIFTPM_DEFAULT_DIRS:
-        rel_dir = root + "/" + base + "/" + target.name
+        rel_dir = base + "/" + target.name
         node = ctx.path(rel_dir)
         if node.exists and node.is_dir:
             return struct(ok = True, error = "", rel_dir = rel_dir)
@@ -288,7 +317,7 @@ def _swiftpm_find_resource_error(identity, target_name, rel_dir, excluded, files
             continue
         resource = _swiftpm_resource_path(rel)
         if resource:
-            return _swiftpm_resource_error(identity, target_name, rel_dir + "/" + resource)
+            return _swiftpm_resource_error(identity, target_name, swiftpm_join_path(rel_dir, resource))
     return ""
 
 def _swiftpm_is_under(full, roots):
@@ -348,7 +377,7 @@ def _swiftpm_keep_existing(identity, target_name, kind, entries, rel_dir, tree):
         checked = _swiftpm_check_entry(identity, target_name, entry, kind)
         if not checked.ok:
             return struct(ok = False, error = checked.error, kept = [], all = [])
-        full = rel_dir if checked.path == "" else rel_dir + "/" + checked.path
+        full = swiftpm_join_path(rel_dir, checked.path)
         every.append(full)
         if checked.path == "" or full in tree.files or full in tree.dirs:
             kept.append(full)
@@ -370,11 +399,11 @@ def _swiftpm_public_root(identity, target, rel_dir):
         `struct(ok, error, root)`.
     """
     if target.public_headers_path == None:
-        return struct(ok = True, error = "", root = rel_dir + "/include")
+        return struct(ok = True, error = "", root = swiftpm_join_path(rel_dir, "include"))
     checked = _swiftpm_check_entry(identity, target.name, target.public_headers_path, "`publicHeadersPath:`")
     if not checked.ok:
         return struct(ok = False, error = checked.error, root = "")
-    return struct(ok = True, error = "", root = rel_dir if checked.path == "" else rel_dir + "/" + checked.path)
+    return struct(ok = True, error = "", root = swiftpm_join_path(rel_dir, checked.path))
 
 def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
     """Select one reached target's Swift and C-family files, purely.
@@ -480,7 +509,7 @@ def _swiftpm_list_target_tree(ctx, identity, rel_dir):
             break
         current = stack.pop()
         for child in ctx.path(current).readdir():
-            full = current + "/" + child.basename
+            full = swiftpm_join_path(current, child.basename)
             if child.is_dir:
                 dirs[full] = True
                 stack.append(full)
@@ -490,13 +519,12 @@ def _swiftpm_list_target_tree(ctx, identity, rel_dir):
         return struct(ok = False, error = has_files_bound_error(identity, rel_dir, PUB_WALK_BOUND), files = {}, dirs = {})
     return struct(ok = True, error = "", files = files, dirs = dirs)
 
-def _swiftpm_collect_sources(ctx, identity, root, target):
+def _swiftpm_collect_sources(ctx, identity, target):
     """Resolve one reached target's directory and explicit file lists.
 
     Args:
         ctx: The repository context.
         identity: The SwiftPM package identity.
-        root: The repo-relative package root.
         target: The target struct.
 
     Returns:
@@ -505,7 +533,7 @@ def _swiftpm_collect_sources(ctx, identity, root, target):
         the repo-relative directory, Swift sources, C-family sources,
         headers and explicit module map.
     """
-    resolved = _swiftpm_resolve_target_dir(ctx, identity, root, target)
+    resolved = _swiftpm_resolve_target_dir(ctx, identity, target)
     if not resolved.ok:
         return struct(ok = False, error = resolved.error, files = None)
     listed = _swiftpm_list_target_tree(ctx, identity, resolved.rel_dir)
@@ -514,7 +542,7 @@ def _swiftpm_collect_sources(ctx, identity, root, target):
 
     # SwiftPM never treats the package manifest as a source, and a target
     # whose `path:` is the package root (`.`) contains it.
-    manifest = root + "/Package.swift"
+    manifest = "Package.swift"
     files = {path: True for path in listed.files.keys() if path != manifest}
     selected = swiftpm_select_target_files(identity, target, resolved.rel_dir, files, listed.dirs)
     if not selected.ok:
@@ -552,17 +580,17 @@ def _swiftpm_package_impl(ctx):
     identity = ctx.attr.identity
     if ctx.attr.unpinned_error:
         fail(ctx.attr.unpinned_error)
-    pinned_download_and_extract(ctx, url = ctx.attr.archive_url, sha256 = ctx.attr.sha256)
+    pinned_download_and_extract(ctx, url = ctx.attr.archive_url, sha256 = ctx.attr.sha256, output = _SWIFTPM_EXTRACT_DIR)
+    hoist_error = swiftpm_hoist_package_root(ctx, identity)
+    if hoist_error:
+        fail(hoist_error)
     if ctx.attr.build_file:
         ctx.file("BUILD.bazel", ctx.read(ctx.path(ctx.attr.build_file)))
         return
-    root = _swiftpm_package_root(ctx, identity)
-    if not root.ok:
-        fail(root.error)
-    manifest = _swiftpm_manifest_filename(ctx, identity, root.root)
+    manifest = _swiftpm_manifest_filename(ctx, identity)
     if not manifest.ok:
         fail(manifest.error)
-    parsed = parse_swiftpm_package(identity, ctx.read(root.root + "/" + manifest.filename))
+    parsed = parse_swiftpm_package(identity, ctx.read(manifest.filename))
     if not parsed.ok:
         fail(parsed.error)
     reached = swiftpm_reachable_targets(identity, parsed.model, None, ctx.attr.hub_name)
@@ -571,7 +599,7 @@ def _swiftpm_package_impl(ctx):
     by_name = {target.name: target for target in parsed.model.targets}
     files_by_target = {}
     for name in reached.names:
-        collected = _swiftpm_collect_sources(ctx, identity, root.root, by_name[name])
+        collected = _swiftpm_collect_sources(ctx, identity, by_name[name])
         if not collected.ok:
             fail(collected.error)
         files_by_target[name] = collected.files
