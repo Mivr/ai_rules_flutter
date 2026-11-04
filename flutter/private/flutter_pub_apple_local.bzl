@@ -22,6 +22,7 @@ load(
     "detect_apple_swiftpm_deps",
     "with_apple_swiftpm_deps",
 )
+load(":flutter_pub_apple_local_refusal.bzl", "local_manifest_decision")
 load(
     ":flutter_pub_apple_local_targets.bzl",
     "local_library_name",
@@ -29,7 +30,6 @@ load(
     "local_settings_bundle",
     _render_local_target_blocks = "render_local_target_blocks",
 )
-load(":flutter_pub_apple_local_refusal.bzl", "local_manifest_decision")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
 load(":podspec_read.bzl", "apply_apple_podspec_link_settings")
 load(":podspec_read_xcconfig.bzl", "active_podspec_defines")
