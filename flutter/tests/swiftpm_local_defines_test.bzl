@@ -15,6 +15,20 @@ load(
     "flutter_apple_plugin_objc_settings",
 )
 
+_STRING_DEFINES = [
+    'LIBRARY_NAME="my-plugin"',
+    'ESCAPED_NAME=\\"from-podspec\\"',
+    'GREETING="hello world"',
+    "PLAIN_NUM=1",
+]
+
+_STRING_DEFINE_ARGV = [
+    '-DLIBRARY_NAME="my-plugin"',
+    '-DESCAPED_NAME="from-podspec"',
+    '-DGREETING="hello world"',
+    "-DPLAIN_NUM=1",
+]
+
 def _apple_test_config_settings(platform):
     """Config settings that analyze an Apple target off macOS."""
     return {
@@ -39,7 +53,7 @@ def _objc_define_argv_test_impl(ctx):
     env = analysistest.begin(ctx)
     argv = _action_argv(env, "ObjcCompile")
     asserts.true(env, bool(argv), "Expected an ObjcCompile action carrying argv")
-    for flag in ["-DLOCAL_C_DEF=7", "-DPERMISSION_CAMERA=1", "-DPLUGIN_FLAG"]:
+    for flag in ["-DLOCAL_C_DEF=7", "-DPERMISSION_CAMERA=1", "-DPLUGIN_FLAG"] + _STRING_DEFINE_ARGV:
         asserts.true(env, flag in argv, "%s missing from ObjcCompile argv: %s" % (flag, argv))
     tut = analysistest.target_under_test(env)
     asserts.true(env, CcInfo in tut, "Expected CcInfo on %s" % tut.label)
@@ -51,7 +65,8 @@ def _objc_define_argv_test_impl(ctx):
             "Flutter's module map missing from CcInfo headers: %s" % paths,
         )
         defines = tut[CcInfo].compilation_context.defines.to_list()
-        for name in ["LOCAL_C_DEF", "PERMISSION_CAMERA", "PLUGIN_FLAG"]:
+        string_names = [d.partition("=")[0] for d in _STRING_DEFINES]
+        for name in ["LOCAL_C_DEF", "PERMISSION_CAMERA", "PLUGIN_FLAG"] + string_names:
             asserts.false(
                 env,
                 any([name in define for define in defines]),
@@ -112,13 +127,37 @@ def swiftpm_local_defines_test_suite(name):
         module_name = name + "_objc",
         platform = "ios",
         settings = flutter_apple_plugin_objc_settings(copts = ["-DLOCAL_C_DEF=7"]),
-        plugin_defines = ["PERMISSION_CAMERA=1", "PLUGIN_FLAG"],
+        plugin_defines = ["PERMISSION_CAMERA=1", "PLUGIN_FLAG"] + _STRING_DEFINES,
     )
     _ios_objc_define_argv_test(
         name = name + "_objc_define_argv",
         size = "small",
         target_under_test = ":_" + objc_target + "__objc",
     )
+
+    # The pure-ObjC and the mixed ObjC+Swift plugin libraries emit the same
+    # `_<name>__objc` compile; both must keep the string-literal quotes.
+    string_tests = []
+    for kind, kind_srcs in {
+        "plain": [":" + objc_src],
+        "mixed": [":" + objc_src, ":" + swift_src],
+    }.items():
+        lib = "%s_%s_lib" % (name, kind)
+        flutter_apple_plugin_library(
+            name = lib,
+            srcs = kind_srcs,
+            module_name = lib,
+            platform = "ios",
+            copts = ["-DLOCAL_C_DEF=7"],
+            plugin_defines = ["PERMISSION_CAMERA=1", "PLUGIN_FLAG"] + _STRING_DEFINES,
+            tags = ["manual"],
+        )
+        _ios_objc_define_argv_test(
+            name = "%s_%s_string_define_argv" % (name, kind),
+            size = "small",
+            target_under_test = ":_" + lib + "__objc",
+        )
+        string_tests.append(":%s_%s_string_define_argv" % (name, kind))
 
     swift_target = name + "_swift"
     flutter_apple_plugin_library(
@@ -143,5 +182,5 @@ def swiftpm_local_defines_test_suite(name):
         tests = [
             ":" + name + "_objc_define_argv",
             ":" + name + "_swift_define_argv",
-        ],
+        ] + string_tests,
     )

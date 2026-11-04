@@ -1,11 +1,18 @@
 """Static reader and spoke wiring for CocoaPods plugin .podspec files (POD-12)."""
 
+load(":flutter_apple_plugin_defines.bzl", "dedupe_plugin_defines")
 load(
     ":podspec_read_ruby.bzl",
     "format_rhs_raw",
     "lex_podspec",
     "parse_resource_bundles_tokens",
     "parse_string_list_tokens",
+)
+load(
+    ":podspec_read_xcconfig.bzl",
+    "splice_podspec_defines",
+    "xcconfig_hash_defines",
+    "xcconfig_merge_defines",
 )
 load(":starlark_literal.bzl", "starlark_string_literal")
 
@@ -411,6 +418,8 @@ def _dispatch_statement_attr(assign, content, plugin, podspec_path, collected):
         _handle_resources(assign.rhs, raw_rhs, meta, collected.privacy_manifests)
     elif attr == "resource_bundles":
         _handle_resource_bundles(assign.rhs, raw_rhs, meta, collected.privacy_manifests)
+    elif attr in ("pod_target_xcconfig", "xcconfig"):
+        collected.defines.extend(xcconfig_hash_defines(assign.rhs))
 
 def _step_keyword_at_stmt_start(tokens, n, idx, block_stack):
     """Handle statement-leading block keywords (`end`, `}`, `else`, `elsif`, `if`, ...)."""
@@ -451,17 +460,20 @@ def read_plugin_podspec(text, podspec_path, plugin, platform):
 
     Returns:
         `struct(frameworks, weak_frameworks, libraries, privacy_manifests,
-        sdk_frameworks, weak_sdk_frameworks, sdk_dylibs)`.
+        defines, sdk_frameworks, weak_sdk_frameworks, sdk_dylibs)`; `defines`
+        holds the static `GCC_PREPROCESSOR_DEFINITIONS` entries, last wins.
     """
     frameworks = []
     weak_frameworks = []
     libraries = []
     privacy_manifests = []
+    defines = []
     collected = struct(
         frameworks = frameworks,
         weak_frameworks = weak_frameworks,
         libraries = libraries,
         privacy_manifests = privacy_manifests,
+        defines = defines,
     )
     tokens = lex_podspec(text)
     n = len(tokens)
@@ -483,7 +495,9 @@ def read_plugin_podspec(text, podspec_path, plugin, platform):
         if _is_skipping(block_stack) or not item.tokens:
             continue
         assign = _parse_attr_assignment(item.tokens)
-        if assign != None and _is_scope_active(assign.scope, platform):
+        if assign == None:
+            collected.defines.extend(xcconfig_merge_defines(item.tokens, platform))
+        elif _is_scope_active(assign.scope, platform):
             _dispatch_statement_attr(assign, text, plugin, podspec_path, collected)
 
     return struct(
@@ -491,6 +505,7 @@ def read_plugin_podspec(text, podspec_path, plugin, platform):
         weak_frameworks = weak_frameworks,
         libraries = libraries,
         privacy_manifests = privacy_manifests,
+        defines = dedupe_plugin_defines(defines),
         sdk_frameworks = frameworks,
         weak_sdk_frameworks = weak_frameworks,
         sdk_dylibs = libraries,
@@ -543,9 +558,10 @@ def splice_apple_podspec_link_settings(content, plugin, apple):
             lines.append("    weak_sdk_frameworks = %s," % starlark_string_literal(podspec.weak_frameworks))
         if podspec.libraries:
             lines.append("    sdk_dylibs = %s," % starlark_string_literal(podspec.libraries))
-        if not lines:
+        defines = getattr(podspec, "defines", [])
+        if not lines and not defines:
             continue
-        insert_text = "\n".join(lines) + "\n"
+        insert_text = "\n".join(lines) + "\n" if lines else ""
         for suffix in ("", "_xtool"):
             marker = '    name = "%s_apple_%s%s",\n' % (plugin, platform, suffix)
             head, sep, tail = content.partition(marker)
@@ -554,6 +570,7 @@ def splice_apple_podspec_link_settings(content, plugin, apple):
             block, vis_sep, vis_tail = tail.partition("\n    visibility = ")
             if not vis_sep:
                 continue
+            block = splice_podspec_defines(block, defines)
             content = head + sep + block + "\n" + insert_text + "    visibility = " + vis_tail
     return content
 
@@ -671,6 +688,7 @@ def _read_platform_podspecs(ctx, plugin, platform, srcs, shared_darwin):
     weak_frameworks = []
     libraries = []
     raw_manifests = []
+    defines = []
     for spec_path in spec_paths:
         spec_dir = spec_path[:spec_path.rfind("/")]
         parsed = read_plugin_podspec(ctx.read(spec_path), spec_path, plugin, platform)
@@ -678,6 +696,7 @@ def _read_platform_podspecs(ctx, plugin, platform, srcs, shared_darwin):
         _accumulate_unique(weak_frameworks, parsed.weak_frameworks)
         _accumulate_unique(libraries, parsed.libraries)
         _accumulate_unique(raw_manifests, parsed.privacy_manifests)
+        defines.extend(parsed.defines)
         for rel_m in parsed.privacy_manifests:
             full_p = resolve_podspec_privacy_path(spec_dir, rel_m, plugin, spec_path)
             if ctx.path(full_p).exists:
@@ -687,6 +706,7 @@ def _read_platform_podspecs(ctx, plugin, platform, srcs, shared_darwin):
         weak_frameworks = weak_frameworks,
         libraries = libraries,
         privacy_manifests = raw_manifests,
+        defines = dedupe_plugin_defines(defines),
         sdk_frameworks = frameworks,
         weak_sdk_frameworks = weak_frameworks,
         sdk_dylibs = libraries,
