@@ -267,6 +267,8 @@ jobs:
       DISK_CACHE_SHARD: linux-unit
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
         run: echo "DISK_CACHE_KEY=ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'e2e/*/MODULE.bazel', 'flutter/private/versions.bzl') }}" >> "$GITHUB_ENV"
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -287,6 +289,28 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
+      # Default strategy selection must pick linux-sandbox: Bazel falls back to
+      # processwrapper-sandbox when the runner blocks user namespaces. Uncached
+      # on a scratch output base so at least one spawn really runs.
+      - name: Prove sandboxed actions run under linux-sandbox
+        run: |
+          base="${RUNNER_TEMP}/sandbox_proof_base"
+          bep="${RUNNER_TEMP}/sandbox_proof_bep.json"
+          trap 'bazel "--output_base=${base}" shutdown' EXIT
+          bazel "--output_base=${base}" test //flutter/tests/ci_linux_sandbox_guard:ci_linux_sandbox_guard_unit_test --disk_cache= --nocache_test_results "--build_event_json_file=${bep}"
+          python3 - "$bep" <<'PY'
+          import json, sys
+          counts = {}
+          for line in open(sys.argv[1]):
+              summary = json.loads(line).get("buildMetrics", {}).get("actionSummary", {})
+              for runner in summary.get("runnerCount", []):
+                  counts[runner["name"]] = counts.get(runner["name"], 0) + int(runner.get("count", 0))
+          print("runnerCount:", counts)
+          if counts.get("processwrapper-sandbox", 0) != 0:
+              sys.exit("processwrapper-sandbox spawns: %d" % counts["processwrapper-sandbox"])
+          if counts.get("linux-sandbox", 0) < 1:
+              sys.exit("no linux-sandbox spawns")
+          PY
       - name: bazel test //... (root unit tests)
         run: bazel test //... --test_output=errors
       - name: bazel test //... 5x flake sweep (root unit tests, pull requests)
@@ -668,6 +692,8 @@ jobs:
       DISK_CACHE_SHARD: linux-app
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
         run: echo "DISK_CACHE_KEY=ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'e2e/*/MODULE.bazel', 'flutter/private/versions.bzl') }}" >> "$GITHUB_ENV"
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -766,6 +792,8 @@ jobs:
       DISK_CACHE_SHARD: linux-small
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
         run: echo "DISK_CACHE_KEY=ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'e2e/*/MODULE.bazel', 'flutter/private/versions.bzl') }}" >> "$GITHUB_ENV"
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -880,6 +908,8 @@ jobs:
       DISK_CACHE_SHARD: linux-integration
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
         run: echo "DISK_CACHE_KEY=ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'e2e/*/MODULE.bazel', 'flutter/private/versions.bzl') }}" >> "$GITHUB_ENV"
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -952,6 +982,8 @@ jobs:
       DISK_CACHE_SHARD: linux-examples
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
         run: echo "DISK_CACHE_KEY=ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'e2e/*/MODULE.bazel', 'flutter/private/versions.bzl') }}" >> "$GITHUB_ENV"
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -1005,6 +1037,8 @@ jobs:
       DISK_CACHE_SHARD: linux-pub-scc
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
         run: echo "DISK_CACHE_KEY=ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'e2e/*/MODULE.bazel', 'flutter/private/versions.bzl') }}" >> "$GITHUB_ENV"
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -1200,6 +1234,8 @@ jobs:
       DISK_CACHE_SHARD: linux-web
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
         run: echo "DISK_CACHE_KEY=ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'e2e/*/MODULE.bazel', 'flutter/private/versions.bzl') }}" >> "$GITHUB_ENV"
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
@@ -1236,13 +1272,6 @@ jobs:
           sdk: 3.13.0
       - name: Install xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
-      # Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, which
-      # blocks Chrome's sandbox from creating the user namespace it needs, and
-      # Chrome then never announces a DevTools debugging port. Relax the sysctl
-      # rather than passing --no-sandbox: this job exists to prove a real Chrome
-      # run works, which a weakened browser would not establish.
-      - name: Allow Chrome's sandbox to create user namespaces
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       # google-chrome is preinstalled on this runner and is on PATH, which is
       # exactly how the dev tool resolves it on Linux (host_tools.dart) — no
       # CHROME_EXECUTABLE needed. xvfb gives that Chrome a display.
@@ -1284,6 +1313,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       # Repository cache only (shared per OS, no disk-cache shard): this job
       # builds one tiny Dart tool, so it restores what ci.yaml saves and
       # never writes, like commit-messages.yaml.
@@ -1301,6 +1332,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
@@ -1308,14 +1341,15 @@ jobs:
       - name: Verify canary output differs across distinct output bases
         working-directory: e2e/repro_canary
         run: |
-          bazel --output_base=/tmp/repro_canary_a build //:canary
+          trap 'bazel --output_base="${RUNNER_TEMP}/repro_canary_a" shutdown; bazel --output_base="${RUNNER_TEMP}/repro_canary_b" shutdown' EXIT
+          bazel "--output_base=${RUNNER_TEMP}/repro_canary_a" build //:canary
           if [ ! -s bazel-bin/canary.bin ]; then
             echo "e2e/repro_canary: output missing or empty in run A" >&2
             exit 1
           fi
           sum_a=$(sha256sum bazel-bin/canary.bin | awk '{print $1}')
 
-          bazel --output_base=/tmp/repro_canary_b build //:canary
+          bazel "--output_base=${RUNNER_TEMP}/repro_canary_b" build //:canary
           if [ ! -s bazel-bin/canary.bin ]; then
             echo "e2e/repro_canary: output missing or empty in run B" >&2
             exit 1
@@ -1344,6 +1378,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
