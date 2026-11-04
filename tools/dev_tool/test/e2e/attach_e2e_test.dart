@@ -157,6 +157,18 @@ void main() {
         final appId = start['params']?['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 90));
 
+        // The tool being up does not mean the attached app has drawn yet.
+        final firstFrame = await dt.httpCommand('app.waitFor', {
+          'appId': appId,
+          'text': 'defines,live v1',
+          'timeoutMs': '30000',
+        });
+        expect(
+          firstFrame['error'],
+          isNull,
+          reason: 'the attached app must render its first frame: $firstFrame',
+        );
+
         // Also the only place the agent surface is exercised over attach: an
         // attached app has to be readable at all.
         var label = await dt.httpCommand('app.getText', {
@@ -481,14 +493,19 @@ void main() {
         final String appId = _params(started)['appId'] as String? ?? dt.appId!;
         await dt.waitForHttpControl(timeout: const Duration(seconds: 90));
 
-        final Map<String, dynamic> before = await dt.httpCommand(
-          'app.getText',
-          {
-            'appId': appId,
-            'key': 'e2e_attach_label',
-          },
+        // `waitForHttpControl` says the tool is up, not that the attached app
+        // has drawn its first frame, so wait for the label instead of reading
+        // it once.
+        final Map<String, dynamic> before = await dt.httpCommand('app.waitFor', {
+          'appId': appId,
+          'text': 'iOS attach marker v1',
+          'timeoutMs': '30000',
+        });
+        expect(
+          before['error'],
+          isNull,
+          reason: 'the attached app must render its first frame: $before',
         );
-        expect(_result(before)['text'], 'iOS attach marker v1');
 
         appMain.writeAsStringSync(
           original.replaceFirst('attach marker v1', 'attach marker v2'),
