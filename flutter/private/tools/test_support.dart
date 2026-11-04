@@ -23,10 +23,36 @@ import 'dart:io';
 ///
 /// Public because the unit tests reach it directly.
 Duration testCeiling(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
+  final int? seconds = int.tryParse(bazelTestTimeout ?? '');
   if (seconds == null || seconds <= 0) return const Duration(minutes: 5);
   final margin = seconds ~/ 20;
   return Duration(seconds: seconds - (margin < 10 ? 10 : margin));
+}
+
+/// How long coverage collection may take, from what is left of the test's
+/// budget.
+///
+/// Three cases, from [bazelTestTimeout] (the raw `TEST_TIMEOUT`, seconds) and
+/// [elapsed] (time since the run began):
+///
+/// * A positive integer: the budget left inside [testCeiling], that is the
+///   ceiling minus [elapsed], so a collection that starts after a long test
+///   waits only for what the test has left and never for more than the
+///   ceiling.
+/// * That budget used up: one second, a small positive bound, so an exhausted
+///   run still attempts the collection and reports its own timeout instead of
+///   parking until Bazel kills it.
+/// * Missing, empty, non-numeric or non-positive: [testCeiling]'s own
+///   fallback of five minutes, as for a direct run outside `bazel test`.
+///
+/// Pure in its arguments, so the unit tests need neither clock nor
+/// environment. Public because they reach it directly.
+Duration coverageBound(String? bazelTestTimeout, Duration elapsed) {
+  final Duration ceiling = testCeiling(bazelTestTimeout);
+  final int? seconds = int.tryParse(bazelTestTimeout ?? '');
+  if (seconds == null || seconds <= 0) return ceiling;
+  final Duration left = ceiling - elapsed;
+  return left > Duration.zero ? left : const Duration(seconds: 1);
 }
 
 /// The suite's default timeout, serialized as `Metadata` carries it.
@@ -41,7 +67,7 @@ Duration testCeiling(String? bazelTestTimeout) {
 ///
 /// Public because the unit tests reach it directly.
 Object suiteTimeout(String? bazelTestTimeout) {
-  final seconds = int.tryParse(bazelTestTimeout ?? '');
+  final int? seconds = int.tryParse(bazelTestTimeout ?? '');
   if (seconds == null || seconds <= 0) return 'none';
   return {
     'duration': Duration(seconds: seconds).inMicroseconds,
