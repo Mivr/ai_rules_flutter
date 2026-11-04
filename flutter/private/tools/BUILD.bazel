@@ -79,6 +79,13 @@ dart_library(
     visibility = ["//visibility:public"],
 )
 
+# Staged by label into external local-SDK repositories, which run it on the
+# SDK's own Dart VM; it imports only the standard library.
+exports_files(
+    ["copy_local_file.dart"],
+    visibility = ["//visibility:public"],
+)
+
 dart_binary(
     name = "android_bundle",
     srcs = [
@@ -353,6 +360,7 @@ _UNIT_TESTS = {
     "android_bundle_test": ("android_bundle.dart", []),
     "bundle_app_test": ("bundle_app.dart", []),
     "compile_shader_test": ("compile_shader.dart", []),
+    "copy_local_file_test": ("copy_local_file.dart", []),
     "kernel_filter_test": (
         "kernel_filter.dart",
         ["@rules_dart//dart/guard:directive_guard"],

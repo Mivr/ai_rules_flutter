@@ -217,7 +217,7 @@ def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, framewor
     ctx.actions.run(
         executable = ctx.executable._xtool_pack,
         arguments = [runner_args],
-        env = {"TMPDIR": "/tmp"},
+        env = {"TMPDIR": executable_file.dirname},
         use_default_shell_env = False,
         inputs = depset(
             direct = sources + headers + modulemaps,
@@ -300,14 +300,23 @@ def _add_xtool_signing_args(ctx, args, direct_inputs):
         args.add("--certificate-password-file", ctx.file.certificate_password_file.path)
         direct_inputs.append(ctx.file.certificate_password_file)
 
-def _xtool_bundle_action_env(ctx):
-    """The hermetic environment for the `xtool_pack bundle` action."""
+def _xtool_bundle_action_env(ctx, default_tmpdir):
+    """The hermetic environment for the `xtool_pack bundle` action.
+
+    Args:
+        ctx: The rule context.
+        default_tmpdir: The `TMPDIR` used when the caller sets none (an
+            action-scoped output directory).
+
+    Returns:
+        The environment dict, keeping any explicit non-empty `TMPDIR`.
+    """
     action_env = dict(ctx.attr.env)
     if ctx.attr.certificate_password_env:
         if ctx.attr.certificate_password_env not in action_env:
             action_env[ctx.attr.certificate_password_env] = ""
     if not action_env.get("TMPDIR"):
-        action_env["TMPDIR"] = "/tmp"
+        action_env["TMPDIR"] = default_tmpdir
     return action_env
 
 def _xtool_bundle_base_args(ctx, platform, app_name, executable_file, archive_file, app_dir):
@@ -396,7 +405,7 @@ def run_xtool_pack_bundle(
 
     _add_xtool_signing_args(ctx, args, direct_inputs)
 
-    action_env = _xtool_bundle_action_env(ctx)
+    action_env = _xtool_bundle_action_env(ctx, archive_file.dirname)
     args.add("--isolated-env")
     for env_key in sorted(ctx.attr.env.keys()):
         if env_key != "TMPDIR" and env_key != "TEST_TMPDIR":
@@ -405,8 +414,6 @@ def run_xtool_pack_bundle(
         args.add("--certificate-password-env", ctx.attr.certificate_password_env)
         if ctx.attr.certificate_password_env not in action_env:
             action_env[ctx.attr.certificate_password_env] = ""
-    if not action_env.get("TMPDIR"):
-        action_env["TMPDIR"] = "/tmp"
 
     ctx.actions.run(
         executable = ctx.executable._xtool_pack,

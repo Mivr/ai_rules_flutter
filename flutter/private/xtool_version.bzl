@@ -31,6 +31,17 @@ def _collect_version_group_names(s):
                 names.append(s[i + 1:end_index])
     return names
 
+def bundle_version_progress_message(label):
+    """The progress message for the `FlutterXtoolBundleVersion` action.
+
+    Args:
+        label: The label of the `flutter_xtool_bundle_version` target.
+
+    Returns:
+        The message naming the target whose bundle version is resolved.
+    """
+    return "Resolving bundle version for %s" % label
+
 def _flutter_xtool_bundle_version_impl(ctx):
     build_label_pattern = ctx.attr.build_label_pattern
     capture_groups = ctx.attr.capture_groups
@@ -90,12 +101,13 @@ def _flutter_xtool_bundle_version_impl(ctx):
                 "--output",
                 bundle_version_file.path,
             ],
-            env = {"TMPDIR": "/tmp"},
+            env = {"TMPDIR": bundle_version_file.dirname},
             use_default_shell_env = False,
             inputs = [control_file, ctx.info_file],
             outputs = [bundle_version_file],
             mnemonic = "FlutterXtoolBundleVersion",
             toolchain = None,
+            progress_message = bundle_version_progress_message(ctx.label),
         )
     else:
         ctx.actions.write(
