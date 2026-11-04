@@ -436,6 +436,23 @@ String _toAppSchemeRelPath(String path) {
   );
 }
 
+/// A parsed `package_config.json` and the file it was read from.
+typedef _PackageConfig = ({
+  File file,
+  Map<String, dynamic> json,
+  List<Map<String, dynamic>> packages,
+});
+
+/// Reads the package config at [packagesPath].
+_PackageConfig _readPackageConfig(String packagesPath) {
+  final File file = File(packagesPath).absolute;
+  final Map<String, dynamic> parsed =
+      json.decode(file.readAsStringSync()) as Map<String, dynamic>;
+  final List<Map<String, dynamic>> packages =
+      (parsed['packages'] as List<dynamic>).cast<Map<String, dynamic>>();
+  return (file: file, json: parsed, packages: packages);
+}
+
 /// Rewrites [packagesPath] so every package root resolves inside the compile's
 /// staging root, and writes the result to [outPath].
 ///
@@ -451,12 +468,8 @@ void _rewritePackageConfigForStage(
   String cwdPrefix,
   String outPath,
 ) {
-  final File pkgFile = File(packagesPath).absolute;
-  final pkgJson =
-      json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
-  final List<Map<String, dynamic>> pkgs = (pkgJson['packages'] as List<dynamic>)
-      .cast<Map<String, dynamic>>();
-  for (final p in pkgs) {
+  final _PackageConfig config = _readPackageConfig(packagesPath);
+  for (final p in config.packages) {
     final rootUri = p['rootUri'] as String;
     String rel = '';
     if (rootUri.startsWith('org-dartlang-app:///')) {
@@ -464,7 +477,7 @@ void _rewritePackageConfigForStage(
         rootUri.substring('org-dartlang-app:///'.length),
       );
     } else {
-      final Uri resolved = pkgFile.uri.resolve(rootUri);
+      final Uri resolved = config.file.uri.resolve(rootUri);
       if (resolved.scheme != 'file') continue;
       final String fsPath = resolved.toFilePath().replaceAll(r'\', '/');
       if (fsPath.startsWith(cwdPrefix)) {
@@ -483,7 +496,7 @@ void _rewritePackageConfigForStage(
     }
     p['rootUri'] = 'org-dartlang-app:///$rel';
   }
-  File(outPath).writeAsStringSync(json.encode(pkgJson));
+  File(outPath).writeAsStringSync(json.encode(config.json));
 }
 
 /// Rewrites [packagesPath] so every package root resolves inside the compile's
@@ -499,15 +512,11 @@ void _rewritePackageConfig(
   String cwdPrefix,
   String outPath,
 ) {
-  final File pkgFile = File(packagesPath).absolute;
-  final pkgJson =
-      json.decode(pkgFile.readAsStringSync()) as Map<String, dynamic>;
-  final List<Map<String, dynamic>> pkgs = (pkgJson['packages'] as List<dynamic>)
-      .cast<Map<String, dynamic>>();
-  for (final p in pkgs) {
+  final _PackageConfig config = _readPackageConfig(packagesPath);
+  for (final p in config.packages) {
     final rootUri = p['rootUri'] as String;
     if (rootUri.startsWith('org-dartlang-app:///')) continue;
-    final Uri resolved = pkgFile.uri.resolve(rootUri);
+    final Uri resolved = config.file.uri.resolve(rootUri);
     if (resolved.scheme == 'file') {
       final String fsPath = resolved.toFilePath().replaceAll(r'\', '/');
       if (fsPath.startsWith(cwdPrefix)) {
@@ -528,7 +537,7 @@ void _rewritePackageConfig(
       }
     }
   }
-  File(outPath).writeAsStringSync(json.encode(pkgJson));
+  File(outPath).writeAsStringSync(json.encode(config.json));
 }
 
 void _runDart2Wasm(List<String> args) {
