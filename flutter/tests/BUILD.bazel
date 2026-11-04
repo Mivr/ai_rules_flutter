@@ -249,6 +249,25 @@ dart_test(
     ],
 )
 
+# Hosted-Linux disk headroom guard: the e2e jobs of ci.yaml free unused
+# preinstalled toolchains and log df before and after each workspace. Same
+# discovery mechanism as the guards above.
+dart_test(
+    name = "ci_disk_guard_test",
+    size = "small",
+    data = ["ci_disk_guard_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :ci_disk_guard_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "ci_disk_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 # Bootstrap template guard: the three `flutter_integration_test` bootstrap
 # templates keep the program text the Starlark unit tests cannot read (they see
 # only the substitutions), and every placeholder the rules substitute is still

@@ -276,6 +276,7 @@ jobs:
       DISK_CACHE_SHARD: linux-unit
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/free-disk
       - name: Enable Linux sandbox user namespaces
         run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
@@ -701,6 +702,7 @@ jobs:
       DISK_CACHE_SHARD: linux-app
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/free-disk
       - name: Enable Linux sandbox user namespaces
         run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
@@ -723,6 +725,11 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
+      - name: Disk report (before first workspace)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: before first workspace
       # Each workspace's e2e.yaml passes --test_output=errors so a failure's
       # assertion reaches this log, while //tools/e2e_runner stages the
       # workspace in isolation, rejects Bazel exit code 4, and enforces
@@ -734,6 +741,11 @@ jobs:
       # order repeats with --test_arg=--test-randomize-ordering-seed=<seed>.
       # Only flutter_test and flutter_prebuilt_test targets take the seed
       # argument; the rest of the workspace is covered by the run above.
+      - name: Disk report (after e2e/hello_world)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/hello_world
       - name: bazel test flutter_test targets 10x flake sweep (e2e/hello_world, nightly)
         if: github.event_name == 'schedule'
         working-directory: e2e/hello_world
@@ -754,6 +766,11 @@ jobs:
       # the keystore attributes reach the signing action. grep -F pins the
       # failure to apksigner's wrong-password message rather than any other
       # error; a passing build fails the job.
+      - name: Disk report (after e2e/codegen)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/codegen
       - name: Release signing red path (wrong keystore password)
         run: |
           cd e2e/hello_world
@@ -801,6 +818,7 @@ jobs:
       DISK_CACHE_SHARD: linux-small
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/free-disk
       - name: Enable Linux sandbox user namespaces
         run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
@@ -840,16 +858,46 @@ jobs:
           printf 'block pub.dev\nblock storage.googleapis.com\n' > "$cfg"
           bazel fetch @local_toolchains//... @local_linux-x64//:dart_sdk_files --lockfile_mode=update --repository_cache="$empty_cache" --downloader_config="$cfg"
           ! grep -Fq 'flutter:extensions.bzl%flutter' MODULE.bazel.lock
+      - name: Disk report (before first workspace)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: before first workspace
       - name: Run e2e/smoke
         run: bazel run //tools/e2e_runner -- --workspace=e2e/smoke --bazel=bazel
+      - name: Disk report (after e2e/smoke)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/smoke
       - name: Run e2e/dual_hub
         run: bazel run //tools/e2e_runner -- --workspace=e2e/dual_hub --bazel=bazel
+      - name: Disk report (after e2e/dual_hub)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/dual_hub
       - name: Run e2e/ffi_example
         run: bazel run //tools/e2e_runner -- --workspace=e2e/ffi_example --bazel=bazel
+      - name: Disk report (after e2e/ffi_example)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/ffi_example
       - name: Run e2e/ffi_plugin_example
         run: bazel run //tools/e2e_runner -- --workspace=e2e/ffi_plugin_example --bazel=bazel
+      - name: Disk report (after e2e/ffi_plugin_example)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/ffi_plugin_example
       - name: Run e2e/web_example
         run: bazel run //tools/e2e_runner -- --workspace=e2e/web_example --bazel=bazel
+      - name: Disk report (after e2e/web_example)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/web_example
       - name: dual_hub source tree unchanged by the dirlink fetch
         run: |
           if [ -n "$(git status --porcelain -- e2e/dual_hub)" ]; then
@@ -917,6 +965,7 @@ jobs:
       DISK_CACHE_SHARD: linux-integration
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/free-disk
       - name: Enable Linux sandbox user namespaces
         run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
@@ -944,16 +993,46 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      - name: Disk report (before first workspace)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: before first workspace
       - name: Run e2e/integration_web
         run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_web --bazel=bazel
+      - name: Disk report (after e2e/integration_web)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/integration_web
       - name: Run e2e/integration_linux
         run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_linux --bazel=bazel
+      - name: Disk report (after e2e/integration_linux)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/integration_linux
       - name: Run e2e/integration_android
         run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_android --bazel=bazel
+      - name: Disk report (after e2e/integration_android)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/integration_android
       - name: Run e2e/min_versions
         run: bazel run //tools/e2e_runner -- --workspace=e2e/min_versions --bazel=bazel
+      - name: Disk report (after e2e/min_versions)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/min_versions
       - name: Run e2e/android_no_go_sdk
         run: bazel run //tools/e2e_runner -- --workspace=e2e/android_no_go_sdk --bazel=bazel
+      - name: Disk report (after e2e/android_no_go_sdk)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/android_no_go_sdk
       - name: run_home hermeticity gate (RT37-flutter:02)
         working-directory: e2e/run_home
         run: ./run_home_test.sh
@@ -991,6 +1070,7 @@ jobs:
       DISK_CACHE_SHARD: linux-examples
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/free-disk
       - name: Enable Linux sandbox user namespaces
         run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
@@ -1013,10 +1093,25 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
+      - name: Disk report (before first workspace)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: before first workspace
       - name: Run e2e/linux_example
         run: bazel run //tools/e2e_runner -- --workspace=e2e/linux_example --bazel=bazel
+      - name: Disk report (after e2e/linux_example)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/linux_example
       - name: Run e2e/cross_compile_example
         run: bazel run //tools/e2e_runner -- --workspace=e2e/cross_compile_example --bazel=bazel
+      - name: Disk report (after e2e/cross_compile_example)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/cross_compile_example
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -1046,6 +1141,7 @@ jobs:
       DISK_CACHE_SHARD: linux-pub-scc
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/free-disk
       - name: Enable Linux sandbox user namespaces
         run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
@@ -1068,8 +1164,18 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
+      - name: Disk report (before first workspace)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: before first workspace
       - name: Run e2e/pub_scc
         run: bazel run //tools/e2e_runner -- --workspace=e2e/pub_scc --bazel=bazel
+      - name: Disk report (after e2e/pub_scc)
+        if: always()
+        uses: ./.github/actions/disk-report
+        with:
+          label: after e2e/pub_scc
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -1243,6 +1349,7 @@ jobs:
       DISK_CACHE_SHARD: linux-web
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/free-disk
       - name: Enable Linux sandbox user namespaces
         run: .github/scripts/enable_linux_sandbox.sh
       - name: Set disk cache key
