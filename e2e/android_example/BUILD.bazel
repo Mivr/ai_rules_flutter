@@ -110,6 +110,14 @@ filegroup(
     tags = ["manual"],
 )
 
+# Extract the flutter_assets directory for flutter_android_apk_overlay.
+filegroup(
+    name = "app_overlay_assets",
+    srcs = [":app_android"],
+    output_group = "flutter_assets",
+    tags = ["manual"],
+)
+
 # =============================================================================
 # Approach 2: Bazel-generated runner (flutter_android_runner_lib_gen)
 #
@@ -219,7 +227,7 @@ flutter_android_registrant(
 flutter_android_apk_overlay(
     name = "e2e_apk_overlay",
     binary = ":app_bazel_runner",
-    flutter_assets = ":app_flutter_assets",
+    flutter_assets = ":app_overlay_assets",
     native_libs_jar = ":app_native_libs_jar",
 )
 
