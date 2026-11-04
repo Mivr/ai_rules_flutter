@@ -446,8 +446,7 @@ typedef _PackageConfig = ({
 /// Reads the package config at [packagesPath].
 _PackageConfig _readPackageConfig(String packagesPath) {
   final File file = File(packagesPath).absolute;
-  final Map<String, dynamic> parsed =
-      json.decode(file.readAsStringSync()) as Map<String, dynamic>;
+  final parsed = json.decode(file.readAsStringSync()) as Map<String, dynamic>;
   final List<Map<String, dynamic>> packages =
       (parsed['packages'] as List<dynamic>).cast<Map<String, dynamic>>();
   return (file: file, json: parsed, packages: packages);
@@ -469,7 +468,7 @@ void _rewritePackageConfigForStage(
   String outPath,
 ) {
   final _PackageConfig config = _readPackageConfig(packagesPath);
-  for (final p in config.packages) {
+  for (final Map<String, dynamic> p in config.packages) {
     final rootUri = p['rootUri'] as String;
     String rel = '';
     if (rootUri.startsWith('org-dartlang-app:///')) {
@@ -513,7 +512,7 @@ void _rewritePackageConfig(
   String outPath,
 ) {
   final _PackageConfig config = _readPackageConfig(packagesPath);
-  for (final p in config.packages) {
+  for (final Map<String, dynamic> p in config.packages) {
     final rootUri = p['rootUri'] as String;
     if (rootUri.startsWith('org-dartlang-app:///')) continue;
     final Uri resolved = config.file.uri.resolve(rootUri);
