@@ -9,89 +9,13 @@ Usage: see flutter/private/flutter_xtool_bundle.bzl for public API.
 """
 
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
-load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterDarwinFrameworkInfo")
+load("//flutter:providers.bzl", "FlutterApplePluginInfo")
+load(":flutter_xtool_bundle_frameworks.bzl", "collect_framework_args_and_inputs")
 load(":xtool_darwin_sdk_repo.bzl", "FlutterXtoolSdkInfo", "UNCONFIGURED_SDK_ERROR")
 load(":xtool_import.bzl", "xtool_target_arch")
 load(":xtool_version.bzl", "FlutterXtoolVersionInfo")
 
 # -- Shared bundle helpers -----------------------------------------------------
-
-def _extract_framework_dirs_from_files(files, seen_dirs, framework_dirs):
-    for f in files:
-        if f.is_directory:
-            if f.path not in seen_dirs:
-                seen_dirs[f.path] = True
-                framework_dirs.append(f.path)
-        else:
-            parts = f.path.split("/")
-            for idx, part in enumerate(parts):
-                if part.endswith(".xcframework") or part.endswith(".framework"):
-                    candidate = "/".join(parts[:idx + 1])
-                    if candidate not in seen_dirs:
-                        seen_dirs[candidate] = True
-                        framework_dirs.append(candidate)
-                    break
-
-def _record_framework_info(fw_info, seen_dirs, framework_dirs, transitive_inputs):
-    """Fold one `FlutterDarwinFrameworkInfo` into the shared accumulators."""
-    transitive_inputs.append(fw_info.framework_files)
-    if fw_info.framework_dir:
-        if fw_info.framework_dir not in seen_dirs:
-            seen_dirs[fw_info.framework_dir] = True
-            framework_dirs.append(fw_info.framework_dir)
-    else:
-        _extract_framework_dirs_from_files(
-            fw_info.framework_files.to_list(),
-            seen_dirs,
-            framework_dirs,
-        )
-
-def _framework_files_in(files):
-    """The subset of `files` that belongs to a `.framework` / `.xcframework`."""
-    return [
-        f
-        for f in files
-        if f.is_directory or ".framework/" in f.path or ".xcframework/" in f.path or f.path.endswith(".framework") or f.path.endswith(".xcframework")
-    ]
-
-def _collect_framework_args_and_inputs(framework_targets, plugin_and_dep_targets = []):
-    framework_dirs = []
-    seen_dirs = {}
-    direct_inputs = []
-    transitive_inputs = []
-
-    for target in framework_targets:
-        if FlutterDarwinFrameworkInfo in target:
-            _record_framework_info(
-                target[FlutterDarwinFrameworkInfo],
-                seen_dirs,
-                framework_dirs,
-                transitive_inputs,
-            )
-        else:
-            files = target[DefaultInfo].files.to_list()
-            direct_inputs.extend(files)
-            _extract_framework_dirs_from_files(files, seen_dirs, framework_dirs)
-
-    for target in plugin_and_dep_targets:
-        if FlutterDarwinFrameworkInfo in target:
-            _record_framework_info(
-                target[FlutterDarwinFrameworkInfo],
-                seen_dirs,
-                framework_dirs,
-                transitive_inputs,
-            )
-        else:
-            fw_files = _framework_files_in(target[DefaultInfo].files.to_list())
-            if fw_files:
-                direct_inputs.extend(fw_files)
-                _extract_framework_dirs_from_files(fw_files, seen_dirs, framework_dirs)
-
-    return struct(
-        dirs = framework_dirs,
-        direct_inputs = direct_inputs,
-        transitive_inputs = transitive_inputs,
-    )
 
 def _classify_runner_file(seen, buckets, f):
     """Sort one file into the runner's source/header/modulemap buckets, deduplicated by path."""
@@ -283,7 +207,7 @@ def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, framewor
         runner_args.add("--header", hdr.path)
     for mm in modulemaps:
         runner_args.add("--modulemap", mm.path)
-    for fw_dir in frameworks.dirs:
+    for fw_dir in frameworks.compile.dirs:
         runner_args.add("--framework", fw_dir)
     for sdk_fw in sdk_frameworks:
         runner_args.add("--sdk-framework", sdk_fw)
@@ -296,8 +220,8 @@ def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, framewor
         env = {"TMPDIR": "/tmp"},
         use_default_shell_env = False,
         inputs = depset(
-            direct = sources + headers + modulemaps + frameworks.direct_inputs,
-            transitive = frameworks.transitive_inputs + plugin_transitive_sets + sdk_transitive,
+            direct = sources + headers + modulemaps,
+            transitive = frameworks.compile.transitive_inputs + plugin_transitive_sets + sdk_transitive,
         ),
         outputs = [executable_file],
         mnemonic = "FlutterXtoolRunner",
@@ -443,7 +367,7 @@ def run_xtool_pack_bundle(
     infoplists = ctx.files.infoplists
     resources = ctx.files.resources
 
-    frameworks = _collect_framework_args_and_inputs(
+    frameworks = collect_framework_args_and_inputs(
         ctx.attr.frameworks,
         ctx.attr.plugins + ctx.attr.deps,
     )
@@ -461,14 +385,13 @@ def run_xtool_pack_bundle(
         infoplists +
         resources +
         native_libs +
-        additional_content_files +
-        frameworks.direct_inputs
+        additional_content_files
     )
 
     if ctx.attr.version:
         _add_xtool_version_args(ctx, args, direct_inputs)
 
-    _add_xtool_bundle_content_args(ctx, args, families, frameworks.dirs, native_libs, resources, additional_content_pairs, infoplists)
+    _add_xtool_bundle_content_args(ctx, args, families, frameworks.bundle.dirs, native_libs, resources, additional_content_pairs, infoplists)
 
     _add_xtool_signing_args(ctx, args, direct_inputs)
 
@@ -491,7 +414,7 @@ def run_xtool_pack_bundle(
         use_default_shell_env = False,
         inputs = depset(
             direct = direct_inputs,
-            transitive = frameworks.transitive_inputs,
+            transitive = frameworks.bundle.transitive_inputs,
         ),
         outputs = [archive_file, app_dir],
         mnemonic = mnemonic,

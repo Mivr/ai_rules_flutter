@@ -1347,10 +1347,18 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_xtool_bundle_frameworks",
+    srcs = ["flutter_xtool_bundle_frameworks.bzl"],
+    visibility = ["//visibility:public"],
+    deps = ["//flutter:providers"],
+)
+
+bzl_library(
     name = "flutter_xtool_bundle_pack",
     srcs = ["flutter_xtool_bundle_pack.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":flutter_xtool_bundle_frameworks",
         ":xtool_darwin_sdk_repo",
         ":xtool_import",
         ":xtool_version",

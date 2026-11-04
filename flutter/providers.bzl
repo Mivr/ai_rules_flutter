@@ -400,5 +400,6 @@ FlutterApplePluginInfo = provider(
         "sdk_frameworks": "list[str]: Linked Apple SDK frameworks.",
         "weak_sdk_frameworks": "list[str]: Linked Apple SDK weak frameworks.",
         "sdk_dylibs": "list[str]: Linked Apple SDK dylibs.",
+        "framework_infos": "depset[FlutterDarwinFrameworkInfo] or None: Framework imports the plugin depends on, kept structured so the xtool bundle can tell static from dynamic. `None` (not supplied) means empty.",
     },
 )
