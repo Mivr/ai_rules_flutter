@@ -24,6 +24,9 @@ load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load(
     "//flutter/private:flutter_integration_test.bzl",
     "flutter_ios_integration_bootstrap",
+)
+load(
+    "//flutter/private:flutter_integration_test_bootstrap.bzl",
     "make_linux_integration_bootstrap_content",
 )
 load(

@@ -506,7 +506,7 @@ bzl_library(
     srcs = ["flutter_integration_android_app.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        "//flutter:android",
+        ":constants",
     ],
 )
 
@@ -517,21 +517,98 @@ bzl_library(
     deps = [
         ":app_entrypoint",
         ":common",
-        ":flutter_android_registrant",
+        ":flutter_integration_test_android",
+        ":flutter_integration_test_bootstrap",
+        ":flutter_integration_test_ios",
+        ":flutter_integration_test_linux",
+        ":flutter_integration_test_web",
+        "@rules_dart//dart:providers",
+        "@rules_dart//dart:utils",
+    ],
+)
+
+bzl_library(
+    name = "flutter_integration_test_bootstrap",
+    srcs = ["flutter_integration_test_bootstrap.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":integration_test_bootstrap_snippets",
+    ],
+)
+
+bzl_library(
+    name = "flutter_integration_test_common",
+    srcs = ["flutter_integration_test_common.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":app_entrypoint",
+        ":common",
         ":flutter_aot_compile",
         ":flutter_compile",
         ":flutter_info",
-        ":flutter_integration_android_app",
+        ":flutter_integration_test_ios",
+        ":flutter_kernel_module",
+        ":flutter_native_assets",
+        ":plugin_registrant",
+        "//flutter:providers",
+        "@rules_dart//dart:providers",
+        "@rules_dart//dart:utils",
+    ],
+)
+
+bzl_library(
+    name = "flutter_integration_test_web",
+    srcs = ["flutter_integration_test_web.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":app_entrypoint",
+        ":common",
+        ":flutter_integration_test_bootstrap",
+        ":flutter_integration_test_common",
         ":flutter_integration_test_ios",
         ":flutter_integration_web_bundle",
         ":flutter_kernel_module",
-        ":flutter_linux_application",
-        ":flutter_native_assets",
         ":flutter_web_compile",
-        ":integration_test_bootstrap_snippets",
-        ":native_sources",
         ":plugin_registrant",
         ":validation",
+        "@rules_dart//dart:providers",
+        "@rules_dart//dart:utils",
+    ],
+)
+
+bzl_library(
+    name = "flutter_integration_test_linux",
+    srcs = ["flutter_integration_test_linux.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":app_entrypoint",
+        ":common",
+        ":flutter_integration_test_bootstrap",
+        ":flutter_integration_test_common",
+        ":flutter_integration_test_ios",
+        ":flutter_kernel_module",
+        ":flutter_linux_application",
+        ":native_sources",
+        ":plugin_registrant",
+        "@rules_dart//dart:providers",
+        "@rules_dart//dart:utils",
+    ],
+)
+
+bzl_library(
+    name = "flutter_integration_test_android",
+    srcs = ["flutter_integration_test_android.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":app_entrypoint",
+        ":common",
+        ":flutter_android_registrant",
+        ":flutter_integration_android_app",
+        ":flutter_integration_test_bootstrap",
+        ":flutter_integration_test_common",
+        ":flutter_integration_test_ios",
+        ":flutter_kernel_module",
+        ":native_sources",
         "//flutter:android",
         "//flutter:providers",
         "@bazel_skylib//rules:write_file",
