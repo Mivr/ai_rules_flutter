@@ -39,7 +39,7 @@ let package = Package(
     platforms: [.iOS("12.0")],
     products: [.library(name: "spm_bigint_plugin", targets: ["spm_bigint_plugin"])],
     dependencies: [.package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.1")],
-    targets: [.target(name: "spm_bigint_plugin", dependencies: ["Helper", .target(name: "Other"), .product(name: "BigInt", package: "BigInt")])],
+    targets: [.target(name: "Helper"), .target(name: "spm_bigint_plugin", dependencies: ["Helper", .target(name: "Other"), .product(name: "BigInt", package: "BigInt")])],
 )
 """
 
@@ -637,6 +637,82 @@ def _unfetchable_pin_keeps_reason_without_hint_test_impl(ctx):
     asserts.true(env, "Map it with" not in selected.error)
     return unittest.end(env)
 
+_BYNAME_MANIFEST = """// swift-tools-version: 5.9
+import PackageDescription
+
+let package = Package(
+    name: "spm_bigint_plugin",
+    platforms: [.iOS("12.0")],
+    products: [.library(name: "spm_bigint_plugin", targets: ["spm_bigint_plugin"])],
+    dependencies: [.package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.1")],
+    targets: [.target(name: "spm_bigint_plugin", dependencies: [DEPS])],
+)
+"""
+
+def _select_byname(deps, manifest = _BYNAME_MANIFEST, product_deps = {}):
+    return select_apple_swiftpm_deps(
+        "spm_bigint_plugin",
+        manifest.replace("DEPS", deps),
+        "ios/spm_bigint_plugin",
+        ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"],
+        "ios",
+        _pins(),
+        product_deps,
+    )
+
+def _byname_product_links_like_product_test_impl(ctx):
+    env = unittest.begin(ctx)
+    for spelling in ['"BigInt"', '.byName(name: "BigInt")']:
+        selected = _select_byname(spelling)
+        asserts.true(env, selected.ok, selected.error)
+        asserts.equals(env, ["@deps__swiftpm-bigint//:BigInt"], selected.labels)
+    return unittest.end(env)
+
+def _byname_of_own_target_links_nothing_test_impl(ctx):
+    env = unittest.begin(ctx)
+    manifest = _BYNAME_MANIFEST.replace("    targets: [", '    targets: [.target(name: "Helper"), ')
+    selected = _select_byname('"Helper", .target(name: "Missing")', manifest)
+    asserts.true(env, selected.ok, selected.error)
+    asserts.equals(env, [], selected.labels)
+    return unittest.end(env)
+
+def _ambiguous_byname_names_plugin_dep_and_fix_test_impl(ctx):
+    env = unittest.begin(ctx)
+    manifest = _BYNAME_MANIFEST.replace("dependencies: [.package(", 'dependencies: [.package(url: "https://example.com/Other.git", exact: "1.0.0"), .package(')
+    selected = _select_byname('"BigInt"', manifest)
+    asserts.true(env, not selected.ok)
+    asserts.true(env, "spm_bigint_plugin" in selected.error)
+    asserts.true(env, '"BigInt"' in selected.error)
+    asserts.true(env, ".product(name:" in selected.error)
+
+    mapped = _select_byname('"BigInt"', manifest, {"bigint:BigInt": "//:bigint_group"})
+    asserts.true(env, mapped.ok, mapped.error)
+    asserts.equals(env, ["//:bigint_group"], mapped.labels)
+    return unittest.end(env)
+
+def _unresolvable_byname_fails_the_fetch_test_impl(ctx):
+    env = unittest.begin(ctx)
+    manifest = _BYNAME_MANIFEST.replace('dependencies: [.package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.1")],', "")
+    selected = _select_byname('"Nope"', manifest)
+    asserts.true(env, not selected.ok)
+    asserts.true(env, "spm_bigint_plugin" in selected.error)
+    asserts.true(env, '"Nope"' in selected.error)
+    return unittest.end(env)
+
+def _spaced_package_declaration_is_refused_when_unreadable_test_impl(ctx):
+    env = unittest.begin(ctx)
+    prefix = "// swift-tools-version: 5.9\nimport PackageDescription\nlet package = Package(name: \"p\", dependencies: ["
+    for spelling in [".package (url: bigIntUrl)", ".package\n(url: bigIntUrl)", ". package(url: bigIntUrl)"]:
+        selected = _select_byname("", prefix + spelling + "])\n")
+        asserts.true(env, not selected.ok, spelling)
+        asserts.true(env, "spm_bigint_plugin" in selected.error, spelling)
+
+    commented = "// swift-tools-version: 5.9\n// .package(url: x)\nlet s = \".package (\"\nlet package = Package(\n"
+    selected = _select_byname("", commented)
+    asserts.true(env, selected.ok, selected.error)
+    asserts.equals(env, [], selected.labels)
+    return unittest.end(env)
+
 _products_resolve_to_pinned_labels_test = unittest.make(_products_resolve_to_pinned_labels_test_impl)
 _mapped_product_resolves_without_pins_test = unittest.make(_mapped_product_resolves_without_pins_test_impl)
 _unmapped_product_without_resolved_keeps_refusal_test = unittest.make(
@@ -663,6 +739,11 @@ _pinned_checksum_still_links_the_product_test = unittest.make(_pinned_checksum_s
 _unfetchable_pin_reports_its_reason_test = unittest.make(_unfetchable_pin_reports_its_reason_test_impl)
 _missing_resolved_fails_test = unittest.make(_missing_resolved_fails_test_impl)
 _unreadable_manifest_without_packages_builds_on_test = unittest.make(_unreadable_manifest_without_packages_builds_on_test_impl)
+_byname_product_links_like_product_test = unittest.make(_byname_product_links_like_product_test_impl)
+_byname_of_own_target_links_nothing_test = unittest.make(_byname_of_own_target_links_nothing_test_impl)
+_ambiguous_byname_names_plugin_dep_and_fix_test = unittest.make(_ambiguous_byname_names_plugin_dep_and_fix_test_impl)
+_unresolvable_byname_fails_the_fetch_test = unittest.make(_unresolvable_byname_fails_the_fetch_test_impl)
+_spaced_package_declaration_is_refused_when_unreadable_test = unittest.make(_spaced_package_declaration_is_refused_when_unreadable_test_impl)
 _manifests_without_links_resolve_empty_test = unittest.make(_manifests_without_links_resolve_empty_test_impl)
 _deps_render_on_both_backends_test = unittest.make(_deps_render_on_both_backends_test_impl)
 _plugin_defines_render_on_both_backends_test = unittest.make(_plugin_defines_render_on_both_backends_test_impl)
@@ -693,6 +774,11 @@ def flutter_pub_apple_test_suite(name):
         _unfetchable_pin_reports_its_reason_test,
         _missing_resolved_fails_test,
         _unreadable_manifest_without_packages_builds_on_test,
+        _byname_product_links_like_product_test,
+        _byname_of_own_target_links_nothing_test,
+        _ambiguous_byname_names_plugin_dep_and_fix_test,
+        _unresolvable_byname_fails_the_fetch_test,
+        _spaced_package_declaration_is_refused_when_unreadable_test,
         _manifests_without_links_resolve_empty_test,
         _deps_render_on_both_backends_test,
         _plugin_defines_render_on_both_backends_test,

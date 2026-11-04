@@ -193,7 +193,7 @@ def _swiftpm_resolve_same_dep(identity, targets, by_name, target_name, dep):
     for candidate in targets:
         if candidate.name and candidate.name.lower() == lowered:
             return struct(ok = True, error = "", target = candidate)
-    return struct(ok = False, error = "SwiftPM package {identity}: target {target} depends on unknown target {name}.".format(identity = repr(identity), target = repr(target_name), name = repr(dep.name)), target = None)
+    return struct(ok = False, error = "SwiftPM package {identity}: target {target} depends on unknown target {name}. A by-name dependency on a product of another package is not supported: write `.product(name: {name}, package: \"<package>\")`, or build the package with swift_package_build_files[{identity}].".format(identity = repr(identity), target = repr(target_name), name = repr(dep.name)), target = None)
 
 def _swiftpm_check_product_targets(identity, model, by_name):
     """Refuse products naming unknown or test targets.
