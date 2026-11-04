@@ -457,6 +457,10 @@ def _write_web_guard_manifest(ctx, scope, compile_sources, stage):
     )
     return manifest
 
+def _web_compile_direct_inputs(req, platform_dill, stage):
+    """The compiler action's direct inputs: entry point, package config, platform dill, sources and stage."""
+    return [req.main_dart, req.package_config, platform_dill] + req.srcs + stage.files + req.web_compile_inputs
+
 def _web_stage_inputs(ctx, web_compile_tool, sources, scope, stage_salt):
     """Stage generated sources for a web compile, or return an empty stage."""
     if web_compile_tool != None:
@@ -585,9 +589,12 @@ def flutter_dart2wasm_action(ctx, req):
     args.add("-o", req.output_wasm)
     args.add(req.main_dart)
 
-    direct_inputs = [req.main_dart, req.package_config, req.dart2wasm_platform_dill] + req.srcs + stage.files + req.web_compile_inputs
+    direct_inputs = _web_compile_direct_inputs(req, req.dart2wasm_platform_dill, stage)
     if req.web_compile_tool != None:
         direct_inputs.append(req.web_compile_tool)
+    outputs = [req.output_wasm, req.output_mjs]
+    if req.output_source_map != None:
+        outputs.append(req.output_source_map)
     _web_guarded_run(
         ctx,
         args,
@@ -598,7 +605,7 @@ def flutter_dart2wasm_action(ctx, req):
             stage = stage,
             direct_inputs = direct_inputs,
             transitive_inputs = [req.flutter_sdk_files],
-            outputs = [req.output_wasm, req.output_mjs] + ([req.output_source_map] if req.output_source_map != None else []),
+            outputs = outputs,
             mnemonic = "FlutterDart2Wasm",
             progress_message = "Compiling Flutter to WASM %s" % ctx.label,
             env_dir = req.output_wasm.dirname,
@@ -676,7 +683,7 @@ def flutter_dart2js_action(ctx, req):
     args.add("-o", req.output_dir.path + "/main.dart.js")
     args.add(req.main_dart)
 
-    direct_inputs = [req.main_dart, req.package_config, req.dart2js_platform_dill] + req.srcs + stage.files + req.web_compile_inputs
+    direct_inputs = _web_compile_direct_inputs(req, req.dart2js_platform_dill, stage)
     if req.web_compile_tool != None:
         direct_inputs.append(req.web_compile_tool)
     _web_guarded_run(
@@ -733,7 +740,7 @@ def flutter_dart2js_cfe_action(ctx, req):
     args.add("-o", req.output_dill)
     args.add(req.main_dart)
 
-    direct_inputs = [req.main_dart, req.package_config, req.dart2js_platform_dill] + req.srcs + stage.files + req.web_compile_inputs
+    direct_inputs = _web_compile_direct_inputs(req, req.dart2js_platform_dill, stage)
     if req.web_compile_tool != None:
         direct_inputs.append(req.web_compile_tool)
     _web_guarded_run(

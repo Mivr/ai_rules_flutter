@@ -129,7 +129,14 @@ def _split_windows_engine_files(engine_files):
         wrapper_root_dir = wrapper_root_dir,
     )
 
-def _windows_runner_include_flags(runner_hdrs, registrant_hdrs, plugin_hdrs, plugin_srcs, plugin_include_dirs, wrapper_include_dir, wrapper_root_dir):
+def _windows_runner_include_flags(
+        runner_hdrs,
+        registrant_hdrs,
+        plugin_hdrs,
+        plugin_srcs,
+        plugin_include_dirs,
+        wrapper_include_dir,
+        wrapper_root_dir):
     """Builds `-I` flags for the wrapper, registrant, runner and plugin headers.
 
     The wrapper needs two include paths:
@@ -220,7 +227,13 @@ def windows_plugin_inputs(srcs, hdrs = [], include_dirs = []):
     """
     return struct(srcs = srcs, hdrs = hdrs, include_dirs = include_dirs)
 
-def _compile_windows_runner(ctx, engine_files, is_debug, runner = windows_runner_inputs([]), registrant = windows_registrant_inputs([]), plugins = windows_plugin_inputs([])):
+def _compile_windows_runner(
+        ctx,
+        engine_files,
+        is_debug,
+        runner = windows_runner_inputs([]),
+        registrant = windows_registrant_inputs([]),
+        plugins = windows_plugin_inputs([])):
     """Compile the C++ Win32 runner binary.
 
     Uses cc_common.compile() + cc_common.link() with Bazel's hermetic CC
@@ -264,7 +277,15 @@ def _compile_windows_runner(ctx, engine_files, is_debug, runner = windows_runner
 
     # The engine header dir is already passed via engine_include_dir for
     # "flutter_windows.h".
-    extra_compile_flags = _windows_runner_include_flags(runner.hdrs, registrant.hdrs, plugins.hdrs, plugins.srcs, plugins.include_dirs, engine.wrapper_include_dir, engine.wrapper_root_dir)
+    extra_compile_flags = _windows_runner_include_flags(
+        runner.hdrs,
+        registrant.hdrs,
+        plugins.hdrs,
+        plugins.srcs,
+        plugins.include_dirs,
+        engine.wrapper_include_dir,
+        engine.wrapper_root_dir,
+    )
 
     # Include registrant, runner, and plugin header directories.
     all_header_files = header_files + registrant.hdrs + runner.hdrs + plugins.hdrs

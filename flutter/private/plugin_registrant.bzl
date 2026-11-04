@@ -752,7 +752,12 @@ def generate_dev_plugin_registrants(ctx, plugins, agent_import = None, native_ag
         registrants[platform] = out
     return registrants
 
-def generate_dart_plugin_registrant(ctx, plugins, target_platform = None, agent_import = None, native_agent_import = None):
+def generate_dart_plugin_registrant(
+        ctx,
+        plugins,
+        target_platform = None,
+        agent_import = None,
+        native_agent_import = None):
     """Generate a Dart plugin registrant source file via ctx.actions.write.
 
     Args:

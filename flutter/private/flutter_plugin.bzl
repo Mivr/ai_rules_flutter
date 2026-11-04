@@ -221,6 +221,12 @@ def _extra_windows_plugin_libraries(ctx, package_name):
         package_name,
     )
 
+def _resource_class_jars(lib):
+    """The resource class jars an Android library target provides, or None."""
+    if AndroidLibraryResourceClassJarProvider in lib:
+        return lib[AndroidLibraryResourceClassJarProvider].jars
+    return None
+
 def _extra_android_plugin_libraries(ctx, package_name):
     entries = []
     for lib in ctx.attr.android_libs:
@@ -228,7 +234,7 @@ def _extra_android_plugin_libraries(ctx, package_name):
             label = lib.label,
             java_info = lib[JavaInfo],
             resources_info = lib[StarlarkAndroidResourcesInfo] if StarlarkAndroidResourcesInfo in lib else None,
-            resource_class_jars = lib[AndroidLibraryResourceClassJarProvider].jars if AndroidLibraryResourceClassJarProvider in lib else None,
+            resource_class_jars = _resource_class_jars(lib),
             package = package_name,
         ))
     return entries

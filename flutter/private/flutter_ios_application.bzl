@@ -105,7 +105,15 @@ def _check_ios_simulator_aot(ctx, app_info, is_device):
              "use flutter_ios_simulator_build_test.") % ctx.var["COMPILATION_MODE"],
         )
 
-def _patch_ios_app_binary(ctx, dart_exe, dart_vm_files, dylib, framework_binary, vtool_platform, minimum_os_version, strip_symbols):
+def _patch_ios_app_binary(
+        ctx,
+        dart_exe,
+        dart_vm_files,
+        dylib,
+        framework_binary,
+        vtool_platform,
+        minimum_os_version,
+        strip_symbols):
     """Copies the AOT dylib and rewrites its LC_BUILD_VERSION with macho_edit.
 
     When the snapshot was compiled stripped, the patch also drops its local
@@ -200,7 +208,14 @@ def _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_ar
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
-def _assemble_ios_debug_assets(ctx, dart_exe, dart_vm_files, flutter_sdk_info, flutter_assets, kernel_dill, framework_assets):
+def _assemble_ios_debug_assets(
+        ctx,
+        dart_exe,
+        dart_vm_files,
+        flutter_sdk_info,
+        flutter_assets,
+        kernel_dill,
+        framework_assets):
     """Copies flutter_assets and adds kernel_blob.bin + VM snapshots.
 
     The vm_isolate_snapshot.bin and isolate_snapshot.bin are required for
@@ -357,14 +372,39 @@ def _flutter_ios_framework_impl(ctx):
 
     if app_info.aot_output:
         # Release mode: AOT binary + flutter_assets.
-        _patch_ios_app_binary(ctx, dart_exe, dart_vm_files, app_info.aot_output, framework_binary, vtool_platform, minimum_os_version, app_info.aot_strip)
+        _patch_ios_app_binary(
+            ctx,
+            dart_exe,
+            dart_vm_files,
+            app_info.aot_output,
+            framework_binary,
+            vtool_platform,
+            minimum_os_version,
+            app_info.aot_strip,
+        )
         _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, framework_assets)
     else:
         # Debug mode: stub binary + flutter_assets with kernel_blob.bin.
         target_arch = apple_support.target_arch_from_rule_ctx(ctx)
         stub_arch = "arm64" if target_arch == "arm64" else "x86_64"
-        _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_arch, vtool_platform, minimum_os_version)
-        _assemble_ios_debug_assets(ctx, dart_exe, dart_vm_files, flutter_sdk_info, flutter_assets, app_info.kernel_dill, framework_assets)
+        _stub_ios_app_binary(
+            ctx,
+            dart_exe,
+            dart_vm_files,
+            framework_binary,
+            stub_arch,
+            vtool_platform,
+            minimum_os_version,
+        )
+        _assemble_ios_debug_assets(
+            ctx,
+            dart_exe,
+            dart_vm_files,
+            flutter_sdk_info,
+            flutter_assets,
+            app_info.kernel_dill,
+            framework_assets,
+        )
 
     framework_files = [framework_binary, framework_plist]
     if not split_assets:

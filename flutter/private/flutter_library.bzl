@@ -172,7 +172,15 @@ def _contribution_context(package_name, font_files_dict, pkg_assets_dict = {}, p
         label = label or "the target declaring fonts_json",
     )
 
-def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_assets_dict, pkg_shaders_dict, shader_includes = [], pkg_asset_platforms = {}, pkg_asset_flavors = {}):
+def build_pub_contributions(
+        package_name,
+        fonts_json,
+        font_files_dict,
+        pkg_assets_dict,
+        pkg_shaders_dict,
+        shader_includes = [],
+        pkg_asset_platforms = {},
+        pkg_asset_flavors = {}):
     """Build pub_fonts/pub_assets/pub_shaders contribution structs from rule attrs.
 
     Decodes the JSON-encoded font declarations and walks the file dicts,

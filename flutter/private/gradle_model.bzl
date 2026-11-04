@@ -252,7 +252,10 @@ def gradle_has_word(text, language, word):
     Returns:
       True when `word` appears as a code token.
     """
-    for tok in gradle_code_text(text, language).replace("(", " ").replace(")", " ").replace(",", " ").replace(":", " ").replace("=", " ").split(" "):
+    code = gradle_code_text(text, language)
+    for punctuation in ["(", ")", ",", ":", "="]:
+        code = code.replace(punctuation, " ")
+    for tok in code.split(" "):
         if tok.strip() == word:
             return True
     return False
