@@ -154,9 +154,34 @@ jobs:
       # --test_output=errors so a failure's assertion reaches this log. Without
       # it the output stays in a test.log on the runner and is discarded with
       # the machine.
+      #
+      # Gate-candidate and main-watch dispatches skip the Android targets on
+      # macOS (owner decision 2026-11-04): Linux CI builds and tests Android,
+      # and the nightly, uncached dispatches and release tags still build
+      # Android on a Mac host. A target excluded here only stops being a
+      # top-level request; anything an included target needs still builds.
+      # `--keep_going` lets the query answer when some package fails to load
+      # (exit 3); fewer exclusions only means more is built.
       - name: bazel test //... (e2e/${{ matrix.workspace }})
         working-directory: e2e/${{ matrix.workspace }}
-        run: bazel test //... --test_output=errors
+        env:
+          SKIP_ANDROID: ${{ github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached }}
+        run: |
+          excludes=()
+          if [[ "$SKIP_ANDROID" == true ]]; then
+            android='kind(".*android.*|aar_import", //...)'
+            status=0
+            bazel query --keep_going --output=label \
+              "rdeps(//..., $android) + (deps($android) intersect //...)" \
+              >"$RUNNER_TEMP/android_targets" || status=$?
+            if [[ $status -ne 0 && $status -ne 3 ]]; then
+              echo "::error::bazel query for the Android targets failed (exit $status)"
+              exit "$status"
+            fi
+            while IFS= read -r target; do excludes+=("-$target"); done <"$RUNNER_TEMP/android_targets"
+            echo "Skipping ${#excludes[@]} Android targets on this macOS leg (nightly, uncached and release runs build them)"
+          fi
+          bazel test --test_output=errors -- //... "${excludes[@]}"
       # The macOS half of POD-2: build each plugin expected.json records as
       # "ok" as the spoke's generated device library, one at a time. The step
       # fails when image_picker_ios does not build: build_expected.json gates
