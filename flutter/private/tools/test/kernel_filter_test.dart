@@ -165,6 +165,32 @@ void main() {
       );
     });
 
+    test('collapses repeated slashes before the declared-set comparison', () {
+      final Directory work = Directory.systemTemp.createTempSync(
+        'kernel_filter_sl_',
+      );
+      final Directory saved = Directory.current;
+      Directory.current = work.path;
+      addTearDown(() {
+        Directory.current = saved.path;
+        work.deleteSync(recursive: true);
+      });
+      final String cwd = Directory.current.path;
+      final doubled = '+file://$cwd/demo/lib/src//d.dart';
+      final undeclared = '+file://$cwd/demo/lib/src//other.dart';
+      final reads = [
+        doubled,
+        '+file://$cwd//demo///lib/src/d.dart',
+        undeclared,
+      ];
+      const declaredSet = {'demo/lib/src/d.dart'};
+      expect(findUndeclaredReads(reads, declaredSet, {}), [undeclared]);
+      expect(
+        findUndeclaredReadsWithMirrorRoots(reads, declaredSet, {}, const []),
+        [undeclared],
+      );
+    });
+
     test('the test-only mirror excuse accepts a mirrored created library', () {
       final parent = Directory.systemTemp.createTempSync('kernel_filter_rm_');
       addTearDown(() => parent.deleteSync(recursive: true));
@@ -254,6 +280,116 @@ void main() {}
 ''',
       });
       expect(errors, isEmpty);
+    });
+
+    group('empty segments and a leading slash', () {
+      const lib = 'class D {}\n';
+
+      List<String> importsOf(
+        String path,
+        String directive, [
+        Map<String, String> extra = const {},
+      ]) => check({
+        'demo/lib/src/d.dart': lib,
+        'demo/lib/demo.dart': lib,
+        ...extra,
+        path: '$directive\n',
+      });
+
+      test('allows a doubled slash after the first package segment', () {
+        expect(
+          importsOf('demo/lib/m.dart', "import 'package:demo/src//d.dart';"),
+          isEmpty,
+        );
+      });
+
+      test('refuses an empty segment right after the package name', () {
+        for (final uri in [
+          'package:demo//src/d.dart',
+          'package:demo///src/d.dart',
+        ]) {
+          expect(importsOf('demo/lib/m.dart', "import '$uri';"), hasLength(1));
+        }
+      });
+
+      test('refuses a package URI that climbs above its package', () {
+        for (final uri in [
+          'package:demo/src//../../../x.dart',
+          'package:demo/a//../../../x.dart',
+        ]) {
+          expect(importsOf('demo/lib/m.dart', "import '$uri';"), hasLength(1));
+        }
+        expect(
+          importsOf(
+            'demo/lib/m.dart',
+            "import 'package:demo/src//../demo.dart';",
+          ),
+          isEmpty,
+        );
+      });
+
+      test('allows a relative empty segment that names a declared source', () {
+        expect(
+          importsOf('demo/test/t.dart', "import '../lib/src//d.dart';"),
+          isEmpty,
+        );
+        expect(importsOf('demo/lib/m.dart', "import 'src//d.dart';"), isEmpty);
+      });
+
+      test('refuses a relative empty segment naming no declared source', () {
+        for (final uri in ['src//missing.dart', 'a//b.dart', 'src//d.dart/']) {
+          expect(importsOf('demo/lib/m.dart', "import '$uri';"), hasLength(1));
+        }
+      });
+
+      test('counts an empty segment before .. as a segment', () {
+        // The front end reads `src//../e.dart` as `src/e.dart`; skipping the
+        // empty segment would name `lib/e.dart` instead.
+        expect(
+          importsOf(
+            'demo/lib/m.dart',
+            "import 'src//../e.dart';",
+            {'demo/lib/e.dart': lib},
+          ),
+          hasLength(1),
+        );
+        expect(
+          importsOf(
+            'demo/lib/m.dart',
+            "import 'src//../e.dart';",
+            {'demo/lib/src/e.dart': lib},
+          ),
+          isEmpty,
+        );
+      });
+
+      test('allows a leading slash that names a declared source in lib', () {
+        expect(
+          importsOf('demo/lib/demo.dart', "export '/src/d.dart';"),
+          isEmpty,
+        );
+      });
+
+      test('refuses leading-slash spellings that stay unsafe', () {
+        for (final directive in [
+          "export '/src/missing.dart';",
+          "export '//src/d.dart';",
+          "export '/src//d.dart';",
+          "export '/src/';",
+          "export '/../d.dart';",
+          "export '/etc/passwd';",
+        ]) {
+          expect(
+            importsOf('demo/lib/demo.dart', directive),
+            hasLength(1),
+            reason: directive,
+          );
+        }
+        expect(
+          importsOf('demo/tool/t.dart', "import '/src/d.dart';"),
+          hasLength(1),
+        );
+      });
     });
 
     test('refuses a file: import of an undeclared workspace file', () {
@@ -1364,9 +1500,27 @@ void main() {}
       );
     });
 
-    test('refuses an empty path segment', () {
+    test('counts an empty path segment as a segment, then drops it', () {
       expect(
         resolveFlutterKeyRelativeTarget('a//b.dart', 'app/main.dart'),
+        'app/a/b.dart',
+      );
+      expect(
+        resolveFlutterKeyRelativeTarget('src//../b.dart', 'app/main.dart'),
+        'app/src/b.dart',
+      );
+      expect(
+        resolveFlutterKeyRelativeTarget('../lib/src//d.dart', 'app/t/m.dart'),
+        'app/lib/src/d.dart',
+      );
+    });
+
+    test('refuses a directory, a leading slash and a fragment', () {
+      for (final uri in ['a//', 'a//b.dart/', '/a/b.dart', '//a/b.dart']) {
+        expect(resolveFlutterKeyRelativeTarget(uri, 'app/main.dart'), isNull);
+      }
+      expect(
+        resolveFlutterKeyRelativeTarget('a//b.dart#x', 'app/main.dart'),
         isNull,
       );
     });

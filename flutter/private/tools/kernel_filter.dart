@@ -189,6 +189,12 @@ bool isBoundaryLine(String line) => _boundary.hasMatch(line);
   return (reads: reads, rest: kept.join('\n'));
 }
 
+/// [path] with each run of slashes collapsed to one: the front end spells a
+/// `lib/src//d.dart` read as written but reads the file `lib/src/d.dart`, so
+/// the declared-set comparison uses the collapsed spelling. Nothing else is
+/// normalized (`.` and `..` segments, case and symlinks stay).
+String _collapseSlashes(String path) => path.replaceAll(RegExp('/{2,}'), '/');
+
 /// The exec-root-relative path a `+file://` dependency [line] names, or null
 /// when the line names no file under the compile's working directory. Percent
 /// escapes decode once, the way the front end spells them.
@@ -201,7 +207,7 @@ String? dependencyExecPath(String line) {
     return null;
   }
   if (uri.scheme != 'file') return null;
-  final path = uri.toFilePath().replaceAll(r'\', '/');
+  final path = _collapseSlashes(uri.toFilePath().replaceAll(r'\', '/'));
   final cwd = Directory.current.path.replaceAll(r'\', '/');
   if (path == cwd) return '';
   if (!path.startsWith('$cwd/')) return null;
@@ -222,7 +228,7 @@ String? dependencyAbsolutePath(String line) {
     return null;
   }
   if (uri.scheme != 'file') return null;
-  var path = uri.toFilePath().replaceAll(r'\', '/');
+  var path = _collapseSlashes(uri.toFilePath().replaceAll(r'\', '/'));
   if (!path.startsWith('/') && !RegExp(r'^[a-zA-Z]:').hasMatch(path)) {
     path = '${Directory.current.path.replaceAll(r'\', '/')}/$path';
   }

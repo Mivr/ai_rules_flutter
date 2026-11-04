@@ -18,10 +18,24 @@
 // or remote execution — exposing only declared inputs, these three layers are
 // what keep undeclared bytes out of the dill, whatever a directive's spelling.
 //
-// Like the shared check, a directive with an empty path segment (`a//b.dart`)
-// is refused: the front end does not resolve every such spelling the way
-// skipping the segment would (a `package:` doubled slash resolves as an
-// absolute path), so such URIs fail before the compiler runs.
+// Empty path segments and a leading `/` are decided here, not by the shared
+// check (which refuses or skips them, and whose floor version this module
+// resolves at):
+//
+// * A `package:` URI with an empty segment after the first segment that
+//   follows the package name (`package:demo/src//d.dart`) is allowed unless
+//   it climbs above its package once empty segments count as segments. An
+//   empty segment directly after the package name (`package:demo//x.dart`)
+//   makes the front end read the host path `/x.dart`, so it stays refused.
+// * A schemeless relative URI with an empty segment (`../lib/src//d.dart`) is
+//   resolved by RFC 3986 dot-segment removal with empty segments counted (so
+//   `src//../b.dart` is `src/b.dart`, never `b.dart`), and is allowed exactly
+//   when that names a declared source or a declared multi-root key.
+// * A schemeless URI with exactly one leading `/` and no empty segment after
+//   it, in a library under a package's `lib/` directory, resolves under that
+//   `lib/` and is allowed exactly when the result is a declared source. A
+//   `//` prefix, an empty segment after the slash, or a library outside any
+//   `lib/` stays refused.
 
 import 'dart:convert';
 import 'dart:io';
@@ -129,45 +143,81 @@ String stripFsRootPrefix(String path, List<String> fsRoots) {
 /// Null when [uri] is not a relative URI (any scheme, a fragment, a
 /// `//`-prefixed authority, or a `/`-absolute path, which names a host file
 /// outside every root) or when a decoded `/` names no file. An empty path
-/// segment also yields null: the front end resolves some such spellings
-/// absolutely, so the key lookup fails and the guard refuses the directive
-/// instead of confining the wrong file. A `?...` query is dropped and the
-/// path part resolved instead: an empty reference names the importing file
-/// itself. Null never means "declared": the caller refuses it unless the
-/// filesystem-path check already accepted it.
+/// segment counts as a segment for `..` (RFC 3986: `src//../b.dart` is
+/// `src/b.dart`) and is then dropped from the key, as the front end reads
+/// `a//b.dart` as `a/b.dart`; a URI ending in an empty segment names a
+/// directory and yields null. A `?...` query is dropped and the path part
+/// resolved instead: an empty reference names the importing file itself. Null
+/// never means "declared": the caller refuses it unless the filesystem-path
+/// check already accepted it.
 String? resolveFlutterKeyRelativeTarget(String uri, String fromKey) {
+  final String? path = _relativePathPart(uri);
+  if (path == null || path.startsWith('/')) return null;
+  // An empty reference names the importing file itself (RFC 3986).
+  if (path.isEmpty) return fromKey;
+  final List<String>? parts = _resolveRelativeParts(path, fromKey);
+  return parts?.where((p) => p.isNotEmpty).join('/');
+}
+
+/// The path part of the schemeless [uri] with `\` read as `/` and any query
+/// dropped, or null when it holds a fragment (which names no file: the front
+/// end reports it instead of reading through it) or a `:` (a scheme).
+String? _relativePathPart(String uri) {
   final text = uri.contains(r'\') ? uri.replaceAll(r'\', '/') : uri;
-  // A fragment names no file: the front end reports a URI with one instead of
-  // reading through it. A query names no file either: the front end reads the
-  // file the path part names, so the path part alone is resolved below.
   if (text.contains('#')) return null;
   final query = text.indexOf('?');
   final path = query < 0 ? text : text.substring(0, query);
-  if (path.contains(':')) return null;
-  if (path.startsWith('//') || path.startsWith('/')) return null;
-  // An empty reference names the importing file itself (RFC 3986).
-  if (path.isEmpty) return fromKey;
-  final stack = <String>[];
-  for (final part in fromKey.split('/')) {
-    if (part.isNotEmpty) stack.add(part);
-  }
-  // Drop the file name: the URI resolves against its directory.
-  if (stack.isNotEmpty) stack.removeLast();
-  for (final raw in path.split('/')) {
-    // An empty segment is not skipped: the front end resolves some such
-    // spellings absolutely, so the key lookup fails and the guard refuses the
-    // directive instead of confining the wrong file.
-    if (raw.isEmpty) return null;
-    final seg = decodeUriSegment(raw);
+  return path.contains(':') ? null : path;
+}
+
+/// Applies the raw URI path segments [raw] to [stack], RFC 3986 style: an
+/// empty segment is a real segment (it is what a following `..` removes), `.`
+/// is dropped and `..` pops. A `..` on an empty [stack] is dropped, or makes
+/// the result null when [refuseEscape]. Null too for a decoded `/`.
+List<String>? _resolveSegments(
+  List<String> stack,
+  Iterable<String> raw, {
+  required bool refuseEscape,
+}) {
+  for (final part in raw) {
+    if (part.isEmpty) {
+      stack.add('');
+      continue;
+    }
+    final String seg = decodeUriSegment(part);
     if (seg.isEmpty || seg == '.') continue;
     if (seg == '..') {
-      if (stack.isNotEmpty) stack.removeLast();
+      if (stack.isNotEmpty) {
+        stack.removeLast();
+      } else if (refuseEscape) {
+        return null;
+      }
       continue;
     }
     if (seg.contains('/')) return null;
     stack.add(seg);
   }
-  return stack.join('/');
+  return stack;
+}
+
+/// The segments (empty ones included) the nonempty relative [path] names when
+/// resolved against the directory of the file [fromPath]; null when it escapes
+/// through a decoded `/` or ends in an empty segment (a directory, no file).
+List<String>? _resolveRelativeParts(String path, String fromPath) {
+  final List<String> stack = [
+    for (final part in fromPath.split('/'))
+      if (part.isNotEmpty) part,
+  ];
+  // Drop the file name: the URI resolves against its directory.
+  if (stack.isNotEmpty) stack.removeLast();
+  final List<String>? parts = _resolveSegments(
+    stack,
+    path.split('/'),
+    refuseEscape: false,
+  );
+  return parts == null || (parts.isNotEmpty && parts.last.isEmpty)
+      ? null
+      : parts;
 }
 
 /// Reads every existing source in [sources] for the directive scan.
@@ -205,12 +255,11 @@ String _refuseFlutterDirective(
 ///
 /// A URI spanning lines is refused however it spells its target: the front
 /// end drops a whitespace-only first line of a multi-line string literal and
-/// reads a different file than the resolvers see. An empty path segment is
-/// refused before resolving: the front end resolves some such spellings
-/// absolutely. Otherwise `dart:` is always allowed, the app scheme must name
-/// a declared key, `package:` must not climb above its package, `file:` and
-/// other unexpected schemes are refused, and a relative URI must resolve to a
-/// declared source beside the importing file or to a declared multi-root key.
+/// reads a different file than the resolvers see. Otherwise `dart:` is always
+/// allowed, the app scheme must name a declared key (an empty segment is
+/// refused there), `package:` must stay inside its package ([_isAllowedPackage]
+/// states the empty-segment rule), `file:` and other unexpected schemes are
+/// refused, and a schemeless URI is decided by [_isAllowedSchemeless].
 bool _isAllowedFlutterDirective(
   String uri,
   String from,
@@ -220,9 +269,9 @@ bool _isAllowedFlutterDirective(
   required String multiRootPrefix,
 }) {
   if (uri.contains('\n') || uri.contains('\r')) return false;
-  if (hasEmptyPathSegment(uri)) return false;
   if (uri.startsWith('dart:')) return true;
   if (uri.startsWith(multiRootPrefix)) {
+    if (hasEmptyPathSegment(uri)) return false;
     // The app scheme resolves only across the compile's `--filesystem-root`
     // values, which name nothing but staged declared inputs: a URI that
     // names no declared key fails the build here instead of at the front
@@ -236,10 +285,54 @@ bool _isAllowedFlutterDirective(
     );
     return key != null && declaredKeys.contains(key);
   }
-  if (uri.startsWith('package:')) return !isEscapingPackageUri(uri);
+  if (uri.startsWith('package:')) return _isAllowedPackage(uri);
   if (isFileSchemeDirectiveUri(uri) ||
       isDisallowedDirectiveUri(uri, multiRootPrefix: multiRootPrefix)) {
     return false;
+  }
+  return _isAllowedSchemeless(uri, from, fromKey, declared, declaredKeys);
+}
+
+/// Whether the `package:` [uri] stays inside its package.
+///
+/// Without an empty segment this is the shared check. With one, the shared
+/// check (at this module's floor version) refuses every spelling, so it is
+/// decided here: an empty segment directly after the package name makes the
+/// front end read the host path (`package:demo//x.dart` is `/x.dart`) and is
+/// refused, a package name holding a percent escape is refused, and any
+/// other empty segment is allowed unless the path climbs above the package
+/// root once empty segments are counted as segments.
+bool _isAllowedPackage(String uri) {
+  if (!hasEmptyPathSegment(uri)) return !isEscapingPackageUri(uri);
+  String rest = uri.substring('package:'.length).replaceAll(r'\', '/');
+  final int cut = rest.indexOf(RegExp('[#?]'));
+  if (cut >= 0) rest = rest.substring(0, cut);
+  final int slash = rest.indexOf('/');
+  if (slash <= 0 || rest.substring(0, slash).contains('%')) return false;
+  final List<String> segments = rest.substring(slash + 1).split('/');
+  if (segments.first.isEmpty) return false;
+  return _resolveSegments([], segments, refuseEscape: true) != null;
+}
+
+/// Whether the schemeless [uri] in the declared source [from] (key [fromKey])
+/// names a declared input.
+///
+/// A single leading `/` goes to [_isAllowedLeadingSlash], an empty segment to
+/// [_isAllowedEmptySegment]; every other spelling must resolve to a declared
+/// source beside the importing file or to a declared multi-root key.
+bool _isAllowedSchemeless(
+  String uri,
+  String from,
+  String fromKey,
+  Set<String> declared,
+  Set<String> declaredKeys,
+) {
+  final String text = uri.replaceAll(r'\', '/');
+  if (text.startsWith('/')) {
+    return _isAllowedLeadingSlash(text, from, fromKey, declared, declaredKeys);
+  }
+  if (hasEmptyPathSegment(uri)) {
+    return _isAllowedEmptySegment(uri, from, fromKey, declared, declaredKeys);
   }
   final target = resolveStagedRelativeTarget(uri, from);
   if (target != null && declared.contains(target)) return true;
@@ -247,12 +340,93 @@ bool _isAllowedFlutterDirective(
   return keyTarget != null && declaredKeys.contains(keyTarget);
 }
 
+/// Whether the schemeless [uri] with an empty path segment names a declared
+/// source or key by its RFC 3986 resolution, empty segments counted.
+///
+/// The staged-path resolution of the shared check skips empty segments, so
+/// `src//../b.dart` would name `b.dart` there but `src/b.dart` in the front
+/// end; the decision here uses the RFC resolution only, for the staged path
+/// and for the multi-root key.
+bool _isAllowedEmptySegment(
+  String uri,
+  String from,
+  String fromKey,
+  Set<String> declared,
+  Set<String> declaredKeys,
+) {
+  final String? keyTarget = resolveFlutterKeyRelativeTarget(uri, fromKey);
+  if (keyTarget != null && declaredKeys.contains(keyTarget)) return true;
+  final String? path = _relativePathPart(uri);
+  if (path == null || path.isEmpty) return false;
+  final List<String>? parts = _resolveRelativeParts(path, from);
+  if (parts == null) return false;
+  final String staged = parts.where((p) => p.isNotEmpty).join('/');
+  final root = from.startsWith('/') ? '/' : '';
+  return declared.contains(normalizeStagedPath('$root$staged'));
+}
+
+/// Whether the schemeless [text] starting with `/` names a declared source
+/// under the `lib/` directory of the package holding the importing file.
+///
+/// The front end resolves a library's `/src/flow.dart` against the library's
+/// own URI, `package:demo/demo.dart`, to `package:demo/src/flow.dart`, which
+/// is the file `lib/src/flow.dart` of that package. The guard has no package
+/// config, so the package directory comes from the importing file's own path:
+/// the directory above a `lib` directory component, taken from the multi-root
+/// key ([fromKey]) or the staged path ([from]). When several components are
+/// named `lib` every reading must name a declared source. Refused: a `//`
+/// prefix, an empty segment after the slash, a file in no `lib/` directory, a
+/// `..` that climbs above `lib/`, and a result that is not declared.
+bool _isAllowedLeadingSlash(
+  String text,
+  String from,
+  String fromKey,
+  Set<String> declared,
+  Set<String> declaredKeys,
+) {
+  final String? path = _relativePathPart(text);
+  if (path == null || path.startsWith('//')) return false;
+  final List<String> segments = path.substring(1).split('/');
+  if (segments.any((s) => s.isEmpty)) return false;
+  final List<String> byKey = _libCandidates(segments, fromKey);
+  if (byKey.isNotEmpty && byKey.every(declaredKeys.contains)) return true;
+  final List<String> byPath = [
+    for (final c in _libCandidates(segments, from)) normalizeStagedPath(c),
+  ];
+  return byPath.isNotEmpty && byPath.every(declared.contains);
+}
+
+/// The path `/<segments>` names under each `lib` directory of [filePath]:
+/// one candidate per directory component named `lib`. Empty when there is no
+/// such directory or [segments] climb above it.
+List<String> _libCandidates(List<String> segments, String filePath) {
+  final List<String> dirs = filePath.split('/')..removeLast();
+  final absolute = filePath.startsWith('/') ? '/' : '';
+  final List<String>? under = _resolveSegments(
+    [],
+    segments,
+    refuseEscape: true,
+  );
+  if (under == null) return const [];
+  return [
+    for (var i = 0; i < dirs.length; i++)
+      if (dirs[i] == 'lib')
+        absolute +
+            [
+              ...dirs.take(i + 1).where((d) => d.isNotEmpty),
+              ...under,
+            ].join('/'),
+  ];
+}
+
 /// A diagnostic for every input source with a directive URI that names no
 /// file the action can read through its declared inputs: a `file:` URI in any
 /// spelling, any other scheme but `dart:`, `package:` and the app scheme, a
-/// `package:` URI climbing above its package, an empty path segment (which
-/// the front end resolves differently than skipping it would), or a relative
-/// URI resolving to no declared input source. The front end reads such a URI
+/// `package:` URI climbing above its package or holding an empty segment right
+/// after the package name, an empty path segment in a relative URI that
+/// resolves to no declared input, a `/`-prefixed URI that names no declared
+/// source under its package's `lib/`, or a relative URI resolving to no
+/// declared input source. The front end reads such a URI
 /// off the host, outside every `--filesystem-root`, so the wrapper refuses
 /// before compiling. Climbing `..` segments are followed past the declared
 /// inputs, never clamped: enough segments name any host path. Empty when
