@@ -16,7 +16,7 @@ load("@rules_dart//dart:defs.bzl", "dart_binary", "dart_test")
 load("//flutter:android.bzl", "flutter_android_apk_overlay", "flutter_android_app", "flutter_android_bundle", "flutter_android_engine", "flutter_android_manifest_gen", "flutter_android_manifest_merge", "flutter_android_permissions_manifest", "flutter_android_plugin_library", "flutter_android_registrant", "flutter_android_runner_lib_gen")
 load("//flutter:defs.bzl", "flutter_aot_target", "flutter_application", "flutter_asset_bundle", "flutter_font_family", "flutter_gen_l10n", "flutter_integration_test", "flutter_kernel_target", "flutter_library", "flutter_native_library", "flutter_plugin", "flutter_prebuilt_test", "flutter_test")
 load("//flutter:dev_files.bzl", "flutter_dev_files")
-load("//flutter:ios.bzl", "flutter_apple_plugin_library", "flutter_apple_plugins_aggregator", "flutter_apple_xcframework_import", "flutter_darwin_xcframework_import", "flutter_entitlements_merge", "flutter_ios_app", "flutter_ios_engine", "flutter_ios_framework_gen", "flutter_ios_info_plist_gen", "flutter_ios_native_frameworks_gen", "flutter_ios_privacy_manifests_gen", "flutter_ios_registrant_gen", "flutter_ios_runner_lib_gen", "flutter_ios_simulator_build", "flutter_ios_simulator_build_test", "flutter_xtool_bundle_version", "flutter_xtool_ios_bundle", "ios_sim_debug_app")
+load("//flutter:ios.bzl", "flutter_apple_plugin_library", "flutter_apple_plugins_aggregator", "flutter_apple_xcframework_import", "flutter_darwin_xcframework_import", "flutter_entitlements_merge", "flutter_ios_app", "flutter_ios_engine", "flutter_ios_framework_gen", "flutter_ios_info_plist_gen", "flutter_ios_native_frameworks_gen", "flutter_ios_privacy_manifests_gen", "flutter_ios_registrant_gen", "flutter_ios_runner_lib_gen", "flutter_ios_simulator_build", "flutter_ios_simulator_build_test", "flutter_ios_xcframeworks", "flutter_xtool_bundle_version", "flutter_xtool_ios_bundle", "ios_sim_debug_app")
 load("//flutter:linux.bzl", "flutter_linux_app", "flutter_linux_bundle", "flutter_linux_engine", "flutter_linux_plugin_library", "flutter_linux_registrant_gen", "flutter_linux_runner_lib_gen")
 load("//flutter:macos.bzl", "flutter_macos_app", "flutter_macos_engine", "flutter_macos_framework_gen", "flutter_macos_info_plist_gen", "flutter_macos_menu_xib_gen", "flutter_macos_native_libs_gen", "flutter_macos_privacy_manifests_gen", "flutter_macos_registrant_gen", "flutter_macos_runner_lib_gen", "flutter_xtool_macos_bundle")
 load("//flutter:native_assets.bzl", "flutter_data_asset", "flutter_native_asset", "flutter_native_assets_manifest")
@@ -316,6 +316,12 @@ flutter_ios_privacy_manifests_gen(
 
 flutter_ios_framework_gen(
     name = "ios_framework",
+    application = ":app",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+flutter_ios_xcframeworks(
+    name = "ios_xcframeworks",
     application = ":app",
     target_compatible_with = ["@platforms//os:macos"],
 )
