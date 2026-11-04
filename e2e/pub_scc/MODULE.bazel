@@ -174,6 +174,7 @@ maven.install(
         "com.google.protobuf:protobuf-java:4.34.0",
         "com.google.protobuf:protobuf-java-util:4.34.0",
     ],
+    lock_file = "//:android_ide_common_30_1_3_install.json",
     repositories = [
         "https://maven-central.storage-download.googleapis.com/maven2",
         "https://maven.google.com",
@@ -228,9 +229,7 @@ maven.install(
         "com.google.auto:auto-common:1.2.2",
         "com.google.auto.service:auto-service:1.1.1",
     ],
-    known_contributing_modules = [
-        "rules_android",
-    ],
+    lock_file = "//:rules_android_maven_install.json",
     repositories = [
         "https://maven-central.storage-download.googleapis.com/maven2",
         "https://maven.google.com",
@@ -240,5 +239,6 @@ maven.install(
 )
 use_repo(
     maven,
+    "android_ide_common_30_1_3",
     "rules_android_maven",
 )
