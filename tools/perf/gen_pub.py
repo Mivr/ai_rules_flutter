@@ -8,6 +8,7 @@ strip those entries; the bench app imports none of them.
 """
 
 import os
+import re
 
 from gen_files import write_plain
 
@@ -92,3 +93,92 @@ def copy_pub_files(out_dir, rules_flutter_dir):
                 write_plain(out_dir, file_name, strip(fh.read()))
         else:
             write_plain(out_dir, file_name, fallback)
+
+
+def _strip_comments(text):
+    """MODULE text with ``#`` comments removed, string literals intact."""
+    out = []
+    quote = None
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            out.append(ch)
+            if ch == "\\" and i + 1 < len(text):
+                i += 1
+                out.append(text[i])
+            elif ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+            out.append(ch)
+        elif ch == "#":
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            continue
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+_LOCK_FILE_RE = re.compile(r"(?<![\w.])lock_file\s*=\s*\"([^\"]*)\"")
+_ROOT_PREFIXES = ("@@//", "@//", "//")
+
+
+def lock_file_rel_path(label):
+    """Workspace-relative path of a root-workspace label, else None.
+
+    External labels (``@repo//...``) return None. A malformed, empty,
+    absolute or escaping root label raises ValueError naming it.
+    """
+    if label.startswith("@") and not label.startswith(_ROOT_PREFIXES):
+        return None
+    body = label
+    for prefix in _ROOT_PREFIXES:
+        if label.startswith(prefix):
+            body = label[len(prefix) - 2:]
+            break
+    if body.startswith(":"):
+        body = "//" + body
+    if not body.startswith("//") or body.count(":") != 1:
+        raise ValueError("malformed lock_file label: %r" % label)
+    pkg, target = body[2:].split(":")
+    rel = pkg + "/" + target if pkg else target
+    parts = rel.split("/")
+    if (not target or "\\" in rel or rel.startswith("/")
+            or any(p in ("", ".", "..") for p in parts)):
+        raise ValueError("invalid lock_file label: %r" % label)
+    return rel
+
+
+def stage_lock_files(out_dir, rules_flutter_dir, module_text):
+    """Copies each workspace-local ``lock_file`` into the workspace.
+
+    The lockfiles come from the hello_world fixture, byte for byte. A
+    declared lockfile missing from the fixture raises ValueError.
+    """
+    seen = []
+    for label in _LOCK_FILE_RE.findall(_strip_comments(module_text)):
+        rel = lock_file_rel_path(label)
+        if rel is not None and rel not in seen:
+            seen.append(rel)
+    fixture = os.path.join(rules_flutter_dir, "e2e", "hello_world")
+    for rel in seen:
+        src = os.path.join(fixture, *rel.split("/"))
+        if not os.path.isfile(src):
+            raise ValueError(
+                "lock_file %r needs fixture %s, which is missing"
+                % (rel, src))
+        dest = os.path.join(out_dir, *rel.split("/"))
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(src, "rb") as fh:
+            data = fh.read()
+        with open(dest, "wb") as fh:
+            fh.write(data)
+
+
+def copy_pub_and_lock_files(out_dir, rules_flutter_dir, module_text):
+    """Writes the pub files and stages the MODULE's local lockfiles."""
+    copy_pub_files(out_dir, rules_flutter_dir)
+    stage_lock_files(out_dir, rules_flutter_dir, module_text)

@@ -65,7 +65,7 @@ from gen_platform_apps import (
     write_android_scaffolding,
     write_app_build,
 )
-from gen_pub import copy_pub_files
+from gen_pub import copy_pub_and_lock_files
 
 MASK64 = (1 << 64) - 1
 
@@ -1423,11 +1423,10 @@ def _write_root_files(files):
     """MODULE, pub files, bazelrc, analysis config and platform scaffolds."""
     out_dir = files.out_dir
     rules_flutter_dir = files.rules_flutter_dir
-    overrides = files.overrides
     bazel_version = read_bazel_version_or(rules_flutter_dir)
-    write_plain(
-        out_dir, "MODULE.bazel", module_bazel_text(rules_flutter_dir, overrides))
-    copy_pub_files(out_dir, rules_flutter_dir)
+    module_text = module_bazel_text(rules_flutter_dir, files.overrides)
+    write_plain(out_dir, "MODULE.bazel", module_text)
+    copy_pub_and_lock_files(out_dir, rules_flutter_dir, module_text)
     write_plain(out_dir, ".bazelversion", bazel_version + "\n")
     write_plain(out_dir, ".bazelrc", bazelrc_text(rules_flutter_dir))
     copy_pub_file(
