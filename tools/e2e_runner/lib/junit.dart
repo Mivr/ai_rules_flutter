@@ -317,6 +317,40 @@ TestCaseCount countCommandTestCases({
   return (total: fbTotal, executed: fbExecuted, source: 'JUnit test.xml');
 }
 
+/// Reads concatenated JUnit `test.xml` text from [bepJsonPath] (`inlineXmls`
+/// and `xmlFiles`), or falls back to `test.xml` files in [stagedWorkspace] and
+/// [scratchOutputBase] only when BEP yields none.
+String collectCommandTestXml({
+  required String? bepJsonPath,
+  required String stagedWorkspace,
+  required String scratchOutputBase,
+}) {
+  final buffer = StringBuffer();
+  if (bepJsonPath != null) {
+    final BepTestArtifacts bep = extractBepTestArtifacts(bepJsonPath);
+    var foundAny = false;
+    for (final String inline in bep.inlineXmls) {
+      foundAny = true;
+      buffer.writeln(inline);
+    }
+    for (final String xmlPath in bep.xmlFiles) {
+      final file = File(xmlPath);
+      if (!file.existsSync()) continue;
+      foundAny = true;
+      buffer.writeln(file.readAsStringSync());
+    }
+    if (foundAny) return buffer.toString();
+  }
+  for (final String xmlPath in findWorkspaceFilesByName(
+    fileName: 'test.xml',
+    stagedWorkspace: stagedWorkspace,
+    scratchOutputBase: scratchOutputBase,
+  )) {
+    buffer.writeln(File(xmlPath).readAsStringSync());
+  }
+  return buffer.toString();
+}
+
 /// Reads concatenated `test.log` outputs from [bepJsonPath], or falls back to
 /// `test.log` files in [stagedWorkspace] and [scratchOutputBase].
 String collectCommandTestLogs({

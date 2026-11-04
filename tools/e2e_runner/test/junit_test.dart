@@ -108,6 +108,14 @@ void _registerBepAndFallbackTests() {
         scratchOutputBase: ob.path,
       );
       expect(logs, contains('SHARD_ONE_LOG_LINE'));
+
+      final String xml = collectCommandTestXml(
+        bepJsonPath: bepFile.path,
+        stagedWorkspace: ws.path,
+        scratchOutputBase: ob.path,
+      );
+      expect(xml, contains('<testcase name="a"/>'));
+      expect(xml, contains('<testcase name="d"/>'));
     });
 
     test('falls back to workspace and execroot test.xml deduplicated', () {
@@ -160,6 +168,13 @@ void _registerBepAndFallbackTests() {
         scratchOutputBase: ob.path,
       );
       expect(logs, contains('FB_LOG_OK'));
+
+      final String xml = collectCommandTestXml(
+        bepJsonPath: emptyBep.path,
+        stagedWorkspace: ws.path,
+        scratchOutputBase: ob.path,
+      );
+      expect(xml, contains('<testcase name="two"/>'));
     });
   });
 }

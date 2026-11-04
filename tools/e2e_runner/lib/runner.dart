@@ -52,6 +52,7 @@ class E2eRunnerOptions {
     required this.workspacePath,
     required this.bazelBinary,
     this.specPath,
+    this.commandFilter,
     this.runtime = _defaultRuntimeConfig,
   });
 
@@ -63,6 +64,12 @@ class E2eRunnerOptions {
 
   /// Optional explicit path to `e2e.yaml` (defaults to `<workspace>/e2e.yaml`).
   final String? specPath;
+
+  /// Command names to execute (in spec order); `null` runs every command.
+  ///
+  /// An empty list, a blank name, or a name matching no spec command fails
+  /// closed before any command runs.
+  final List<String>? commandFilter;
 
   /// Environment, scratch parent, platform, and output stream overrides.
   final RunnerRuntimeConfig runtime;
@@ -290,7 +297,7 @@ Future<void> runE2e(E2eRunnerOptions options) async {
       childEnv: childEnv,
       windowsMode: win,
     );
-    for (var i = 0; i < spec.commands.length; i++) {
+    for (final int i in _selectCommandIndices(spec, options.commandFilter)) {
       await _executeStep(state, index: i);
     }
   } finally {
@@ -303,6 +310,33 @@ Future<void> runE2e(E2eRunnerOptions options) async {
     );
     deleteScratchTree(scratchRoot);
   }
+}
+
+/// Returns the indices of [spec] commands selected by [filter], in spec order.
+List<int> _selectCommandIndices(E2eSpec spec, List<String>? filter) {
+  final all = List<int>.generate(spec.commands.length, (i) => i);
+  if (filter == null) return all;
+  final String shown = filter.map((name) => '"$name"').join(', ');
+  if (filter.isEmpty || filter.any((name) => name.trim().isEmpty)) {
+    throw E2eRunnerException(
+      specPath: spec.specPath,
+      commandName: '--command',
+      message: '--command filter is empty ($shown)',
+    );
+  }
+  final Set<String> known = spec.commands.map((c) => c.name).toSet();
+  for (final String name in filter) {
+    if (!known.contains(name)) {
+      throw E2eRunnerException(
+        specPath: spec.specPath,
+        commandName: '--command',
+        message:
+            '--command filter "$name" matches no command; '
+            'available: ${known.join(', ')}',
+      );
+    }
+  }
+  return all.where((i) => filter.contains(spec.commands[i].name)).toList();
 }
 
 Directory _selectScratchParent(
@@ -599,6 +633,14 @@ void _verifyOutputExpectations({
       scratchOutputBase: state.outputBase,
     );
     _requireContainsAll(logs, expect.testLogContains, 'test.log', context);
+  }
+  if (expect.testXmlContains.isNotEmpty) {
+    final String xml = collectCommandTestXml(
+      bepJsonPath: prepared.bepPath,
+      stagedWorkspace: state.stagedWorkspace,
+      scratchOutputBase: state.outputBase,
+    );
+    _requireContainsAll(xml, expect.testXmlContains, 'test.xml', context);
   }
 }
 

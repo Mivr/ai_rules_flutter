@@ -23,6 +23,13 @@ ArgParser _buildParser() => ArgParser()
     'spec',
     help: 'Optional explicit path to e2e.yaml.',
   )
+  ..addMultiOption(
+    'command',
+    splitCommas: false,
+    help:
+        'Run only the named spec command (repeatable; spec order). Fails '
+        'when empty or when a name matches no command.',
+  )
   ..addFlag(
     'help',
     abbr: 'h',
@@ -75,6 +82,9 @@ Future<void> main(List<String> arguments) async {
         workspacePath: workspacePath,
         bazelBinary: bazelBinary,
         specPath: resolvedSpec,
+        commandFilter: parsed.wasParsed('command')
+            ? parsed['command'] as List<String>
+            : null,
         runtime: (
           environment: Platform.environment,
           tempParent: null,
