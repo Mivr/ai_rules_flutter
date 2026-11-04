@@ -998,9 +998,31 @@ bzl_library(
 )
 
 bzl_library(
+    name = "podspec_read_regex",
+    srcs = ["podspec_read_regex.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "podspec_read_percent",
+    srcs = ["podspec_read_percent.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "podspec_read_check",
+    srcs = ["podspec_read_check.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
     name = "podspec_read_ruby",
     srcs = ["podspec_read_ruby.bzl"],
     visibility = ["//visibility:public"],
+    deps = [
+        ":podspec_read_percent",
+        ":podspec_read_regex",
+    ],
 )
 
 bzl_library(
@@ -1019,6 +1041,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":flutter_apple_plugin_defines",
+        ":podspec_read_check",
         ":podspec_read_ruby",
         ":podspec_read_xcconfig",
         ":starlark_literal",

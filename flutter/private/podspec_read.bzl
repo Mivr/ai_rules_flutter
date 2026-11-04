@@ -2,9 +2,14 @@
 
 load(":flutter_apple_plugin_defines.bzl", "dedupe_plugin_defines")
 load(
+    ":podspec_read_check.bzl",
+    "checked_podspec_tokens",
+    "podspec_syntax_error",
+)
+load(
     ":podspec_read_ruby.bzl",
     "format_rhs_raw",
-    "lex_podspec",
+    "lex_podspec_checked",
     "parse_resource_bundles_tokens",
     "parse_string_list_tokens",
 )
@@ -253,8 +258,10 @@ def _update_rhs_state(t, prev, state):
         return
     if stmt_len == state["assign_pos"] + 1 and t.kind == "word" and t.text in _END_OPENERS and not _after_dot(prev):
         state["rhs_end"] = 1
+        state["rhs_line"] = t.line
     elif t.kind == "word" and t.text == "do" and not _after_dot(prev):
         state["rhs_end"] = 1
+        state["rhs_line"] = t.line
     elif _is_modifier_keyword(t, prev, stmt_len, state["assign_pos"], state["mod_pos"]):
         state["mod_pos"] = stmt_len
 
@@ -264,8 +271,16 @@ def _trimmed_stmt_tokens(state):
     return state["stmt"][:mod_pos] if mod_pos >= 0 else state["stmt"]
 
 def _finished_statement(state, next_idx):
-    """Build a finished-statement result struct from accumulated `state`."""
-    return struct(is_block = False, tokens = _trimmed_stmt_tokens(state), next_idx = next_idx)
+    """Build a finished-statement result struct from accumulated `state`.
+
+    `open_line` is non-zero only when input ended inside an RHS `if`/`do`/... block.
+    """
+    return struct(
+        is_block = False,
+        tokens = _trimmed_stmt_tokens(state),
+        next_idx = next_idx,
+        open_line = state["rhs_line"] if state["rhs_end"] > 0 else 0,
+    )
 
 def _boundary_action(t, prev, state, tokens, n, j):
     """Classify a depth-0, pre-assignment statement token, or `None` to keep scanning.
@@ -295,7 +310,7 @@ def _boundary_action(t, prev, state, tokens, n, j):
 
 def _read_statement_or_block_open(tokens, n, idx):
     """Scan one statement or `do`/`{` block header starting at `tokens[idx]`."""
-    state = {"stmt": [], "assign_pos": -1, "rhs_end": 0, "mod_pos": -1}
+    state = {"stmt": [], "assign_pos": -1, "rhs_end": 0, "mod_pos": -1, "rhs_line": 0}
     depth = 0
     prev = None
     j = idx
@@ -442,10 +457,10 @@ def _step_keyword_at_stmt_start(tokens, n, idx, block_stack):
     if kw in ("elsif", "when", "rescue"):
         return _skip_condition_header(tokens, n, idx, False)
     if kw == "begin":
-        block_stack.append(struct(closer = "end", skip = _is_skipping(block_stack)))
+        block_stack.append(struct(closer = "end", skip = _is_skipping(block_stack), line = tok.line))
         return idx + 1
     if kw in _END_OPENERS:
-        block_stack.append(struct(closer = "end", skip = _is_skipping(block_stack)))
+        block_stack.append(struct(closer = "end", skip = _is_skipping(block_stack), line = tok.line))
         return _skip_condition_header(tokens, n, idx, kw in ("while", "until", "for"))
     return -1
 
@@ -475,7 +490,7 @@ def read_plugin_podspec(text, podspec_path, plugin, platform):
         privacy_manifests = privacy_manifests,
         defines = defines,
     )
-    tokens = lex_podspec(text)
+    tokens = checked_podspec_tokens(lex_podspec_checked(text), plugin, podspec_path)
     n = len(tokens)
     block_stack = []
     idx = 0
@@ -486,12 +501,15 @@ def read_plugin_podspec(text, podspec_path, plugin, platform):
         if kw_next >= 0:
             idx = kw_next
             continue
+        start_line = tokens[idx].line
         item = _read_statement_or_block_open(tokens, n, idx)
         idx = item.next_idx
         if item.is_block:
             skip = _is_skipping(block_stack) or _should_skip_opened_block(item.header, platform)
-            block_stack.append(struct(closer = item.closer, skip = skip))
+            block_stack.append(struct(closer = item.closer, skip = skip, line = start_line))
             continue
+        if item.open_line:
+            fail(podspec_syntax_error(plugin, podspec_path, item.open_line, "an unclosed block"))
         if _is_skipping(block_stack) or not item.tokens:
             continue
         assign = _parse_attr_assignment(item.tokens)
@@ -499,6 +517,9 @@ def read_plugin_podspec(text, podspec_path, plugin, platform):
             collected.defines.extend(xcconfig_merge_defines(item.tokens, platform))
         elif _is_scope_active(assign.scope, platform):
             _dispatch_statement_attr(assign, text, plugin, podspec_path, collected)
+    if block_stack:
+        open_line = block_stack[0].line
+        fail(podspec_syntax_error(plugin, podspec_path, open_line, "an unclosed block (missing `end` or `}`)"))
 
     return struct(
         frameworks = frameworks,

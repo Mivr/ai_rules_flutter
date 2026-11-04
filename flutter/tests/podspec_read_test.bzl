@@ -425,6 +425,9 @@ _expect_failure_test = analysistest.make(
     },
 )
 
+podspec_failure_probe = _podspec_failure_probe
+podspec_expect_failure_test = _expect_failure_test
+
 def _pure_swift_ccinfo_test_impl(ctx):
     """Assert that a pure-Swift `flutter_apple_plugin_library` propagates SDK link flags in `CcInfo`."""
     env = analysistest.begin(ctx)
