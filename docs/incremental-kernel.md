@@ -42,6 +42,30 @@ just omitting it) restores the stock one-shot action: with the flag off the
 `FlutterKernelCompile` actions are byte-identical to a build without the
 flag, so remote and local caches keep hitting.
 
+## Dev-only incremental serialization
+
+```sh
+bazel build --@rules_flutter//flutter:incremental_kernel \
+  --@rules_flutter//flutter:dev_incremental_serialization //app:app
+```
+
+By default the worker starts `frontend_server` with
+`--no-incremental-serialization`, so every warm edit rewrites the full dill
+from scratch. `//flutter:dev_incremental_serialization` (a `bool_flag`,
+default `False`) starts it without that flag, which keeps the server's
+incremental serialization. A reporter measured the reset phase at 13-16 s
+with the default against 1.6 s without it (one build each, one machine).
+
+- It only has an effect together with `//flutter:incremental_kernel`, on the
+  same compiles that flag routes through the worker.
+- The resulting dill is **not byte-identical** to a one-shot compile.
+- It is for development only: do not use it in CI or remote-cache
+  configurations. Every compile that uses it carries the execution
+  requirements `no-remote-cache` and `no-remote-exec`, so a dev dill never
+  reaches a shared cache or a remote executor.
+- With the setting off (the default), every `FlutterKernelCompile` action is
+  unchanged.
+
 ## Scope
 
 JIT whole-program compiles only (`target == "flutter"`, non-AOT, in any
