@@ -66,6 +66,16 @@ const _commonPlaceholders = [
   '{binding_init}',
 ];
 
+/// Strings the Linux (and so the iOS) template must not carry itself: the
+/// fixed-port fallback and the iOS-only file fallback live in prologues.
+const _linuxForbidden = [
+  'ws://127.0.0.1',
+  '38427',
+  'Directory.systemTemp',
+  'flutter_integration_test_harness_url',
+  'stderr.flush()',
+];
+
 void main() {
   final root = _workspaceRoot();
   if (root == null) {
@@ -118,6 +128,18 @@ void main() {
     final text = read(_templates['linux']!);
     expect(text, contains('{harness_url_prologue}'));
     expect(text, contains('WebSocket.connect(wsUrl)'));
+  });
+
+  test('linux bootstrap carries no fixed port or file fallback', () {
+    final String path = _templates['linux']!;
+    final String outside = read(path).replaceAll('{harness_url_prologue}', '');
+    for (final String forbidden in _linuxForbidden) {
+      expect(
+        outside,
+        isNot(contains(forbidden)),
+        reason: '$path must not contain $forbidden outside the prologue',
+      );
+    }
   });
 
   test('android bootstrap falls back to the adb-reverse port', () {
