@@ -23,7 +23,7 @@ String? _messageOf(LogRecord record) {
 /// answers [appAlive]; `log show` answers empty, so only the live stream can
 /// announce.
 class _ScriptedLaunch {
-  _ScriptedLaunch({bool holdLaunch = false}) {
+  new({bool holdLaunch = false}) {
     if (!holdLaunch) openLaunch.complete();
     final device =
         IOSSimulatorDevice(

@@ -55,7 +55,7 @@ class StabilizedPackageConfig {
   /// rewrite — so callers report this rather than treating it as a failure.
   final List<String> repointed;
 
-  const StabilizedPackageConfig({required this.path, required this.repointed});
+  const new({required this.path, required this.repointed});
 }
 
 /// Write a copy of [packageConfigPath] into [into] whose `file:` package roots

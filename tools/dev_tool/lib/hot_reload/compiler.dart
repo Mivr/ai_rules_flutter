@@ -10,7 +10,7 @@ import 'package:flutter_bazel_dev_tool/frontend_server.dart';
 
 /// Outcome of a single compile request.
 sealed class CompileOutcome {
-  const CompileOutcome();
+  const new();
 }
 
 /// The compile produced a kernel artifact at [dillPath].
@@ -21,14 +21,14 @@ sealed class CompileOutcome {
 /// applied-state tracking it doesn't otherwise need.
 class CompileSucceeded extends CompileOutcome {
   final String dillPath;
-  const CompileSucceeded(this.dillPath);
+  const new(this.dillPath);
 }
 
 /// The compile failed; [diagnostics] is whatever the frontend_server
 /// emitted on stderr/stdout before reporting non-zero error count.
 class CompileFailed extends CompileOutcome {
   final String diagnostics;
-  const CompileFailed(this.diagnostics);
+  const new(this.diagnostics);
 }
 
 /// Domain-level compile interface.
@@ -67,7 +67,7 @@ abstract interface class Compiler {
 class FrontendServerCompiler implements Compiler {
   final FrontendServer _server;
 
-  FrontendServerCompiler(this._server);
+  new(this._server);
 
   @override
   Future<CompileOutcome> compileIncrement({

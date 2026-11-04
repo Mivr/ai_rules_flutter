@@ -34,7 +34,7 @@ class HttpControlChannel {
   /// which concurrent requests otherwise name identically.
   int _screenshotSeq = 0;
 
-  HttpControlChannel({
+  new({
     required CommandRunner commandRunner,
     required DeviceSession? Function(String appId) findSession,
     String? token,
@@ -651,5 +651,5 @@ class HttpControlChannel {
 class _ScreenshotMatch {
   final String appId;
   final String type;
-  _ScreenshotMatch({required this.appId, required this.type});
+  new({required this.appId, required this.type});
 }

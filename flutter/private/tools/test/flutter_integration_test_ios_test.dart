@@ -23,7 +23,7 @@ import '../zip_writer.dart' show ZipEntry, encodeDeterministicZip;
 /// A canned `simctl` child: output plus an optional hang (an exit that never
 /// arrives, so the driver's deadline fires and must kill the child).
 class CannedSimctl {
-  const CannedSimctl({
+  const new({
     this.exitCode = 0,
     this.stdoutText = '',
     this.stderrText = '',
@@ -40,7 +40,7 @@ class CannedSimctl {
 /// prefix entries for calls (like `install`) whose trailing argument (the
 /// extracted app dir) the test only learns from the recorded calls.
 class FakeSimctlSpawner implements ios.CommandSpawner {
-  FakeSimctlSpawner(this.answers, {this.prefixAnswers = const {}});
+  new(this.answers, {this.prefixAnswers = const {}});
 
   final Map<String, CannedSimctl> answers;
   final Map<String, CannedSimctl> prefixAnswers;

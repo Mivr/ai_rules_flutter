@@ -187,7 +187,7 @@ class ZlibStaticTreeDesc {
   final int elems;
   final int maxLength;
 
-  const ZlibStaticTreeDesc({
+  const new({
     required this.staticLens,
     required this.extra,
     required this.extraBase,

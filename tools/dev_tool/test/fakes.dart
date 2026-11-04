@@ -45,7 +45,7 @@ class FakeDevFS {
   /// that would not take the bytes looks like from the client's side.
   int uploadStatus = HttpStatus.ok;
 
-  FakeDevFS._(this._server, this.root);
+  new _(this._server, this.root);
 
   static Future<FakeDevFS> start(Directory root) async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -396,7 +396,7 @@ class _FakeStdin implements IOSink {
 
   bool _closed = false;
 
-  _FakeStdin(this._buffer, this._lines, this._throws);
+  new(this._buffer, this._lines, this._throws);
 
   /// The single path every write takes.
   void _feed(String text) {
@@ -564,7 +564,7 @@ class FakeVmService implements VmService {
   /// Stream IDs for which [streamListen] should fail with an unrelated error.
   final Set<String> failingStreams = {};
 
-  FakeVmService({
+  new({
     this.isolates = const [],
     this.reloadSuccess = true,
     this.throwOnReload = false,
@@ -1179,7 +1179,7 @@ Future<VmService> Function(String) connectorFor(FakeVmService service) =>
 class RecompileCall {
   final String entrypoint;
   final Set<String> invalidated;
-  RecompileCall(this.entrypoint, this.invalidated);
+  new(this.entrypoint, this.invalidated);
 }
 
 /// In-memory [Compiler] for orchestrator tests.
@@ -1246,7 +1246,7 @@ class FakeCompiler implements Compiler {
 class ApplyCall {
   final String dillPath;
   final ApplyMode mode;
-  ApplyCall(this.dillPath, this.mode);
+  new(this.dillPath, this.mode);
 }
 
 /// In-memory [AppInstance] for orchestrator tests. Configurable per-call
@@ -1264,7 +1264,7 @@ class FakeAppInstance implements AppInstance {
 
   final List<ApplyCall> calls = [];
 
-  FakeAppInstance({required this.id});
+  new({required this.id});
 
   @override
   Future<ApplyOutcome> applyKernel(
@@ -1287,7 +1287,7 @@ class FakeAppInstance implements AppInstance {
 class LibImage {
   final int own;
   final Map<String, int> inlined;
-  const LibImage({required this.own, this.inlined = const {}});
+  const new({required this.own, this.inlined = const {}});
 
   @override
   bool operator ==(Object other) =>
@@ -1394,7 +1394,7 @@ class DependencyFakeCompiler implements Compiler {
   int rollbackCount = 0;
   int shutdownCount = 0;
 
-  DependencyFakeCompiler(this.tree);
+  new(this.tree);
 
   /// Accept the whole tree as this compiler's starting baseline, the way an
   /// assembled session begins after its initial compile.
@@ -1504,7 +1504,7 @@ class FakeMDnsClientFactory {
 
   final clients = <FakeMDnsClient>[];
 
-  FakeMDnsClientFactory({
+  new({
     Map<(int, String), List<ResourceRecord>>? records,
     this.startError,
     this.silentAttempts = 0,
@@ -1533,7 +1533,7 @@ class FakeMDnsClient implements MDnsClient {
   bool started = false;
   bool stopped = false;
 
-  FakeMDnsClient({
+  new({
     Map<(int, String), List<ResourceRecord>>? records,
     this.startError,
   }) : records = records ?? const {};

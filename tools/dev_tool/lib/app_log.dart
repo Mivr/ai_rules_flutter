@@ -43,7 +43,7 @@ class AppLogLine {
   /// still buffered.
   final int index;
 
-  const AppLogLine({
+  const new({
     required this.text,
     required this.isError,
     required this.index,
@@ -69,7 +69,7 @@ class LogPage {
   /// not ask for anything earlier, so nothing was missed.
   final int missed;
 
-  const LogPage({
+  const new({
     required this.lines,
     required this.nextCursor,
     required this.missed,
@@ -100,7 +100,7 @@ class AppLogStream {
   int _dropped = 0;
   bool _closed = false;
 
-  AppLogStream({this.capacity = _defaultCapacity})
+  new({this.capacity = _defaultCapacity})
     : assert(capacity > 0, 'capacity must be positive');
 
   /// Close this stream once every future in [sources] has completed.
@@ -256,7 +256,7 @@ class AppLogPump {
   final List<StreamSubscription<String>> _subscriptions;
   final Completer<void> _done;
 
-  AppLogPump._(this._subscriptions, this._done);
+  new _(this._subscriptions, this._done);
 
   /// Completes when this pump will forward nothing further — its source has
   /// ended, or [dispose] was called. Hand it to [AppLogStream.closeWhen] to

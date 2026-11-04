@@ -30,7 +30,7 @@ import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
 
 /// Outcome of a reload or restart request.
 sealed class ReloadOutcome {
-  const ReloadOutcome();
+  const new();
 }
 
 /// The compile and apply both succeeded.
@@ -53,7 +53,7 @@ class ReloadApplied extends ReloadOutcome {
   /// Empty when every one of [apps] drew a frame after its apply.
   final Map<String, String> notShown;
 
-  const ReloadApplied({
+  const new({
     required this.filesRecompiled,
     required this.isEmpty,
     required this.apps,
@@ -64,14 +64,14 @@ class ReloadApplied extends ReloadOutcome {
 /// No work was scheduled — no target had any FS change or caller-declared
 /// invalidation outstanding. Every targeted app is already up to date.
 class ReloadNoChange extends ReloadOutcome {
-  const ReloadNoChange();
+  const new();
 }
 
 /// Compile failed. Every target's pending compile was rolled back; no applied
 /// versions are advanced.
 class ReloadCompileFailed extends ReloadOutcome {
   final String diagnostics;
-  const ReloadCompileFailed(this.diagnostics);
+  const new(this.diagnostics);
 }
 
 /// Compile succeeded but at least one device did not end up healthy.
@@ -83,7 +83,7 @@ class ReloadCompileFailed extends ReloadOutcome {
 /// partial failure discards no device's work.
 class ReloadApplyFailed extends ReloadOutcome {
   final Map<String, ApplyOutcome> perApp;
-  const ReloadApplyFailed(this.perApp);
+  const new(this.perApp);
 }
 
 class ReloadOrchestrator {
@@ -94,7 +94,7 @@ class ReloadOrchestrator {
 
   final String entrypoint;
 
-  ReloadOrchestrator({
+  new({
     required this.workspace,
     required this.units,
     required this.entrypoint,

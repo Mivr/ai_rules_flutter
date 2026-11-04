@@ -29,8 +29,7 @@ class FakeVmDiscoveryClock implements VmDiscoveryClock {
   final List<_FakeVmDiscoveryTimer> _timers = [];
 
   /// A [VmDiscoveryClock] the test drives by hand, starting at [start].
-  FakeVmDiscoveryClock({DateTime? start})
-    : _now = start ?? DateTime(2026, 1, 1);
+  new({DateTime? start}) : _now = start ?? DateTime(2026, 1, 1);
 
   @override
   DateTime now() => _now;
@@ -100,7 +99,7 @@ class _FakeVmDiscoveryTimer implements VmDiscoveryTimer {
   final void Function() onFire;
 
   /// One fake timer: the [VmDiscoveryTimer] the fake clock hands out.
-  _FakeVmDiscoveryTimer({required this.at, required this.onFire});
+  new({required this.at, required this.onFire});
 
   bool _cancelled = false;
   bool _fired = false;

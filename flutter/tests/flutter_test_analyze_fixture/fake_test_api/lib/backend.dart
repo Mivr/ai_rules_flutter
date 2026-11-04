@@ -25,7 +25,7 @@ void test(String name, FutureOr<void> Function() body) {
 /// Minimal bidirectional channel matching the `stream` / `sink` surface the
 /// generated `flutter_test` bootstrap pipes over the harness WebSocket.
 class FakeTestChannel {
-  FakeTestChannel(this.stream, this.sink);
+  new(this.stream, this.sink);
 
   final Stream<dynamic> stream;
   final StreamSink<dynamic> sink;
@@ -34,7 +34,7 @@ class FakeTestChannel {
 /// Minimal `RemoteListener` speaking `flutter_test_runner`'s MultiChannel JSON
 /// framing (`[channelId, message]`).
 class RemoteListener {
-  RemoteListener._();
+  new _();
 
   static FakeTestChannel start(
     Future<void> Function() Function() getMain, {

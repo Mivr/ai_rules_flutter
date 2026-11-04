@@ -892,7 +892,7 @@ class _StubDevice extends Device {
 
 /// A device whose platform capture writes [png].
 class _CapturingDevice extends _StubDevice {
-  _CapturingDevice(this.png);
+  new(this.png);
 
   final List<int> png;
 

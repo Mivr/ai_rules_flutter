@@ -17,7 +17,7 @@ const gcsBase = 'https://storage.googleapis.com/flutter_infra_release/flutter';
 /// Where to run and what version to add, resolved from flags and environment.
 class VersionRequest {
   /// Creates a resolved request.
-  const VersionRequest({
+  const new({
     required this.version,
     required this.workspaceDir,
     required this.flutterRepo,
@@ -61,7 +61,7 @@ VersionRequest resolveVersionRequest(List<String> args) {
 /// The two revisions read out of the Flutter repo at the release tag.
 class EngineRevisions {
   /// Creates both revisions.
-  const EngineRevisions({
+  const new({
     required this.engineRev,
     required this.materialFontsUrl,
   });
@@ -119,7 +119,7 @@ Future<EngineRevisions> readEngineRevisions(
 /// What to download, grouped so the download step takes one argument.
 class DownloadSpec {
   /// Creates the download inputs.
-  const DownloadSpec({
+  const new({
     required this.version,
     required this.engineRev,
     required this.materialFontsUrl,
@@ -153,7 +153,7 @@ typedef ArtifactOutcome = ({
 /// map key its hash is recorded under.
 class HashTarget {
   /// Creates one download target.
-  const HashTarget({
+  const new({
     required this.label,
     required this.url,
     required this.key,
@@ -404,7 +404,7 @@ String renderVersionSnippet({
 /// the bare message, so the reports below print it unadorned.
 class ArtifactChecksumException implements Exception {
   /// Creates the failure with its report text.
-  ArtifactChecksumException(this.message);
+  new(this.message);
 
   /// The report text, printed unadorned.
   final String message;

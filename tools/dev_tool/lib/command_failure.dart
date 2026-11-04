@@ -36,18 +36,15 @@ class CommandFailure implements Exception {
   final String message;
   final CommandFailureKind kind;
 
-  const CommandFailure(this.message, this.kind);
+  const new(this.message, this.kind);
 
-  const CommandFailure.notFound(this.message)
-    : kind = CommandFailureKind.notFound;
+  const new notFound(this.message) : kind = CommandFailureKind.notFound;
 
-  const CommandFailure.badRequest(this.message)
-    : kind = CommandFailureKind.badRequest;
+  const new badRequest(this.message) : kind = CommandFailureKind.badRequest;
 
-  const CommandFailure.unavailable(this.message)
-    : kind = CommandFailureKind.unavailable;
+  const new unavailable(this.message) : kind = CommandFailureKind.unavailable;
 
-  const CommandFailure.failed(this.message) : kind = CommandFailureKind.failed;
+  const new failed(this.message) : kind = CommandFailureKind.failed;
 
   @override
   String toString() => message;

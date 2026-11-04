@@ -5,7 +5,7 @@ export 'package:flutter/src/widgets/icon_data.dart'
     show IconData, staticIconProvider;
 
 class TextStyle {
-  const TextStyle({this.fontFamily, this.package});
+  const new({this.fontFamily, this.package});
 
   final String? fontFamily;
   final String? package;

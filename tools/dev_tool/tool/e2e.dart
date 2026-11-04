@@ -104,7 +104,7 @@ class RequireRanUsage implements Exception {
   /// The usage text the runner prints for this misuse.
   final String usage;
 
-  const RequireRanUsage([this.usage = _requireRanUsage]);
+  const new([this.usage = _requireRanUsage]);
 
   @override
   String toString() => usage;
@@ -229,7 +229,7 @@ class Outcome {
   /// or failed. From `--require-ran=`; empty means no requirement.
   final List<String> requireRan;
 
-  Outcome({Iterable<String> requireRan = const []})
+  new({Iterable<String> requireRan = const []})
     : requireRan = List<String>.unmodifiable(requireRan);
 
   final _names = <int, String>{};

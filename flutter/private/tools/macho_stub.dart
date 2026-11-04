@@ -24,7 +24,7 @@ import 'macho_parse.dart'
 
 /// Parsed `stub` subcommand flags.
 class _StubArgs {
-  _StubArgs({
+  new({
     required this.outputPath,
     required this.arch,
     required this.platformName,

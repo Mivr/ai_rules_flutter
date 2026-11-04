@@ -248,7 +248,7 @@ class _TemplateSubstitution {
   final Set<String> usedDefines;
   final List<String> errors;
 
-  const _TemplateSubstitution({
+  const new({
     required this.label,
     required this.webDefines,
     required this.keepPlaceholders,
@@ -650,7 +650,7 @@ class _WebCompileRequest {
   final bool noSourceMaps;
   final List<String> extraOptions;
 
-  const _WebCompileRequest({
+  const new({
     required this.dartaotruntime,
     required this.sdkBin,
     required this.packagesPath,
@@ -847,7 +847,7 @@ class _ScrubPrefixes {
   final String? stageDirName;
   final String? relStagePrefix;
 
-  _ScrubPrefixes({
+  new({
     required this.pkgAppUri,
     required this.rewrittenPkgUri,
     required this.origPkgUri,
@@ -865,7 +865,7 @@ class _ScrubState {
   String content;
   bool changed = false;
 
-  _ScrubState(this.content);
+  new(this.content);
 
   /// Replaces every [from] with [to], recording the change.
   void replace(Pattern from, String to) {
@@ -1253,7 +1253,7 @@ class _Dart2JsScrubRequest {
   final String? packagesPath;
   final String? rewrittenPkgPath;
 
-  const _Dart2JsScrubRequest({
+  const new({
     required this.outJs,
     required this.cfeOnly,
     required this.cwdPath,

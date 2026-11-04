@@ -41,7 +41,7 @@ class Version {
   final DateTime mtime;
   final int size;
 
-  Version({required this.mtime, required this.size});
+  new({required this.mtime, required this.size});
 
   @override
   bool operator ==(Object other) =>
@@ -58,7 +58,7 @@ class Version {
 class SourceVersions {
   final Map<String, Version> _versions;
 
-  const SourceVersions(this._versions);
+  const new(this._versions);
 
   /// File URIs known to this snapshot.
   Iterable<String> get fileUris => _versions.keys;
@@ -84,7 +84,7 @@ class Workspace {
   /// invalidate the right library. Empty for non-codegen apps.
   final Map<String, String> generatedFiles;
 
-  Workspace({
+  new({
     required this.resolver,
     this.generatedFiles = const {},
   });

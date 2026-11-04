@@ -22,7 +22,7 @@ import 'package:path/path.dart' as p;
 /// failure in the dev tool throws, so the callers that already turn one into a
 /// user-facing error need no new case.
 class MissingHostToolException extends StateError {
-  MissingHostToolException(super.message);
+  new(super.message);
 }
 
 /// An external program the dev tool runs, and everywhere it might live.
@@ -45,7 +45,7 @@ class HostTool {
 
   final Map<String, String> _environment;
 
-  HostTool({
+  new({
     required this.name,
     required this.purpose,
     required this.remedy,

@@ -65,7 +65,7 @@ class _Fixture {
   final String probeFile;
   final String marker;
 
-  const _Fixture(this.workspace, this.target, this.probeFile, this.marker);
+  const new(this.workspace, this.target, this.probeFile, this.marker);
 }
 
 const _fixtures = <String, _Fixture>{
@@ -309,7 +309,7 @@ class _ForestSampler {
   DateTime? _gapStart;
   Duration _longest = Duration.zero;
 
-  _ForestSampler._(this._leaf);
+  new _(this._leaf);
 
   static Future<_ForestSampler> create(String workspace) async {
     final info = await Process.run('bazel', [
@@ -378,7 +378,7 @@ class _Session {
   final _httpBound = Completer<void>();
   bool _exited = false;
 
-  _Session(this.name, this.process) {
+  new(this.name, this.process) {
     unawaited(process.exitCode.then((_) => _exited = true));
     process.stdout
         .transform(utf8.decoder)

@@ -12,7 +12,7 @@ class RecordedCall {
   final List<String> args;
   final String workingDirectory;
 
-  const RecordedCall({required this.args, required this.workingDirectory});
+  const new({required this.args, required this.workingDirectory});
 }
 
 WarmChild _child(int exitCode) => WarmChild(

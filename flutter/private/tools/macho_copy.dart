@@ -59,7 +59,7 @@ void copyDirDereferencingSync(Directory src, Directory dst) {
 
 /// Parsed `copy-assets` subcommand flags.
 class _CopyAssetsArgs {
-  _CopyAssetsArgs({
+  new({
     required this.srcPath,
     required this.dstPath,
     required this.kernelBlobPath,
@@ -161,7 +161,7 @@ void createSymlinkReplacingSync(String linkPath, String target) {
 
 /// Parsed `assemble-macos-framework` subcommand flags.
 class _AssembleArgs {
-  _AssembleArgs({
+  new({
     required this.binaryPath,
     required this.infoPlistPath,
     required this.assetsPath,
@@ -295,7 +295,7 @@ void runAssembleMacosFramework(List<String> args) {
 
 /// Parsed `copy-files` subcommand flags.
 class _CopyFilesArgs {
-  _CopyFilesArgs({
+  new({
     required this.outputDirPath,
     required this.platformName,
     required this.minOsStr,

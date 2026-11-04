@@ -92,7 +92,7 @@ class _Harness {
   NativeLibsVerdict? nativeLibs;
   int nativeLibsGateCalls = 0;
 
-  _Harness._(
+  new _(
     this.tmp,
     this.host,
     this.pipeline,
@@ -237,7 +237,7 @@ Future<AssetTracker> seedBundle(Directory tmp, String contents) async {
 class _ScriptedProcess extends FakeProcess {
   void Function(String line) onLine = (_) {};
 
-  _ScriptedProcess() {
+  new() {
     stdinLines.listen((line) => onLine(line));
   }
 }

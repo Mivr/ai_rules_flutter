@@ -893,7 +893,7 @@ class _MacApp {
   final int pid;
   final String bundlePath;
   final VmService _vm;
-  _MacApp._(this.pid, this.bundlePath, this._vm);
+  new _(this.pid, this.bundlePath, this._vm);
 
   Future<void> dispose() => _vm.dispose();
 

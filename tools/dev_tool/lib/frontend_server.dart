@@ -101,7 +101,7 @@ class FrontendServer {
   /// Line buffer for partial stdout chunks.
   String _lineBuffer = '';
 
-  FrontendServer({
+  new({
     required String dartaotruntimePath,
     required String frontendServerPath,
     required CompilerConfig config,
@@ -693,7 +693,7 @@ class CompileResult {
   /// the second is what the frontend server actually said.
   final int errorCount;
 
-  CompileResult({
+  new({
     required this.dillPath,
     required this.success,
     String? outputPath,

@@ -150,7 +150,7 @@ class Module {
   final String? sourceMap;
   final String? metadata;
 
-  const Module(this.path, this.code, {this.sourceMap, this.metadata});
+  const new(this.path, this.code, {this.sourceMap, this.metadata});
 }
 
 /// Write the artifacts a DDC compile leaves behind, the way the frontend
@@ -241,11 +241,11 @@ Matcher throwsDevToolException(Matcher message) => throwsA(
 class Squatter {
   /// Takes every connection: something answering across the whole ephemeral
   /// range, which is what a bounded search has to give up on.
-  Squatter.everyPort(this.decoyPort) : _limit = null;
+  new everyPort(this.decoyPort) : _limit = null;
 
   /// Takes the first connection only: one held port, which a search is meant
   /// to move past.
-  Squatter.onePort(this.decoyPort) : _limit = 1;
+  new onePort(this.decoyPort) : _limit = 1;
 
   /// The real server this takes connections to.
   final int decoyPort;
@@ -296,7 +296,7 @@ class _RealHttpClients extends HttpOverrides {}
 /// Only what the reachability check uses is implemented; anything else throws
 /// rather than answering something plausible.
 class _SquattedClient implements HttpClient {
-  _SquattedClient(this._inner, this._squatter);
+  new(this._inner, this._squatter);
 
   final HttpClient _inner;
   final Squatter _squatter;

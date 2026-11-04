@@ -64,13 +64,13 @@ class PlistEntry {
   final String key;
   final String rawValue;
 
-  PlistEntry(this.key, this.rawValue);
+  new(this.key, this.rawValue);
 }
 
 class PlistFormatException implements Exception {
   final String message;
 
-  PlistFormatException(this.message);
+  new(this.message);
 
   @override
   String toString() => message;
@@ -96,7 +96,7 @@ class _Scanner {
   final String path;
   int pos = 0;
 
-  _Scanner(this.text, this.path);
+  new(this.text, this.path);
 
   bool get atEnd => pos >= text.length;
 

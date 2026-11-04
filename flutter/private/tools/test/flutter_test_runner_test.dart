@@ -27,7 +27,7 @@ import '../test_support.dart' as support;
 /// RPC can be told to answer with a JSON-RPC `error` or with a structurally
 /// wrong `result`, which is how the tests below reach both failure classes.
 class _FakeVmService {
-  _FakeVmService._(this._server) {
+  new _(this._server) {
     _server.listen((request) async {
       final socket = await WebSocketTransformer.upgrade(request);
       // `collectCoverage` closes the socket from its `finally`, including

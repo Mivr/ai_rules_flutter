@@ -60,7 +60,7 @@ class _RcFlag {
   final String rawLine;
   final int? attempts;
 
-  const _RcFlag({
+  const new({
     required this.lineNumber,
     required this.offset,
     required this.rawLine,

@@ -74,7 +74,7 @@ class MdnsDiscoveryException implements Exception {
   final MdnsDiscoveryFailure failure;
   final String message;
 
-  MdnsDiscoveryException(this.failure, this.message);
+  new(this.failure, this.message);
 
   @override
   String toString() => message;
@@ -89,7 +89,7 @@ class MdnsDiscoveryException implements Exception {
 /// as cancelled.
 class MdnsAbandoned implements Exception {
   /// The run ended while discovery was still waiting.
-  const MdnsAbandoned();
+  const new();
 
   @override
   String toString() =>
@@ -99,13 +99,13 @@ class MdnsAbandoned implements Exception {
 
 /// The two ways [_raceAbandon] — below — wakes up.
 sealed class _AbandonResult<T> {
-  const _AbandonResult();
+  const new();
 }
 
 /// The awaited work finished with [value].
 class _Worked<T> extends _AbandonResult<T> {
   /// The awaited work finished with [value].
-  const _Worked(this.value);
+  const new(this.value);
 
   /// The awaited work's value.
   final T value;
@@ -114,7 +114,7 @@ class _Worked<T> extends _AbandonResult<T> {
 /// The launch site ended the wait while the work was still in flight.
 class _Abandoned<T> extends _AbandonResult<T> {
   /// The launch site ended the wait while the work was still in flight.
-  const _Abandoned();
+  const new();
 }
 
 /// One resolved `_dartVmService._tcp` advertisement.
@@ -142,7 +142,7 @@ class MdnsVmServiceRecord {
   /// dial a wirelessly attached device, meaningless for a forwarded port.
   final InternetAddress? address;
 
-  MdnsVmServiceRecord({
+  new({
     required this.serviceName,
     required this.host,
     required this.port,
@@ -176,7 +176,7 @@ class MdnsVmServiceDiscovery {
   final MDnsClientFactory _clientFactory;
   final NetworkInterfaceLister _listInterfaces;
 
-  MdnsVmServiceDiscovery({
+  new({
     MDnsClientFactory? clientFactory,
     NetworkInterfaceLister? listNetworkInterfaces,
   }) : _clientFactory = clientFactory ?? MDnsClient.new,

@@ -17,7 +17,7 @@ class LoadCommand {
   final int cmd;
   final Uint8List bytes;
 
-  LoadCommand(this.cmd, this.bytes);
+  new(this.cmd, this.bytes);
 
   int get cmdsize => bytes.length;
 }
@@ -156,7 +156,7 @@ LoadCommand buildLcRpath(String rpath) {
 /// rewrite can relocate the range without relearning the command layout.
 /// Grouped as a class so range helpers stay under the parameter limit.
 class CommandRange {
-  const CommandRange({
+  const new({
     required this.field,
     required this.offset,
     required this.size,
@@ -293,7 +293,7 @@ const _dyldInfoPairNames = [
 /// in load-command order: commands walk in list order, and within one command
 /// the ranges walk in the order [_considerCommandPayload] reads them.
 class _PayloadFloor {
-  _PayloadFloor(this.value);
+  new(this.value);
 
   int value;
 

@@ -41,7 +41,7 @@ void _writePatchedOutput(Uint8List bytes, String outputPath) {
 
 /// Parsed `patch` subcommand flags.
 class _PatchArgs {
-  _PatchArgs({
+  new({
     required this.inputPath,
     required this.outputPath,
     required this.platformName,
@@ -230,7 +230,7 @@ String _readLcString(Uint8List bytes, int offset) {
 /// Resolved `patchMachO` options: platform versions, identity, and search
 /// paths applied to the binary. Grouped so the patch entry points stay small.
 class PatchOptions {
-  const PatchOptions({
+  const new({
     this.platform,
     this.minOs,
     this.sdkVersion,
@@ -530,7 +530,7 @@ _idDylibVersions(LoadCommand lc) {
 /// the refusal), and the fat slice label when patching a universal binary.
 /// Grouped so the emit entry point stays small.
 class _PayloadCeiling {
-  const _PayloadCeiling({
+  const new({
     required this.oldSizeofcmds,
     required this.firstPayload,
     this.sliceLabel,

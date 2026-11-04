@@ -29,7 +29,7 @@ class BundleRebuild {
   int _builtFor = -1;
   bool _result = false;
 
-  BundleRebuild(this._build, this._command);
+  new(this._build, this._command);
 
   Future<bool> run() async {
     final command = _command();

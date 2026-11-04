@@ -20,7 +20,7 @@ enum ApplyMode {
 
 /// Outcome of a single [AppInstance.applyKernel] call.
 sealed class ApplyOutcome {
-  const ApplyOutcome();
+  const new();
 }
 
 /// The kernel was uploaded and the VM accepted the reload/restart.
@@ -29,7 +29,7 @@ sealed class ApplyOutcome {
 /// drew a frame after it — see [VerdictApplied.notShown].
 class Applied extends ApplyOutcome {
   final String? notShown;
-  const Applied({this.notShown});
+  const new({this.notShown});
 }
 
 /// The VM responded but the reload itself reported failure (or the upload
@@ -41,7 +41,7 @@ class Applied extends ApplyOutcome {
 /// [AppliedThenThrew].
 class ApplyFailed extends ApplyOutcome {
   final String reason;
-  const ApplyFailed(this.reason);
+  const new(this.reason);
 }
 
 /// The VM took the code, and the app then reported a framework error on the
@@ -60,7 +60,7 @@ class ApplyFailed extends ApplyOutcome {
 /// is.
 class AppliedThenThrew extends ApplyOutcome {
   final FlutterErrorReport error;
-  const AppliedThenThrew(this.error);
+  const new(this.error);
 
   /// One line naming the failure, from the report's own fields.
   String get reason =>
@@ -72,7 +72,7 @@ class AppliedThenThrew extends ApplyOutcome {
 /// The reload exceeded the per-call latency budget. The connection has
 /// been force-closed; the next call will reconnect.
 class ApplyTimedOut extends ApplyOutcome {
-  const ApplyTimedOut();
+  const new();
 }
 
 /// A running app instance on one device. Implementations differ by
@@ -98,7 +98,7 @@ class VmServiceAppInstance implements AppInstance {
 
   final VmServiceClient _client;
 
-  VmServiceAppInstance({
+  new({
     required this.id,
     required VmServiceClient client,
     this.rpcTimeout = const Duration(seconds: 30),

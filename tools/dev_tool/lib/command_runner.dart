@@ -82,7 +82,7 @@ class CommandRunner {
   List<Map<String, Object>>? _announced;
   var _announcementScheduled = false;
 
-  CommandRunner({this.onProgress, this.onCommandsChanged});
+  new({this.onProgress, this.onCommandsChanged});
 
   /// Every command registered right now, sorted by name.
   ///

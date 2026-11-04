@@ -261,7 +261,7 @@ class DeviceSession {
   /// answering.
   Future<void> get terminated => _terminated.future;
 
-  DeviceSession({
+  new({
     required this.device,
     required AppInstance appInstance,
     required this.vmClient,
@@ -372,7 +372,7 @@ class ReloadResult {
   /// Overall success: both compile and device steps succeeded.
   bool get success => compileSuccess && deviceSuccess;
 
-  ReloadResult({
+  new({
     required this.compileSuccess,
     this.outcome,
     this.diagnostics = '',

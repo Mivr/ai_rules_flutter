@@ -20,7 +20,7 @@ class _Fixture {
     workspaceRoot: workspace,
   );
 
-  _Fixture() : root = Directory.systemTemp.createTempSync('asset_bundle_');
+  new() : root = Directory.systemTemp.createTempSync('asset_bundle_');
 
   /// Write [content] to a workspace file and copy it into the bundle, the way
   /// a build would.

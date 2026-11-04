@@ -144,7 +144,7 @@ class OverlayPermission {
   /// All attributes on the overlay element in source order.
   final Map<String, String> attributes;
 
-  OverlayPermission(
+  new(
     this.element,
     this.name, {
     Map<String, String>? attributes,
@@ -190,7 +190,7 @@ class _Scanner {
   final String text;
   int pos = 0;
 
-  _Scanner(this.text);
+  new(this.text);
 
   bool get atEnd => pos >= text.length;
 
@@ -550,7 +550,7 @@ class _BasePermission {
   final int spanStart;
   final int spanEnd;
 
-  _BasePermission({
+  new({
     required this.element,
     required this.name,
     required this.attributes,
@@ -605,7 +605,7 @@ class _BaseTagFold {
   final String basePath;
   final List<_BasePermission> permissions;
 
-  const _BaseTagFold({
+  const new({
     required this.scanner,
     required this.text,
     required this.name,
@@ -794,7 +794,7 @@ class LibraryPermission {
   final Set<String> toolsRemove;
   final Set<String> toolsReplace;
 
-  LibraryPermission(
+  new(
     this.element,
     this.attributes, {
     this.isRemove = false,
@@ -1057,7 +1057,7 @@ class _SpanEdit {
   final int end;
   final String replacement;
 
-  const _SpanEdit(this.start, this.end, this.replacement);
+  const new(this.start, this.end, this.replacement);
 }
 
 String _applyEdits(String text, List<_SpanEdit> edits) {
@@ -1096,7 +1096,7 @@ class _AppPermission {
   final bool hadInitialToolsAttributes;
   bool modified = false;
 
-  _AppPermission._({
+  new _({
     required this.element,
     required this.name,
     required this.androidAttributes,
@@ -1112,7 +1112,7 @@ class _AppPermission {
     this.modified = false,
   });
 
-  factory _AppPermission.fromBase(_BasePermission bp) {
+  factory fromBase(_BasePermission bp) {
     final removed = <String>{..._parseAttrList(bp.attributes['tools:remove'])};
     final replaced = <String>{
       ..._parseAttrList(bp.attributes['tools:replace']),
@@ -1160,7 +1160,7 @@ class _AppPermission {
     );
   }
 
-  factory _AppPermission.fromOverlay(OverlayPermission op) {
+  factory fromOverlay(OverlayPermission op) {
     final removed = <String>{...op.toolsRemove};
     final replaced = <String>{...op.toolsReplace};
     final rawNode = op.toolsNode;
@@ -1682,7 +1682,7 @@ class _MergedInsert {
   final Map<String, String> libraries;
   final String basePath;
 
-  const _MergedInsert({
+  const new({
     required this.editedBaseXml,
     required this.insertAt,
     required this.lines,

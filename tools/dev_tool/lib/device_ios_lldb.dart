@@ -367,7 +367,7 @@ class LldbStops {
   bool _inStop = false;
   bool _reported = false;
 
-  LldbStops({
+  new({
     required this.from,
     required this.lldb,
     required this.appLogs,

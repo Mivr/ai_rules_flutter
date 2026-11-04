@@ -109,7 +109,7 @@ class VmProbe {
   final Stream<dynamic> replies;
   var _nextId = 1000;
 
-  VmProbe(this.socket) : replies = socket.asBroadcastStream();
+  new(this.socket) : replies = socket.asBroadcastStream();
 
   static Future<VmProbe> connect(DevToolProcess dt) async {
     final debugPort = await dt.waitForEvent(

@@ -79,7 +79,7 @@ class ResolvedRunfile {
   final String path;
   final String? manifestPath;
 
-  ResolvedRunfile(this.path, {this.manifestPath});
+  new(this.path, {this.manifestPath});
 }
 
 /// Resolve a runfile path, returning null if runfiles are not available

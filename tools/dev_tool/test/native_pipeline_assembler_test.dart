@@ -428,7 +428,7 @@ const _noRecordText =
 class _BuildInfoVmService extends FakeVmService {
   final Map<String, dynamic>? buildInfo;
 
-  _BuildInfoVmService({
+  new({
     required super.isolates,
     this.buildInfo,
     bool registered = true,

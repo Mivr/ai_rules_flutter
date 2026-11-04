@@ -13,7 +13,7 @@ class _ZipCentralEntry {
   final int localHeaderOffset;
   final Uint8List rawData;
 
-  _ZipCentralEntry({
+  new({
     required this.name,
     required this.compressionMethod,
     required this.compressedSize,

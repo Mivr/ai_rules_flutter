@@ -12,7 +12,7 @@ class ArtifactSection {
   final String comment;
   final List<String> paths;
 
-  const ArtifactSection(this.comment, this.paths);
+  const new(this.comment, this.paths);
 }
 
 const artifactSections = [

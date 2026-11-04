@@ -329,7 +329,7 @@ void foldDepLines(Set<String> current, List<String> lines) {
 /// to [incrementalDill]. The dependency report is forced on so the worker
 /// can verify the read set.
 class FrontendServerSession implements CompilerSession {
-  FrontendServerSession._(
+  new _(
     this._process,
     this._lines,
     this.roots,

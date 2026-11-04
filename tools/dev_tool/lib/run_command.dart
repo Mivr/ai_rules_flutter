@@ -282,7 +282,7 @@ class RunCommand {
 
   final ArgResults _results;
 
-  RunCommand(this._results);
+  new(this._results);
 
   /// This run's machine protocol, once [_execute] has built it.
   ///

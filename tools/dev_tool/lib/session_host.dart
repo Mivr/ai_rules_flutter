@@ -107,7 +107,7 @@ class SessionHost {
   final bool _isMachine;
   final Logger _logger;
 
-  SessionHost({required bool isMachine, required Logger logger, Bazel? bazel})
+  new({required bool isMachine, required Logger logger, Bazel? bazel})
     : _isMachine = isMachine,
       _logger = logger,
       bazel = bazel ?? Bazel() {

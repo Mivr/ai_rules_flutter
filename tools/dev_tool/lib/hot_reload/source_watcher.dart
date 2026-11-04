@@ -16,7 +16,7 @@ class SourceChange {
   /// Absolute filesystem paths of files that changed within the debounce
   /// window. Always non-empty.
   final Set<String> paths;
-  const SourceChange(this.paths);
+  const new(this.paths);
 }
 
 /// Why a watcher stopped being able to see edits.
@@ -29,7 +29,7 @@ class WatcherFailure {
   final Object? error;
   final StackTrace? stackTrace;
 
-  const WatcherFailure(this.reason, {this.error, this.stackTrace});
+  const new(this.reason, {this.error, this.stackTrace});
 
   @override
   String toString() => error == null ? reason : '$reason: $error';
@@ -80,7 +80,7 @@ class SourceWatcher {
   /// Which changed paths reach [changes]. Defaults to [isDartSource].
   final PathFilter _accepts;
 
-  SourceWatcher({
+  new({
     required this.root,
     this.debounce = const Duration(milliseconds: 200),
     DirectoryWatcher Function(String root)? watcherFactory,

@@ -89,7 +89,7 @@ class WebServerOptions {
   /// [WebOptions.resolve] is the one place it is decided.
   final bool crossOriginIsolation;
 
-  const WebServerOptions({
+  const new({
     required this.crossOriginIsolation,
     this.hostname = defaultHostname,
     this.port = 0,
@@ -147,7 +147,7 @@ class WebViewport {
   /// that only asked for a viewport size.
   final double? deviceScaleFactor;
 
-  const WebViewport({
+  const new({
     required this.width,
     required this.height,
     this.deviceScaleFactor,
@@ -181,7 +181,7 @@ class BrowserLaunchOptions {
   /// The viewport to lay the app out at, or null for the window's own size.
   final WebViewport? viewport;
 
-  const BrowserLaunchOptions({
+  const new({
     this.launchUrl,
     this.browserFlags = const [],
     this.headless = false,
@@ -230,7 +230,7 @@ class WebOptions {
   /// fragment against the program actually running.
   final bool enableExpressionEvaluation;
 
-  const WebOptions({
+  const new({
     required this.server,
     required this.browser,
     required this.enableExpressionEvaluation,

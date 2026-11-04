@@ -55,7 +55,7 @@ class AssetBundle {
   /// files it is compiled from. See `DevConfig.shaders`.
   final Map<String, List<String>> shaders;
 
-  const AssetBundle({
+  const new({
     required this.directory,
     required this.workspaceRoot,
     this.shaders = const {},
@@ -169,7 +169,7 @@ class AssetTracker {
   ///
   /// [takeBundleChanges] takes the same guard for the same window, against the
   /// start of the rebuild it is committing.
-  AssetTracker(this.bundle, {required DateTime builtBefore})
+  new(this.bundle, {required DateTime builtBefore})
     : _bundleState = const {},
       _sourceState = const {} {
     _bundleState = bundle.scan();

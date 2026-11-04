@@ -28,7 +28,7 @@ class CannedResult {
   final String stderrText;
   final bool hang;
 
-  const CannedResult({
+  const new({
     this.exitCode = 0,
     this.stdoutText = '',
     this.stderrText = '',
@@ -92,7 +92,7 @@ class FakeSpawner implements CommandSpawner {
   final started = <String>[];
   final killed = <String>[];
 
-  FakeSpawner(
+  new(
     this.results, {
     this.hasXcrun = true,
     this.listDevices,
@@ -223,7 +223,7 @@ class SlowFirstCall implements CommandSpawner {
   var calls = 0;
   final killed = <String>[];
 
-  SlowFirstCall(this.slowKey, this.inner);
+  new(this.slowKey, this.inner);
 
   @override
   Future<SpawnedCommand> start(String executable, List<String> args) async {

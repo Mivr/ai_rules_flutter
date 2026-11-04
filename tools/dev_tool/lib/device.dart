@@ -215,7 +215,7 @@ class AppInstance {
   /// privately never deletes it.
   final List<Directory> scratchDirs;
 
-  AppInstance({
+  new({
     required this.process,
     this.vmServiceUri,
     this.vmServiceDiscoveryNote,

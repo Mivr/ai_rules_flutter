@@ -231,7 +231,7 @@ void main(List<String> args) async {
 /// and [_Harness.run], so the values that travel together stay in one object
 /// instead of a long parameter list.
 class FlutterTestRun {
-  const FlutterTestRun({
+  const new({
     required this.tester,
     required this.icu,
     required this.dill,
@@ -330,7 +330,7 @@ Future<int> _runOnce(FlutterTestRun run) async {
 
 /// Harness state: server, tester process, WebSocket, channel demux.
 class _Harness {
-  _Harness._(this._server);
+  new _(this._server);
 
   final HttpServer _server;
   Process? _process;
@@ -1050,19 +1050,19 @@ class _Harness {
 
 /// The outcome of waiting for flutter_tester's bootstrap to connect back.
 sealed class _DialBack {
-  const _DialBack();
+  const new();
 }
 
 /// The bootstrap connected; [request] is the HTTP request to upgrade.
 final class _BootstrapConnected extends _DialBack {
-  const _BootstrapConnected(this.request);
+  const new(this.request);
 
   final HttpRequest request;
 }
 
 /// flutter_tester exited before connecting, with [exitCode].
 final class _TesterExited extends _DialBack {
-  const _TesterExited(this.exitCode);
+  const new(this.exitCode);
 
   final int exitCode;
 }
@@ -1070,7 +1070,7 @@ final class _TesterExited extends _DialBack {
 /// Nothing happened within the bound: flutter_tester is alive and has not
 /// connected. There is no exit code to wait for.
 final class _DialBackTimedOut extends _DialBack {
-  const _DialBackTimedOut();
+  const new();
 }
 
 class _Results implements TestResultSink {

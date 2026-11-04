@@ -276,7 +276,7 @@ List<SectionLayout> sectionLayoutsOf(LoadCommand lc) {
 /// rewritten indirect-symbol table's span when the strip moves one. Grouped so
 /// the overlap check stays under the parameter limit.
 class InPlaceTouchedSpans {
-  const InPlaceTouchedSpans({
+  const new({
     required this.tableOffset,
     required this.tableSize,
     required this.indirectOffset,
@@ -514,7 +514,7 @@ LoadCommand relocatedNoteCommand(
 /// The rewritten image's geometry for [auditOutputRanges]: grouped so the
 /// audit stays under the parameter limit.
 class RewrittenLayout {
-  const RewrittenLayout({required this.linkeditOff, required this.fileLength});
+  const new({required this.linkeditOff, required this.fileLength});
 
   /// The `__LINKEDIT` file offset the rewrite rebuilt from, or 0 when the
   /// image has no `__LINKEDIT` segment (the in-place rewrite).

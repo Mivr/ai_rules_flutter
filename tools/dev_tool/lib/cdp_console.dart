@@ -275,7 +275,7 @@ class CdpConsoleClient {
   Duration _waited = Duration.zero;
   Object? _lastError;
 
-  CdpConsoleClient({
+  new({
     required this.cdpPort,
     required this.logs,
     this.appUrl,

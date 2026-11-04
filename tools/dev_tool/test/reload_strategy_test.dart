@@ -1393,7 +1393,7 @@ class _FakeCdpBrowser {
   /// Every CDP method the client sent, in order.
   final List<String> received = [];
 
-  _FakeCdpBrowser._(this._server) {
+  new _(this._server) {
     _server.listen((request) async {
       if (request.uri.path == '/json') {
         request.response.headers.contentType = ContentType.json;

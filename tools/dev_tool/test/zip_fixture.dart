@@ -35,7 +35,7 @@ class _Entry {
   final Uint8List data;
   final bool isDirectory;
 
-  _Entry(this.name, this.data, this.isDirectory);
+  new(this.name, this.data, this.isDirectory);
 }
 
 void _collect(List<_Entry> entries, Directory root, String rel) {
@@ -188,7 +188,7 @@ class _ReadEntry {
   final bool isDirectory;
   final bool isSymlink;
 
-  _ReadEntry(
+  new(
     this.name,
     this.data,
     this.unixMode,

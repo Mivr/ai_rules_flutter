@@ -75,7 +75,7 @@ class NativeCompilerConfig implements CompilerConfig {
   @override
   final List<String> enableExperiments;
 
-  NativeCompilerConfig({
+  new({
     required this.patchedSdkRoot,
     this.fileSystemRoots = const [],
     this.fileSystemScheme = '',
@@ -128,7 +128,7 @@ class WebCompilerConfig implements CompilerConfig {
   @override
   final List<String> enableExperiments;
 
-  WebCompilerConfig({
+  new({
     required this.webToolchain,
     this.fileSystemRoots = const [],
     this.dartDefines = const [],

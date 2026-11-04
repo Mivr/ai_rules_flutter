@@ -225,7 +225,7 @@ void _stampStubUuid(Uint8List out, int uuidDataOffset) {
 /// and version plus linked frameworks, libraries, and metadata. Grouped so
 /// the stub entry points stay small.
 class StubRunnerSpec {
-  const StubRunnerSpec({
+  const new({
     required this.platform,
     this.arch = 'arm64',
     required this.minimumOsVersion,

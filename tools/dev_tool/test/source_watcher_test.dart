@@ -13,7 +13,7 @@ class _FakeDirectoryWatcher implements DirectoryWatcher {
   final StreamController<WatchEvent> _events =
       StreamController<WatchEvent>.broadcast();
 
-  _FakeDirectoryWatcher(this.path);
+  new(this.path);
 
   @override
   Stream<WatchEvent> get events => _events.stream;

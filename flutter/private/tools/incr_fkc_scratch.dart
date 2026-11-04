@@ -48,7 +48,7 @@ const incrFkcClaimFileName = 'lock.claim';
 /// when the process closes any descriptor for the file, so this file is
 /// opened exactly once and never read back through another handle.
 class ScratchLock {
-  ScratchLock._(this._handle);
+  new _(this._handle);
 
   final RandomAccessFile? _handle;
 

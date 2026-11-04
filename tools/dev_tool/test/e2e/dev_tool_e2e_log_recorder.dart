@@ -67,7 +67,7 @@ class DevToolE2eLogRecorder {
   bool _closed = false;
   bool _failed = false;
 
-  DevToolE2eLogRecorder._(this._sink, {required this.filePath});
+  new _(this._sink, {required this.filePath});
 
   /// Starts recording the process with [pid], or returns null when
   /// `DEV_TOOL_E2E_LOG_DIR` is unset or empty.

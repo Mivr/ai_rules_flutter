@@ -48,7 +48,7 @@ class FatSlice {
   final int align;
   final Uint8List bytes;
 
-  FatSlice({
+  new({
     required this.cputype,
     required this.cpusubtype,
     required this.bytes,

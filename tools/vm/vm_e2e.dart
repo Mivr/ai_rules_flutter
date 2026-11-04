@@ -24,7 +24,7 @@ const e2eDefaultFolders = [
 /// What to run and where, parsed from the command line.
 class E2eRunOptions {
   /// Creates parsed options.
-  const E2eRunOptions({
+  const new({
     required this.vmName,
     required this.isWindows,
     required this.keepGoing,
@@ -76,7 +76,7 @@ E2eRunOptions parseE2eArgs(List<String> args) {
 /// The outcome of one folder's `bazel test //...` run.
 class E2eFolderResult {
   /// Creates one folder's outcome.
-  const E2eFolderResult(this.folder, this.exitCode, this.pass, this.tail);
+  const new(this.folder, this.exitCode, this.pass, this.tail);
 
   /// The folder that ran.
   final String folder;

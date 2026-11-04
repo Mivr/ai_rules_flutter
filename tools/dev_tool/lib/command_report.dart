@@ -42,7 +42,7 @@ class AssetOutcome {
   /// tracker.
   final bool rebuiltIdentical;
 
-  const AssetOutcome({
+  const new({
     this.changed = const {},
     this.delivery,
     this.rebuildFailed,
@@ -179,7 +179,7 @@ class CommandReport {
   /// nothing, which is a different fact.
   final List<String>? appIds;
 
-  const CommandReport({
+  const new({
     required this.verb,
     this.appIds,
     this.outcome,

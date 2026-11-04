@@ -37,7 +37,7 @@ class DeviceLauncher {
   /// The artifact to launch, from [RunPlan.buildApp].
   final String appFile;
 
-  DeviceLauncher({
+  new({
     required this.plan,
     required this.host,
     required this.appFile,

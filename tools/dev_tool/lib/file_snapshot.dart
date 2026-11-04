@@ -49,15 +49,12 @@ class FileSnapshot {
   /// mtime predates this by more than [racyWindow].
   final int readAtMicros;
 
-  const FileSnapshot(this.stamp, this.content, this.readAtMicros);
+  const new(this.stamp, this.content, this.readAtMicros);
 
   /// The snapshot of a path that is not there. Equal only to itself: a file
   /// that stays missing is not a change, and one that appears or disappears
   /// is.
-  const FileSnapshot.missing()
-    : stamp = missingStamp,
-      content = '',
-      readAtMicros = 0;
+  const new missing() : stamp = missingStamp, content = '', readAtMicros = 0;
 
   /// Whether this is the snapshot of a path that was not there.
   bool get isMissing => stamp == missingStamp;

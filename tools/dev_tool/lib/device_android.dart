@@ -59,7 +59,7 @@ class AndroidDevice extends Device {
   /// app itself runs on the device and is force-stopped by [_releaseApp].
   Process? _launchingLogcat;
 
-  AndroidDevice({
+  new({
     this.deviceId,
     String? packageName,
     String? activityName,
@@ -775,7 +775,7 @@ class LogcatLine {
   /// The record without its timestamp — what gets shown.
   final String display;
 
-  const LogcatLine({
+  const new({
     required this.level,
     required this.tag,
     required this.message,

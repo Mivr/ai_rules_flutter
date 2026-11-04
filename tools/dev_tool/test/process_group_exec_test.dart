@@ -55,7 +55,7 @@ class _Lines {
   final _ended = Completer<void>();
   late final StreamSubscription<String> _subscription;
 
-  _Lines(Stream<List<int>> stdout) {
+  new(Stream<List<int>> stdout) {
     _subscription = stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())

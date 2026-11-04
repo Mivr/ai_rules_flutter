@@ -41,7 +41,7 @@ Map<String, Uint8List> _readZipArchiveEntries(Uint8List zipBytes) {
 
 /// Parsed `verify` subcommand flags.
 class _VerifyArgs {
-  _VerifyArgs({
+  new({
     required this.inputPath,
     required this.binaryRelpath,
     required this.frameworkZipPath,

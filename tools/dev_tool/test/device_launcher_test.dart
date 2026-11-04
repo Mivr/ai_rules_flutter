@@ -36,7 +36,7 @@ class _CannedDevice extends Device {
 
   var stops = 0;
 
-  _CannedDevice(this._instance);
+  new(this._instance);
 
   @override
   String get name => 'Canned';

@@ -76,7 +76,7 @@ class BuildInfo {
   /// for still survives the round trip in [defineAssignment].
   final Map<String, dynamic> record;
 
-  const BuildInfo._({
+  const new _({
     required this.label,
     required this.compilationMode,
     required this.platformBuildArgs,
@@ -108,7 +108,7 @@ class BuildInfo {
   /// skew, and guessing at the missing half is how the dev tool would end up
   /// rebuilding into a tree the app never reads — the failure this whole
   /// mechanism exists to prevent. So it fails by name instead.
-  factory BuildInfo.fromJson(Map<String, dynamic> json) {
+  factory fromJson(Map<String, dynamic> json) {
     T need<T>(String key) {
       final value = json[key];
       if (value is! T) {

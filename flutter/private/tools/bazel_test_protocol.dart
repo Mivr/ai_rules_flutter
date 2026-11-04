@@ -45,7 +45,7 @@ import 'package:boolean_selector/boolean_selector.dart';
 
 /// Which of a suite's tests this run executes.
 class TestSelection {
-  TestSelection({
+  new({
     this.filter,
     this.totalShards = 1,
     this.shardIndex = 0,
@@ -71,7 +71,7 @@ class TestSelection {
   /// Throws [FormatException] for a filter that is not a regular expression, a
   /// tag entry that is not a boolean selector, or shard numbers that are not
   /// numbers: a run that guessed would report a selection that never happened.
-  factory TestSelection.fromEnvironment(Map<String, String> env) {
+  factory fromEnvironment(Map<String, String> env) {
     final pattern = env['TESTBRIDGE_TEST_ONLY'];
     RegExp? filter;
     if (pattern != null && pattern.isNotEmpty) {
@@ -288,7 +288,7 @@ class TestSelection {
 /// One test in a `RemoteListener` tree with the tags it inherits: its own
 /// `metadata` tags plus every enclosing group's, root included.
 class _Candidate {
-  _Candidate(this.test, this.tags);
+  new(this.test, this.tags);
 
   final Map<Object?, Object?> test;
   final Set<String> tags;
@@ -421,13 +421,13 @@ String _existingRunfile(
 
 /// One case's outcome, for the JUnit report.
 class TestCaseResult {
-  TestCaseResult.passed(this.name, this.elapsed, this.output)
+  new passed(this.name, this.elapsed, this.output)
     : skipped = false,
       failureType = null,
       message = null,
       detail = null;
 
-  TestCaseResult.skipped(this.name)
+  new skipped(this.name)
     : skipped = true,
       elapsed = Duration.zero,
       output = '',
@@ -435,7 +435,7 @@ class TestCaseResult {
       message = null,
       detail = null;
 
-  TestCaseResult.failed(
+  new failed(
     this.name,
     this.elapsed,
     this.output, {

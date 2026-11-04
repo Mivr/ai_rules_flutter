@@ -30,7 +30,7 @@ enum KeyModifier {
   meta('Meta', 4),
   shift('Shift', 8);
 
-  const KeyModifier(this.key, this.cdpBit);
+  const new(this.key, this.cdpBit);
 
   /// The DOM `KeyboardEvent.key` of this modifier.
   final String key;
@@ -71,7 +71,7 @@ class KeyDescription {
   /// This key with Shift held, where Shift changes what it types.
   final KeyDescription? shifted;
 
-  const KeyDescription({
+  const new({
     required this.code,
     required this.key,
     required this.keyCode,
@@ -99,7 +99,7 @@ class KeyDescription {
 /// A refused key chord, with a message that says what to write instead.
 class KeyChordException implements Exception {
   final String message;
-  const KeyChordException(this.message);
+  const new(this.message);
 
   @override
   String toString() => message;
@@ -119,7 +119,7 @@ class KeyStroke {
   /// reports them.
   final Set<KeyModifier> modifiers;
 
-  const KeyStroke({
+  const new({
     required this.down,
     required this.description,
     required this.modifiers,
@@ -176,7 +176,7 @@ class KeyChord {
   /// The key pressed while they are held.
   final KeyDescription key;
 
-  const KeyChord._(this.spec, this.held, this.key);
+  const new _(this.spec, this.held, this.key);
 
   /// Parse [spec] the way Playwright's `keyboard.press` does.
   ///
@@ -394,7 +394,7 @@ class _KeyDef {
   final String? text;
   final int location;
 
-  const _KeyDef(
+  const new(
     this.code,
     this.keyCode,
     this.key, {

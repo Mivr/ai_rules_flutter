@@ -20,7 +20,7 @@ import 'dart:io';
 /// A user-facing check failure. Thrown, never swallowed: the entry point
 /// reports the message and exits non-zero.
 class IdentityFailure implements Exception {
-  IdentityFailure(this.message);
+  new(this.message);
 
   final String message;
 
@@ -402,7 +402,7 @@ String locateDill({required String workDir, required String linkPrefix}) {
 /// with [run]; [run] restores the edited sources, shuts down both Bazel
 /// servers and deletes the scratch directory on every exit path.
 class IdentityRun {
-  IdentityRun({required this.bazel, required this.repoRoot})
+  new({required this.bazel, required this.repoRoot})
     : work = Directory.systemTemp.createTempSync('incr_identity_'),
       _cleaned = false;
 

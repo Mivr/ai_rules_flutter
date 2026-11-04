@@ -14,7 +14,7 @@ class PlistEntry {
   final String key;
   final String rawValue;
 
-  const PlistEntry(this.key, this.rawValue);
+  const new(this.key, this.rawValue);
 }
 
 /// Cursor over an XML plist string while its top-level `<dict>` entries are
@@ -24,7 +24,7 @@ class _PlistReader {
   final String source;
   var pos = 0;
 
-  _PlistReader(this.xml, {required this.source});
+  new(this.xml, {required this.source});
 
   void skipTrivia() {
     while (pos < xml.length) {

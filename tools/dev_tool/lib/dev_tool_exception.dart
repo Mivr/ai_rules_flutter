@@ -14,7 +14,7 @@ class DevToolException implements Exception {
   final String message;
   final int exitCode;
 
-  DevToolException(this.message, {this.exitCode = 1});
+  new(this.message, {this.exitCode = 1});
 
   @override
   String toString() => message;

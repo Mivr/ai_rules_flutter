@@ -137,7 +137,7 @@ class IOSDeviceInfo {
   /// [MdnsVmServiceDiscovery.discover].
   final List<String> hostnames;
 
-  IOSDeviceInfo({
+  new({
     required this.udid,
     required this.coreDeviceId,
     required this.name,
@@ -233,7 +233,7 @@ class IOSDevice extends Device {
   /// What the current launch's lldb does with a stop, once the app runs.
   LldbStops? lldbStops;
 
-  IOSDevice({
+  new({
     String? udid,
     String? bundleId,
     ProcessRunSync? runProcess,

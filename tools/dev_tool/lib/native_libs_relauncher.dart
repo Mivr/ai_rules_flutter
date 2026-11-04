@@ -82,7 +82,7 @@ class Relauncher {
   /// patcher re-snapshots the image the new process loaded.
   final Future<void> Function()? afterRelaunch;
 
-  Relauncher({
+  new({
     required this.appFile,
     required this.rebuild,
     required this.sessions,

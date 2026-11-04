@@ -1,8 +1,7 @@
 {
   "flutter/private/dartdev_patch/patch.dart": {
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 28,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 28
   },
   "flutter/private/dartdev_patch/patch_test.dart": {
     "prefer_const_declarations": 3,
@@ -22,13 +21,11 @@
     "prefer_const_constructors": 2,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 26,
-    "unnecessary_parenthesis": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_parenthesis": 1
   },
   "flutter/private/tools/bazel_test_protocol.dart": {
     "comment_references": 5,
-    "specify_nonobvious_local_variable_types": 29,
-    "unnecessary_type_name_in_constructor": 6
+    "specify_nonobvious_local_variable_types": 29
   },
   "flutter/private/tools/bundle_app.dart": {
     "avoid_dynamic_calls": 12,
@@ -58,25 +55,21 @@
     "prefer_final_locals": 2,
     "specify_nonobvious_local_variable_types": 51,
     "unnecessary_raw_strings": 1,
-    "unnecessary_string_escapes": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_string_escapes": 1
   },
   "flutter/private/tools/flutter_integration_test_android.dart": {
     "async_return_with_no_await": 1,
     "avoid_catching_errors": 1,
     "avoid_redundant_argument_values": 1,
-    "specify_nonobvious_local_variable_types": 48,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 48
   },
   "flutter/private/tools/flutter_integration_test_ios.dart": {
     "async_return_with_no_await": 1,
-    "specify_nonobvious_local_variable_types": 18,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 18
   },
   "flutter/private/tools/flutter_integration_test_launcher.dart": {
     "comment_references": 1,
-    "specify_nonobvious_local_variable_types": 2,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 2
   },
   "flutter/private/tools/flutter_integration_test_runner.dart": {
     "always_put_required_named_parameters_first": 4,
@@ -90,8 +83,7 @@
     "no_dynamic_casts": 2,
     "prefer_initializing_formals": 4,
     "specify_nonobvious_local_variable_types": 74,
-    "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 8
+    "unnecessary_async": 1
   },
   "flutter/private/tools/flutter_integration_test_web_serve.dart": {
     "avoid_catches_without_on_clauses": 1,
@@ -101,7 +93,6 @@
   },
   "flutter/private/tools/flutter_test_coverage.dart": {
     "specify_nonobvious_local_variable_types": 21,
-    "unnecessary_type_name_in_constructor": 1,
     "use_null_aware_elements": 1
   },
   "flutter/private/tools/flutter_test_runner.dart": {
@@ -115,8 +106,7 @@
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
     "prefer_const_constructors": 1,
-    "specify_nonobvious_local_variable_types": 37,
-    "unnecessary_type_name_in_constructor": 6
+    "specify_nonobvious_local_variable_types": 37
   },
   "flutter/private/tools/generate_asset_manifest.dart": {
     "dangling_library_doc_comments": 1,
@@ -125,8 +115,7 @@
   },
   "flutter/private/tools/incr_fkc_scratch.dart": {
     "avoid_redundant_argument_values": 2,
-    "specify_nonobvious_local_variable_types": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 1
   },
   "flutter/private/tools/incr_fkc_server.dart": {
     "async_return_with_no_await": 3,
@@ -135,8 +124,7 @@
     "discarded_futures": 1,
     "specify_nonobvious_local_variable_types": 30,
     "unnecessary_async": 1,
-    "unnecessary_raw_strings": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_raw_strings": 1
   },
   "flutter/private/tools/incr_fkc_worker.dart": {
     "avoid_catches_without_on_clauses": 2,
@@ -145,7 +133,6 @@
     "specify_nonobvious_local_variable_types": 54,
     "unintended_html_in_doc_comment": 3,
     "unnecessary_raw_strings": 1,
-    "unnecessary_type_name_in_constructor": 3,
     "unreachable_from_main": 1
   },
   "flutter/private/tools/ios_simulator_boot.dart": {
@@ -157,7 +144,6 @@
     "sort_constructors_first": 8,
     "specify_nonobvious_local_variable_types": 37,
     "unnecessary_raw_strings": 2,
-    "unnecessary_type_name_in_constructor": 8,
     "unreachable_from_main": 1
   },
   "flutter/private/tools/kernel_filter.dart": {
@@ -170,16 +156,14 @@
   },
   "flutter/private/tools/macho_cli.dart": {
     "dangling_library_doc_comments": 1,
-    "specify_nonobvious_local_variable_types": 9,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 9
   },
   "flutter/private/tools/macho_codesign.dart": {
     "avoid_redundant_argument_values": 25,
     "dangling_library_doc_comments": 1,
     "noop_primitive_operations": 1,
     "prefer_constructors_over_static_methods": 1,
-    "specify_nonobvious_local_variable_types": 53,
-    "unnecessary_type_name_in_constructor": 4
+    "specify_nonobvious_local_variable_types": 53
   },
   "flutter/private/tools/macho_constants.dart": {
     "dangling_library_doc_comments": 1
@@ -188,8 +172,7 @@
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
     "directives_ordering": 1,
-    "specify_nonobvious_local_variable_types": 33,
-    "unnecessary_type_name_in_constructor": 3
+    "specify_nonobvious_local_variable_types": 33
   },
   "flutter/private/tools/macho_edit.dart": {
     "specify_nonobvious_local_variable_types": 2
@@ -198,54 +181,46 @@
     "avoid_redundant_argument_values": 14,
     "dangling_library_doc_comments": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 28,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 28
   },
   "flutter/private/tools/macho_framework.dart": {
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 56,
-    "unnecessary_type_name_in_constructor": 1,
     "use_raw_strings": 1
   },
   "flutter/private/tools/macho_parse.dart": {
     "comment_references": 2,
     "dangling_library_doc_comments": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 21,
-    "unnecessary_type_name_in_constructor": 3
+    "specify_nonobvious_local_variable_types": 21
   },
   "flutter/private/tools/macho_patch.dart": {
     "avoid_redundant_argument_values": 1,
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
     "specify_nonobvious_local_variable_types": 39,
-    "type_annotate_public_apis": 2,
-    "unnecessary_type_name_in_constructor": 3
+    "type_annotate_public_apis": 2
   },
   "flutter/private/tools/macho_ranges.dart": {
     "dangling_library_doc_comments": 1,
-    "specify_nonobvious_local_variable_types": 11,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 11
   },
   "flutter/private/tools/macho_strip.dart": {
     "comment_references": 2,
     "dangling_library_doc_comments": 1,
     "noop_primitive_operations": 1,
-    "specify_nonobvious_local_variable_types": 49,
-    "unnecessary_type_name_in_constructor": 9
+    "specify_nonobvious_local_variable_types": 49
   },
   "flutter/private/tools/macho_stub.dart": {
     "dangling_library_doc_comments": 1,
     "directives_ordering": 1,
-    "specify_nonobvious_local_variable_types": 23,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 23
   },
   "flutter/private/tools/macho_verify.dart": {
     "dangling_library_doc_comments": 1,
-    "specify_nonobvious_local_variable_types": 20,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 20
   },
   "flutter/private/tools/merge_android_manifests.dart": {
     "dangling_library_doc_comments": 1,
@@ -254,8 +229,7 @@
     "sort_constructors_first": 10,
     "specify_nonobvious_local_variable_types": 137,
     "unintended_html_in_doc_comment": 2,
-    "unnecessary_raw_strings": 1,
-    "unnecessary_type_name_in_constructor": 10
+    "unnecessary_raw_strings": 1
   },
   "flutter/private/tools/merge_plists.dart": {
     "comment_references": 1,
@@ -263,23 +237,20 @@
     "sort_constructors_first": 3,
     "specify_nonobvious_local_variable_types": 48,
     "unintended_html_in_doc_comment": 2,
-    "unnecessary_raw_strings": 2,
-    "unnecessary_type_name_in_constructor": 3
+    "unnecessary_raw_strings": 2
   },
   "flutter/private/tools/plist_info.dart": {
     "avoid_redundant_argument_values": 4,
     "dangling_library_doc_comments": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 14,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 14
   },
   "flutter/private/tools/plist_parse.dart": {
     "dangling_library_doc_comments": 1,
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 22,
     "type_annotate_public_apis": 1,
-    "unnecessary_raw_strings": 1,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_raw_strings": 1
   },
   "flutter/private/tools/pub.dart": {
     "specify_nonobvious_local_variable_types": 7
@@ -327,8 +298,7 @@
     "async_return_with_no_await": 2,
     "comment_references": 3,
     "specify_nonobvious_local_variable_types": 19,
-    "unnecessary_async": 2,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_async": 2
   },
   "flutter/private/tools/test/flutter_integration_test_runner_test.dart": {
     "async_return_with_no_await": 4,
@@ -337,7 +307,6 @@
     "inference_failure_on_collection_literal": 1,
     "specify_nonobvious_local_variable_types": 46,
     "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 1,
     "use_raw_strings": 1
   },
   "flutter/private/tools/test/flutter_test_runner_test.dart": {
@@ -345,8 +314,7 @@
     "close_sinks": 1,
     "inference_failure_on_collection_literal": 1,
     "specify_nonobvious_local_variable_types": 4,
-    "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_async": 1
   },
   "flutter/private/tools/test/generate_asset_manifest_test.dart": {
     "leading_newlines_in_multiline_strings": 6,
@@ -357,21 +325,18 @@
     "avoid_redundant_argument_values": 1,
     "no_dynamic_casts": 10,
     "specify_nonobvious_local_variable_types": 50,
-    "unnecessary_raw_strings": 2,
-    "unnecessary_type_name_in_constructor": 3
+    "unnecessary_raw_strings": 2
   },
   "flutter/private/tools/test/incr_fkc_worker_test.dart": {
     "prefer_if_elements_to_conditional_expressions": 1,
-    "specify_nonobvious_local_variable_types": 48,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 48
   },
   "flutter/private/tools/test/ios_simulator_boot_test.dart": {
     "async_return_with_no_await": 1,
     "avoid_redundant_argument_values": 5,
     "sort_constructors_first": 3,
     "specify_nonobvious_local_variable_types": 45,
-    "type_annotate_public_apis": 1,
-    "unnecessary_type_name_in_constructor": 3
+    "type_annotate_public_apis": 1
   },
   "flutter/private/tools/test/kernel_filter_test.dart": {
     "async_return_with_no_await": 1,
@@ -447,8 +412,7 @@
     "avoid_bool_literals_in_conditional_expressions": 1,
     "avoid_catching_errors": 1,
     "cast_nullable_to_non_nullable": 1,
-    "specify_nonobvious_local_variable_types": 10,
-    "unnecessary_type_name_in_constructor": 7
+    "specify_nonobvious_local_variable_types": 10
   },
   "flutter/private/tools/web_guard.dart": {
     "async_return_with_no_await": 1,
@@ -463,8 +427,7 @@
     "omit_obvious_local_variable_types": 1,
     "sort_constructors_first": 5,
     "specify_nonobvious_local_variable_types": 61,
-    "unnecessary_brace_in_string_interps": 1,
-    "unnecessary_type_name_in_constructor": 5
+    "unnecessary_brace_in_string_interps": 1
   },
   "flutter/private/tools/xtool_bundle.dart": {
     "avoid_redundant_argument_values": 3,
@@ -472,8 +435,7 @@
     "parameter_assignments": 2,
     "prefer_foreach": 1,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 56,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 56
   },
   "flutter/private/tools/xtool_framework.dart": {
     "avoid_redundant_argument_values": 4,
@@ -491,21 +453,18 @@
     "parameter_assignments": 3,
     "specify_nonobvious_local_variable_types": 26,
     "type_annotate_public_apis": 1,
-    "unintended_html_in_doc_comment": 5,
-    "unnecessary_type_name_in_constructor": 1
+    "unintended_html_in_doc_comment": 5
   },
   "flutter/private/tools/xtool_runner.dart": {
     "always_put_required_named_parameters_first": 3,
     "dangling_library_doc_comments": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 24,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 24
   },
   "flutter/private/tools/xtool_stub.dart": {
     "always_put_required_named_parameters_first": 1,
     "dangling_library_doc_comments": 1,
-    "specify_nonobvious_local_variable_types": 20,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 20
   },
   "flutter/private/tools/zip_reader.dart": {
     "comment_references": 4,
@@ -513,8 +472,7 @@
     "parameter_assignments": 3,
     "prefer_const_constructors": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 44,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 44
   },
   "flutter/private/tools/zip_writer.dart": {
     "avoid_redundant_argument_values": 1,
@@ -525,8 +483,7 @@
     "specify_nonobvious_local_variable_types": 32,
     "specify_nonobvious_property_types": 2,
     "type_annotate_public_apis": 2,
-    "unnecessary_parenthesis": 3,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_parenthesis": 3
   },
   "flutter/private/tools/zlib_raw_match.dart": {
     "omit_obvious_local_variable_types": 1,
@@ -536,8 +493,7 @@
   "flutter/private/tools/zlib_raw_state.dart": {
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 7,
-    "unnecessary_parenthesis": 1,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_parenthesis": 1
   },
   "flutter/private/tools/zlib_raw_trees.dart": {
     "avoid_multiple_declarations_per_line": 1,
@@ -546,8 +502,7 @@
     "parameter_assignments": 3,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 12,
-    "unnecessary_parenthesis": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_parenthesis": 1
   },
   "flutter/tests/analyze_fixture/lib/geometry.dart": {
     "public_member_api_docs": 2
@@ -556,8 +511,7 @@
     "public_member_api_docs": 2
   },
   "flutter/tests/dbg_assert_fixture/lib/assert_helper.dart": {
-    "public_member_api_docs": 2,
-    "unnecessary_type_name_in_constructor": 1
+    "public_member_api_docs": 2
   },
   "flutter/tests/dbg_assert_fixture/test/modular_dbg_assert_test.dart": {
     "avoid_catching_errors": 3,
@@ -575,15 +529,13 @@
   },
   "flutter/tests/flaky_guard/flaky_guard_test.dart": {
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 34,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 34
   },
   "flutter/tests/flutter_test_analyze_fixture/fake_test_api/lib/backend.dart": {
     "avoid_futureor_void": 1,
     "close_sinks": 1,
     "public_member_api_docs": 4,
-    "specify_nonobvious_local_variable_types": 7,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 7
   },
   "flutter/tests/flutter_test_analyze_fixture/test/counter_test.dart": {
     "specify_nonobvious_local_variable_types": 1
@@ -630,12 +582,10 @@
     "public_member_api_docs": 3
   },
   "flutter/tests/icon_tree_shake_fixture/lib/material.dart": {
-    "public_member_api_docs": 10,
-    "unnecessary_type_name_in_constructor": 1
+    "public_member_api_docs": 10
   },
   "flutter/tests/icon_tree_shake_fixture/lib/src/widgets/icon_data.dart": {
-    "public_member_api_docs": 7,
-    "unnecessary_type_name_in_constructor": 2
+    "public_member_api_docs": 7
   },
   "flutter/tests/icon_tree_shake_fixture/web_icon_plugin/lib/web_icon_plugin.dart": {
     "avoid_classes_with_only_static_members": 1,
@@ -650,8 +600,7 @@
   "flutter/tests/lib/dependency_floors_lib.dart": {
     "avoid_positional_boolean_parameters": 1,
     "public_member_api_docs": 2,
-    "specify_nonobvious_local_variable_types": 13,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 13
   },
   "flutter/tests/lint_baseline_fixture/lib/green.dart": {
     "avoid_print": 2
@@ -663,7 +612,6 @@
     "avoid_redundant_argument_values": 5,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 60,
-    "unnecessary_type_name_in_constructor": 1,
     "use_raw_strings": 1
   },
   "flutter/tests/min_versions_android_guard_test.dart": {
@@ -739,8 +687,7 @@
     "prefer_foreach": 1,
     "public_member_api_docs": 5,
     "sort_constructors_first": 4,
-    "specify_nonobvious_local_variable_types": 9,
-    "unnecessary_type_name_in_constructor": 4
+    "specify_nonobvious_local_variable_types": 9
   },
   "tools/dev_tool/lib/app_log_sink.dart": {
     "dangling_library_doc_comments": 1,
@@ -753,8 +700,7 @@
     "library_private_types_in_public_api": 1,
     "public_member_api_docs": 4,
     "sort_constructors_first": 3,
-    "specify_nonobvious_local_variable_types": 11,
-    "unnecessary_type_name_in_constructor": 4
+    "specify_nonobvious_local_variable_types": 11
   },
   "tools/dev_tool/lib/bazel.dart": {
     "avoid_redundant_argument_values": 1,
@@ -765,22 +711,19 @@
     "public_member_api_docs": 9,
     "sort_constructors_first": 9,
     "specify_nonobvious_local_variable_types": 44,
-    "unintended_html_in_doc_comment": 1,
-    "unnecessary_type_name_in_constructor": 9
+    "unintended_html_in_doc_comment": 1
   },
   "tools/dev_tool/lib/build_command.dart": {
     "avoid_redundant_argument_values": 1,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 4,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 5,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 5
   },
   "tools/dev_tool/lib/build_info.dart": {
     "public_member_api_docs": 1,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 2,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 2
   },
   "tools/dev_tool/lib/build_mode.dart": {
     "public_member_api_docs": 1
@@ -789,8 +732,7 @@
     "comment_references": 1,
     "public_member_api_docs": 3,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 1
   },
   "tools/dev_tool/lib/cdp_console.dart": {
     "async_return_with_no_await": 1,
@@ -800,39 +742,33 @@
     "no_raw_types": 4,
     "public_member_api_docs": 4,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 18,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 18
   },
   "tools/dev_tool/lib/command_failure.dart": {
     "public_member_api_docs": 7,
-    "sort_constructors_first": 5,
-    "unnecessary_type_name_in_constructor": 5
+    "sort_constructors_first": 5
   },
   "tools/dev_tool/lib/command_report.dart": {
     "public_member_api_docs": 7,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 3,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 3
   },
   "tools/dev_tool/lib/command_runner.dart": {
     "comment_references": 2,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 4,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 4
   },
   "tools/dev_tool/lib/compiler_config.dart": {
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 5,
-    "sort_constructors_first": 2,
-    "unnecessary_type_name_in_constructor": 2
+    "sort_constructors_first": 2
   },
   "tools/dev_tool/lib/dev_tool_exception.dart": {
     "public_member_api_docs": 3,
-    "sort_constructors_first": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "sort_constructors_first": 1
   },
   "tools/dev_tool/lib/device.dart": {
     "avoid_catches_without_on_clauses": 1,
@@ -841,7 +777,6 @@
     "public_member_api_docs": 3,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 12,
-    "unnecessary_type_name_in_constructor": 1,
     "use_setters_to_change_properties": 1
   },
   "tools/dev_tool/lib/device_android.dart": {
@@ -855,8 +790,7 @@
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 49,
     "unintended_html_in_doc_comment": 2,
-    "unnecessary_raw_strings": 3,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_raw_strings": 3
   },
   "tools/dev_tool/lib/device_desktop.dart": {
     "annotate_overrides": 3,
@@ -867,8 +801,7 @@
     "omit_obvious_local_variable_types": 3,
     "public_member_api_docs": 3,
     "sort_constructors_first": 3,
-    "specify_nonobvious_local_variable_types": 34,
-    "unnecessary_type_name_in_constructor": 3
+    "specify_nonobvious_local_variable_types": 34
   },
   "tools/dev_tool/lib/device_id.dart": {
     "async_return_with_no_await": 1,
@@ -878,8 +811,7 @@
     "public_member_api_docs": 1,
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 22,
-    "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_async": 1
   },
   "tools/dev_tool/lib/device_ios.dart": {
     "avoid_catching_errors": 1,
@@ -891,8 +823,7 @@
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 48,
     "unintended_html_in_doc_comment": 1,
-    "unnecessary_parenthesis": 1,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_parenthesis": 1
   },
   "tools/dev_tool/lib/device_ios_lldb.dart": {
     "avoid_dynamic_calls": 1,
@@ -901,8 +832,7 @@
     "inference_failure_on_collection_literal": 1,
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 18,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 18
   },
   "tools/dev_tool/lib/device_ios_sim.dart": {
     "annotate_overrides": 1,
@@ -915,13 +845,11 @@
     "specify_nonobvious_local_variable_types": 25,
     "unnecessary_null_checks": 1,
     "unnecessary_raw_strings": 1,
-    "unnecessary_type_name_in_constructor": 3,
     "use_null_aware_elements": 1
   },
   "tools/dev_tool/lib/device_ios_sim_discovery.dart": {
     "prefer_foreach": 1,
     "specify_nonobvious_local_variable_types": 14,
-    "unnecessary_type_name_in_constructor": 2,
     "use_raw_strings": 1
   },
   "tools/dev_tool/lib/device_launcher.dart": {
@@ -930,8 +858,7 @@
     "public_member_api_docs": 4,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 13,
-    "unnecessary_raw_strings": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_raw_strings": 1
   },
   "tools/dev_tool/lib/device_web.dart": {
     "async_return_with_no_await": 3,
@@ -947,7 +874,6 @@
     "sort_constructors_first": 4,
     "specify_nonobvious_local_variable_types": 41,
     "unnecessary_async": 2,
-    "unnecessary_type_name_in_constructor": 4,
     "use_setters_to_change_properties": 1
   },
   "tools/dev_tool/lib/file_snapshot.dart": {
@@ -955,8 +881,7 @@
     "comment_references": 2,
     "public_member_api_docs": 1,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 9,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 9
   },
   "tools/dev_tool/lib/frontend_server.dart": {
     "async_return_with_no_await": 3,
@@ -968,8 +893,7 @@
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 14,
     "unawaited_futures": 1,
-    "unnecessary_async": 3,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_async": 3
   },
   "tools/dev_tool/lib/host_tools.dart": {
     "avoid_escaping_inner_quotes": 1,
@@ -977,8 +901,7 @@
     "no_adjacent_strings_in_list": 1,
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 16,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 16
   },
   "tools/dev_tool/lib/hot_reload/app_instance.dart": {
     "avoid_catching_errors": 1,
@@ -988,15 +911,13 @@
     "prefer_initializing_formals": 1,
     "public_member_api_docs": 13,
     "sort_constructors_first": 4,
-    "specify_nonobvious_local_variable_types": 4,
-    "unnecessary_type_name_in_constructor": 6
+    "specify_nonobvious_local_variable_types": 4
   },
   "tools/dev_tool/lib/hot_reload/applied_versions.dart": {
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 2,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 3,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 3
   },
   "tools/dev_tool/lib/hot_reload/asset_bundle.dart": {
     "avoid_js_rounded_ints": 1,
@@ -1004,8 +925,7 @@
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 2,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 15,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 15
   },
   "tools/dev_tool/lib/hot_reload/compiler.dart": {
     "async_return_with_no_await": 2,
@@ -1013,8 +933,7 @@
     "public_member_api_docs": 6,
     "sort_constructors_first": 3,
     "specify_nonobvious_local_variable_types": 2,
-    "unnecessary_async": 2,
-    "unnecessary_type_name_in_constructor": 4
+    "unnecessary_async": 2
   },
   "tools/dev_tool/lib/hot_reload/file_clock.dart": {
     "avoid_slow_async_io": 1
@@ -1023,8 +942,7 @@
     "comment_references": 1,
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 3,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 3
   },
   "tools/dev_tool/lib/hot_reload/readiness_gate.dart": {
     "comment_references": 9,
@@ -1037,28 +955,24 @@
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 12,
     "sort_constructors_first": 4,
-    "specify_nonobvious_local_variable_types": 12,
-    "unnecessary_type_name_in_constructor": 6
+    "specify_nonobvious_local_variable_types": 12
   },
   "tools/dev_tool/lib/hot_reload/session_reloader.dart": {
     "comment_references": 4,
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 3,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 3
   },
   "tools/dev_tool/lib/hot_reload/source_uri_resolver.dart": {
     "comment_references": 2,
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 5,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 5
   },
   "tools/dev_tool/lib/hot_reload/source_watcher.dart": {
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 8,
-    "sort_constructors_first": 3,
-    "unnecessary_type_name_in_constructor": 3
+    "sort_constructors_first": 3
   },
   "tools/dev_tool/lib/hot_reload/workspace.dart": {
     "avoid_equals_and_hash_code_on_mutable_classes": 2,
@@ -1066,8 +980,7 @@
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 5,
     "sort_constructors_first": 3,
-    "specify_nonobvious_local_variable_types": 6,
-    "unnecessary_type_name_in_constructor": 3
+    "specify_nonobvious_local_variable_types": 6
   },
   "tools/dev_tool/lib/http_control_channel.dart": {
     "async_return_with_no_await": 3,
@@ -1077,15 +990,13 @@
     "prefer_initializing_formals": 2,
     "public_member_api_docs": 1,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 30,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 30
   },
   "tools/dev_tool/lib/ios_sim_log_fallback.dart": {
     "comment_references": 1,
     "no_adjacent_strings_in_list": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 18,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 18
   },
   "tools/dev_tool/lib/key_press.dart": {
     "avoid_escaping_inner_quotes": 1,
@@ -1094,8 +1005,7 @@
     "public_member_api_docs": 9,
     "sort_constructors_first": 5,
     "specify_nonobvious_local_variable_types": 22,
-    "unnecessary_const_in_enum_constructor": 1,
-    "unnecessary_type_name_in_constructor": 6
+    "unnecessary_const_in_enum_constructor": 1
   },
   "tools/dev_tool/lib/logging.dart": {
     "cast_nullable_to_non_nullable": 2,
@@ -1104,8 +1014,7 @@
     "prefer_foreach": 1,
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 6,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 6
   },
   "tools/dev_tool/lib/machine_protocol.dart": {
     "avoid_catches_without_on_clauses": 2,
@@ -1114,7 +1023,6 @@
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 8,
-    "unnecessary_type_name_in_constructor": 1,
     "use_null_aware_elements": 5
   },
   "tools/dev_tool/lib/mdns_vm_service_discovery.dart": {
@@ -1127,8 +1035,7 @@
     "sort_constructors_first": 3,
     "specify_nonobvious_local_variable_types": 28,
     "unnecessary_lambdas": 1,
-    "unnecessary_raw_strings": 1,
-    "unnecessary_type_name_in_constructor": 7
+    "unnecessary_raw_strings": 1
   },
   "tools/dev_tool/lib/native_assembly_gate.dart": {
     "comment_references": 2
@@ -1137,8 +1044,7 @@
     "prefer_constructors_over_static_methods": 1,
     "public_member_api_docs": 8,
     "sort_constructors_first": 5,
-    "specify_nonobvious_local_variable_types": 16,
-    "unnecessary_type_name_in_constructor": 7
+    "specify_nonobvious_local_variable_types": 16
   },
   "tools/dev_tool/lib/native_hot_patcher.dart": {
     "avoid_slow_async_io": 1,
@@ -1146,8 +1052,7 @@
     "prefer_initializing_formals": 3,
     "public_member_api_docs": 5,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 39,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 39
   },
   "tools/dev_tool/lib/native_image_identity.dart": {
     "async_return_with_no_await": 2,
@@ -1166,19 +1071,16 @@
     "avoid_catching_errors": 1,
     "public_member_api_docs": 4,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 7,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 7
   },
   "tools/dev_tool/lib/native_libs_verdict.dart": {
     "public_member_api_docs": 7,
-    "sort_constructors_first": 3,
-    "unnecessary_type_name_in_constructor": 5
+    "sort_constructors_first": 3
   },
   "tools/dev_tool/lib/native_libs_watch.dart": {
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 5,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 5
   },
   "tools/dev_tool/lib/native_patch_delivery.dart": {
     "async_return_with_no_await": 1,
@@ -1186,13 +1088,11 @@
     "prefer_initializing_formals": 3,
     "public_member_api_docs": 11,
     "sort_constructors_first": 4,
-    "specify_nonobvious_local_variable_types": 10,
-    "unnecessary_type_name_in_constructor": 6
+    "specify_nonobvious_local_variable_types": 10
   },
   "tools/dev_tool/lib/native_patch_outcome.dart": {
     "public_member_api_docs": 7,
-    "sort_constructors_first": 4,
-    "unnecessary_type_name_in_constructor": 6
+    "sort_constructors_first": 4
   },
   "tools/dev_tool/lib/native_pipeline_assembler.dart": {
     "always_put_required_named_parameters_first": 4,
@@ -1201,8 +1101,7 @@
     "directives_ordering": 2,
     "public_member_api_docs": 8,
     "sort_constructors_first": 3,
-    "specify_nonobvious_local_variable_types": 40,
-    "unnecessary_type_name_in_constructor": 3
+    "specify_nonobvious_local_variable_types": 40
   },
   "tools/dev_tool/lib/outcome_renderer.dart": {
     "no_adjacent_strings_in_list": 1,
@@ -1213,14 +1112,12 @@
   "tools/dev_tool/lib/package_roots.dart": {
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 11,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 11
   },
   "tools/dev_tool/lib/relaunch_outcome.dart": {
     "comment_references": 2,
     "public_member_api_docs": 6,
-    "sort_constructors_first": 3,
-    "unnecessary_type_name_in_constructor": 5
+    "sort_constructors_first": 3
   },
   "tools/dev_tool/lib/reload_pipeline.dart": {
     "async_return_with_no_await": 3,
@@ -1230,8 +1127,7 @@
     "prefer_final_locals": 2,
     "public_member_api_docs": 3,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 61,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 61
   },
   "tools/dev_tool/lib/reload_strategy.dart": {
     "avoid_catches_without_on_clauses": 5,
@@ -1240,8 +1136,7 @@
     "no_adjacent_strings_in_list": 1,
     "public_member_api_docs": 11,
     "sort_constructors_first": 8,
-    "specify_nonobvious_local_variable_types": 19,
-    "unnecessary_type_name_in_constructor": 9
+    "specify_nonobvious_local_variable_types": 19
   },
   "tools/dev_tool/lib/run_command.dart": {
     "avoid_escaping_inner_quotes": 4,
@@ -1251,8 +1146,7 @@
     "directives_ordering": 2,
     "public_member_api_docs": 3,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 12,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 12
   },
   "tools/dev_tool/lib/run_plan.dart": {
     "avoid_catching_errors": 1,
@@ -1264,8 +1158,7 @@
     "prefer_constructors_over_static_methods": 1,
     "public_member_api_docs": 18,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 19,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 19
   },
   "tools/dev_tool/lib/runfiles_helper.dart": {
     "avoid_catching_errors": 1,
@@ -1275,8 +1168,7 @@
     "public_member_api_docs": 3,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 5,
-    "unnecessary_statements": 2,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_statements": 2
   },
   "tools/dev_tool/lib/session.dart": {
     "always_put_required_named_parameters_first": 1,
@@ -1290,7 +1182,6 @@
     "public_member_api_docs": 9,
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 24,
-    "unnecessary_type_name_in_constructor": 2,
     "use_null_aware_elements": 2
   },
   "tools/dev_tool/lib/session_host.dart": {
@@ -1300,8 +1191,7 @@
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 12,
-    "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_async": 1
   },
   "tools/dev_tool/lib/shutdown_signals.dart": {
     "avoid_catches_without_on_clauses": 1,
@@ -1309,8 +1199,7 @@
     "prefer_initializing_formals": 2,
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 1
   },
   "tools/dev_tool/lib/teardown.dart": {
     "async_return_with_no_await": 1,
@@ -1329,8 +1218,7 @@
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 22,
     "sort_constructors_first": 4,
-    "specify_nonobvious_local_variable_types": 25,
-    "unnecessary_type_name_in_constructor": 4
+    "specify_nonobvious_local_variable_types": 25
   },
   "tools/dev_tool/lib/tunnel_command.dart": {
     "dangling_library_doc_comments": 1,
@@ -1351,8 +1239,7 @@
     "sort_constructors_first": 6,
     "specify_nonobvious_local_variable_types": 63,
     "type_annotate_public_apis": 3,
-    "unnecessary_async": 2,
-    "unnecessary_type_name_in_constructor": 7
+    "unnecessary_async": 2
   },
   "tools/dev_tool/lib/vm_service_discovery.dart": {
     "always_put_required_named_parameters_first": 1,
@@ -1363,15 +1250,13 @@
     "sort_constructors_first": 4,
     "specify_nonobvious_local_variable_types": 24,
     "unnecessary_async": 1,
-    "unnecessary_lambdas": 1,
-    "unnecessary_type_name_in_constructor": 10
+    "unnecessary_lambdas": 1
   },
   "tools/dev_tool/lib/vm_service_logs.dart": {
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 4,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 4
   },
   "tools/dev_tool/lib/web_bootstrap.dart": {
     "dangling_library_doc_comments": 1,
@@ -1380,12 +1265,10 @@
   "tools/dev_tool/lib/web_expression_compiler.dart": {
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 1
   },
   "tools/dev_tool/lib/web_mode.dart": {
-    "public_member_api_docs": 3,
-    "unnecessary_type_name_in_constructor": 4
+    "public_member_api_docs": 3
   },
   "tools/dev_tool/lib/web_module_server.dart": {
     "async_return_with_no_await": 2,
@@ -1401,7 +1284,6 @@
     "unnecessary_brace_in_string_interps": 1,
     "unnecessary_null_checks": 4,
     "unnecessary_raw_strings": 1,
-    "unnecessary_type_name_in_constructor": 5,
     "unnecessary_underscores": 2,
     "use_raw_strings": 1
   },
@@ -1411,8 +1293,7 @@
     "missing_whitespace_between_adjacent_strings": 1,
     "public_member_api_docs": 6,
     "sort_constructors_first": 4,
-    "specify_nonobvious_local_variable_types": 21,
-    "unnecessary_type_name_in_constructor": 4
+    "specify_nonobvious_local_variable_types": 21
   },
   "tools/dev_tool/lib/web_pipeline_assembler.dart": {
     "avoid_catches_without_on_clauses": 2,
@@ -1420,8 +1301,7 @@
     "prefer_const_constructors": 1,
     "public_member_api_docs": 12,
     "sort_constructors_first": 4,
-    "specify_nonobvious_local_variable_types": 36,
-    "unnecessary_type_name_in_constructor": 4
+    "specify_nonobvious_local_variable_types": 36
   },
   "tools/dev_tool/test/agent_command_test.dart": {
     "avoid_escaping_inner_quotes": 3,
@@ -1449,8 +1329,7 @@
   },
   "tools/dev_tool/test/asset_bundle_test.dart": {
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 8,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 8
   },
   "tools/dev_tool/test/attach_command_test.dart": {
     "specify_nonobvious_local_variable_types": 6
@@ -1479,13 +1358,11 @@
     "specify_nonobvious_local_variable_types": 12,
     "unnecessary_async": 1,
     "unnecessary_string_interpolations": 1,
-    "unnecessary_type_name_in_constructor": 1,
     "unnecessary_underscores": 3
   },
   "tools/dev_tool/test/cdp_viewport_test.dart": {
     "inference_failure_on_collection_literal": 1,
-    "specify_nonobvious_local_variable_types": 12,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 12
   },
   "tools/dev_tool/test/cli_args_test.dart": {
     "specify_nonobvious_local_variable_types": 1
@@ -1527,14 +1404,12 @@
     "no_raw_types": 5,
     "prefer_const_constructors": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 11,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 11
   },
   "tools/dev_tool/test/device_ios_sim_discovery_test.dart": {
     "cast_nullable_to_non_nullable": 2,
     "prefer_foreach": 1,
-    "specify_nonobvious_local_variable_types": 13,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 13
   },
   "tools/dev_tool/test/device_launcher_test.dart": {
     "async_return_with_no_await": 1,
@@ -1544,8 +1419,7 @@
     "no_raw_types": 3,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 13,
-    "type_annotate_public_apis": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "type_annotate_public_apis": 1
   },
   "tools/dev_tool/test/device_test.dart": {
     "async_return_with_no_await": 1,
@@ -1564,8 +1438,7 @@
     "specify_nonobvious_local_variable_types": 240,
     "unawaited_futures": 1,
     "unnecessary_async": 8,
-    "unnecessary_parenthesis": 1,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_parenthesis": 1
   },
   "tools/dev_tool/test/e2e/agent_e2e_test.dart": {
     "avoid_dynamic_calls": 31,
@@ -1614,7 +1487,6 @@
     "sort_constructors_first": 9,
     "specify_nonobvious_local_variable_types": 73,
     "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 10,
     "use_null_aware_elements": 2,
     "use_raw_strings": 1
   },
@@ -1622,15 +1494,13 @@
     "dangling_library_doc_comments": 1,
     "prefer_constructors_over_static_methods": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 4,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 4
   },
   "tools/dev_tool/test/e2e/editable_workspace.dart": {
     "avoid_escaping_inner_quotes": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 14,
-    "unnecessary_null_checks": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_null_checks": 1
   },
   "tools/dev_tool/test/e2e/editable_workspace_e2e_test.dart": {
     "avoid_escaping_inner_quotes": 3,
@@ -1698,7 +1568,6 @@
     "no_adjacent_strings_in_list": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 64,
-    "unnecessary_type_name_in_constructor": 1,
     "use_raw_strings": 4
   },
   "tools/dev_tool/test/e2e/press_key_e2e_test.dart": {
@@ -1752,7 +1621,6 @@
     "no_raw_types": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 35,
-    "unnecessary_type_name_in_constructor": 1,
     "unnecessary_underscores": 2
   },
   "tools/dev_tool/test/e2e/web_initial_compile_recovery_e2e_test.dart": {
@@ -1804,8 +1672,7 @@
     "prefer_foreach": 4,
     "sort_constructors_first": 10,
     "specify_nonobvious_local_variable_types": 22,
-    "unawaited_futures": 2,
-    "unnecessary_type_name_in_constructor": 10
+    "unawaited_futures": 2
   },
   "tools/dev_tool/test/file_clock_test.dart": {
     "specify_nonobvious_local_variable_types": 2
@@ -1838,8 +1705,7 @@
     "no_raw_types": 1,
     "specify_nonobvious_local_variable_types": 90,
     "unnecessary_async": 6,
-    "unnecessary_string_interpolations": 2,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_string_interpolations": 2
   },
   "tools/dev_tool/test/key_press_test.dart": {
     "avoid_escaping_inner_quotes": 1,
@@ -1848,8 +1714,7 @@
     "use_raw_strings": 1
   },
   "tools/dev_tool/test/logging_test.dart": {
-    "sort_constructors_first": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "sort_constructors_first": 1
   },
   "tools/dev_tool/test/loopbacks.dart": {
     "specify_nonobvious_local_variable_types": 1
@@ -1873,8 +1738,7 @@
     "avoid_redundant_argument_values": 1,
     "dangling_library_doc_comments": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 27,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 27
   },
   "tools/dev_tool/test/native_hot_patch_tool_test.dart": {
     "avoid_escaping_inner_quotes": 2,
@@ -1884,8 +1748,7 @@
   "tools/dev_tool/test/native_hot_patcher_test.dart": {
     "avoid_escaping_inner_quotes": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 9,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 9
   },
   "tools/dev_tool/test/native_image_identity_test.dart": {
     "specify_nonobvious_local_variable_types": 7
@@ -1899,8 +1762,7 @@
     "only_throw_errors": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 34,
-    "unnecessary_string_interpolations": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_string_interpolations": 1
   },
   "tools/dev_tool/test/native_libs_watch_test.dart": {
     "dangling_library_doc_comments": 1,
@@ -1915,8 +1777,7 @@
     "async_return_with_no_await": 1,
     "avoid_redundant_argument_values": 1,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 7,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 7
   },
   "tools/dev_tool/test/outcome_renderer_test.dart": {
     "avoid_escaping_inner_quotes": 3,
@@ -1931,8 +1792,7 @@
   "tools/dev_tool/test/process_group_exec_test.dart": {
     "avoid_redundant_argument_values": 2,
     "sort_constructors_first": 1,
-    "specify_nonobvious_local_variable_types": 17,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_local_variable_types": 17
   },
   "tools/dev_tool/test/readiness_gate_test.dart": {
     "specify_nonobvious_local_variable_types": 2,
@@ -1953,8 +1813,7 @@
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 141,
     "unnecessary_async": 1,
-    "unnecessary_string_interpolations": 1,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_string_interpolations": 1
   },
   "tools/dev_tool/test/reload_strategy_test.dart": {
     "avoid_redundant_argument_values": 1,
@@ -1966,15 +1825,13 @@
     "non_constant_identifier_names": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 99,
-    "unnecessary_string_interpolations": 4,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_string_interpolations": 4
   },
   "tools/dev_tool/test/run_command_lifecycle_test.dart": {
     "dangling_library_doc_comments": 1,
     "directives_ordering": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 21,
-    "unnecessary_type_name_in_constructor": 1,
     "use_null_aware_elements": 1
   },
   "tools/dev_tool/test/run_command_test.dart": {
@@ -2016,8 +1873,7 @@
     "unnecessary_async": 1,
     "unnecessary_lambdas": 2,
     "unnecessary_raw_strings": 1,
-    "unnecessary_string_interpolations": 3,
-    "unnecessary_type_name_in_constructor": 3
+    "unnecessary_string_interpolations": 3
   },
   "tools/dev_tool/test/shutdown_signals_test.dart": {
     "close_sinks": 4
@@ -2029,8 +1885,7 @@
     "prefer_const_constructors": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 11,
-    "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_async": 1
   },
   "tools/dev_tool/test/temp_dir_test.dart": {
     "specify_nonobvious_local_variable_types": 5,
@@ -2062,8 +1917,7 @@
     "discarded_futures": 1,
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 7,
-    "unnecessary_lambdas": 2,
-    "unnecessary_type_name_in_constructor": 2
+    "unnecessary_lambdas": 2
   },
   "tools/dev_tool/test/vm_service_discovery_test.dart": {
     "avoid_redundant_argument_values": 12,
@@ -2071,8 +1925,7 @@
     "dangling_library_doc_comments": 1,
     "no_raw_types": 2,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 33,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 33
   },
   "tools/dev_tool/test/vm_service_logs_test.dart": {
     "specify_nonobvious_local_variable_types": 2,
@@ -2083,8 +1936,7 @@
     "prefer_const_declarations": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 8,
-    "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "unnecessary_async": 1
   },
   "tools/dev_tool/test/wasm_pipeline_assembler_test.dart": {
     "avoid_escaping_inner_quotes": 2,
@@ -2117,7 +1969,6 @@
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 180,
     "unnecessary_async": 1,
-    "unnecessary_type_name_in_constructor": 4,
     "unnecessary_underscores": 2
   },
   "tools/dev_tool/test/web_options_test.dart": {
@@ -2128,8 +1979,7 @@
     "avoid_positional_boolean_parameters": 2,
     "exhaustive_cases": 2,
     "sort_constructors_first": 2,
-    "specify_nonobvious_local_variable_types": 33,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 33
   },
   "tools/dev_tool/test/zip_fixture_test.dart": {
     "prefer_asserts_with_message": 1,
@@ -2140,8 +1990,7 @@
     "avoid_print": 1,
     "avoid_redundant_argument_values": 1,
     "sort_constructors_first": 3,
-    "specify_nonobvious_local_variable_types": 37,
-    "unnecessary_type_name_in_constructor": 3
+    "specify_nonobvious_local_variable_types": 37
   },
   "tools/dev_tool/tool/e2e.dart": {
     "avoid_escaping_inner_quotes": 1,
@@ -2151,15 +2000,13 @@
     "prefer_foreach": 1,
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 21,
-    "unintended_html_in_doc_comment": 1,
-    "unnecessary_type_name_in_constructor": 2
+    "unintended_html_in_doc_comment": 1
   },
   "tools/dev_tool/tool/warm_ios_e2e.dart": {
     "always_put_required_named_parameters_first": 1,
     "avoid_equals_and_hash_code_on_mutable_classes": 4,
     "sort_constructors_first": 4,
-    "specify_nonobvious_local_variable_types": 19,
-    "unnecessary_type_name_in_constructor": 4
+    "specify_nonobvious_local_variable_types": 19
   },
   "tools/incr_kernel_identity/identity.dart": {
     "avoid_catching_errors": 1,
@@ -2168,7 +2015,6 @@
     "prefer_single_quotes": 2,
     "specify_nonobvious_local_variable_types": 31,
     "unnecessary_raw_strings": 2,
-    "unnecessary_type_name_in_constructor": 2,
     "use_raw_strings": 4
   },
   "tools/incr_kernel_identity/incr_kernel_identity.dart": {
@@ -2217,8 +2063,7 @@
   },
   "tools/update_flutter_version/artifact_list.dart": {
     "sort_constructors_first": 1,
-    "specify_nonobvious_property_types": 1,
-    "unnecessary_type_name_in_constructor": 1
+    "specify_nonobvious_property_types": 1
   },
   "tools/update_flutter_version/main.dart": {
     "avoid_print": 13,
@@ -2248,8 +2093,7 @@
     "avoid_print": 19,
     "avoid_redundant_argument_values": 5,
     "comment_references": 1,
-    "specify_nonobvious_local_variable_types": 33,
-    "unnecessary_type_name_in_constructor": 5
+    "specify_nonobvious_local_variable_types": 33
   },
   "tools/vm/create_linux_vm.dart": {
     "avoid_print": 18,
@@ -2302,7 +2146,6 @@
   },
   "tools/vm/vm_e2e.dart": {
     "avoid_positional_boolean_parameters": 2,
-    "specify_nonobvious_local_variable_types": 7,
-    "unnecessary_type_name_in_constructor": 2
+    "specify_nonobvious_local_variable_types": 7
   }
 }

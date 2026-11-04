@@ -30,7 +30,7 @@ class SourceUriResolver {
   /// [appSources] by URI, for the snapshot to stat.
   final Map<String, String> _appSourcePaths;
 
-  SourceUriResolver({
+  new({
     required String workspaceRoot,
     required List<({String name, String libRoot})> sourcePackages,
     List<({String path, String uri})> appSources = const [],

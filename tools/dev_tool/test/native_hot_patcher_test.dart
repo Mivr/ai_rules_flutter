@@ -56,7 +56,7 @@ class FakeApp implements NativePatchTarget {
   /// An extension call that should fail, with the agent's message.
   String? refuseApply;
 
-  FakeApp(this.appId);
+  new(this.appId);
 
   @override
   Future<Map<String, dynamic>?> callExtension(

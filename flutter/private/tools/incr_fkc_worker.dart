@@ -66,7 +66,7 @@ typedef GuardScan = Map<String, List<String>> Function(
 /// any other change of the declared set or roots rescans every source. The
 /// first check scans everything and so seeds the per-source verdicts.
 class GuardCache {
-  GuardCache({GuardScan? scan}) : _scan = scan ?? _defaultScan;
+  new({GuardScan? scan}) : _scan = scan ?? _defaultScan;
 
   final GuardScan _scan;
   Set<String>? _declared;
@@ -131,7 +131,7 @@ class GuardCache {
 
 /// One warm server and the last accepted request behind it.
 class IncrServerState {
-  IncrServerState({
+  new({
     required this.session,
     required this.roots,
     required this.fullDill,
@@ -241,7 +241,7 @@ Future<void> cancelWorkerSignals(
 /// The incremental worker: one [IncrServerState] per configuration key with
 /// an LRU cap on live servers (a warm server holds about 1.75 GiB).
 class IncrWorker {
-  IncrWorker({
+  new({
     String? cwd,
     int? maxServers,
     SessionFactory? sessions,

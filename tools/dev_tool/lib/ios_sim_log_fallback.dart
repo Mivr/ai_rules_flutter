@@ -268,7 +268,7 @@ class SimLogFallback {
   final Logger? logger;
 
   /// The persisted-log fallback for one simulator launch.
-  SimLogFallback({
+  new({
     required this.query,
     required this.runProcess,
     this.pollInterval = defaultSimLogFallbackPollInterval,

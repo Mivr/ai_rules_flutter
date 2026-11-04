@@ -73,7 +73,7 @@ class _Harness {
   final AppliedVersions applied;
   final Workspace workspace;
 
-  _Harness._(
+  new _(
     this.tmp,
     this.appDir,
     this.device,
