@@ -300,6 +300,30 @@ def _flutter_test_assets(ctx, flutter_sdk_info, kernel_dill):
     )
     return flutter_assets
 
+def test_coverage_libraries(package_name, lib_root, main, srcs):
+    """The library URI prefixes a coverage run is scoped to: the test's own code.
+
+    The package prefix first (when there is a `package_name`), then `main`,
+    then `srcs` in the given order, each named as the compile path names it
+    (`app_main_location`). The bootstrap, the golden comparator and every
+    other generated file are not here. No duplicates, no blank entries.
+
+    Args:
+        package_name: The test's Dart package name, or `""`.
+        lib_root: The test's library root, from `derive_lib_root`.
+        main: The test's `main` File.
+        srcs: The test's `srcs` Files.
+
+    Returns:
+        A list of URI strings.
+    """
+    libraries = ["package:%s/" % package_name] if package_name else []
+    for f in [main] + list(srcs):
+        uri = app_main_location(package_name, lib_root, f).uri
+        if uri not in libraries:
+            libraries.append(uri)
+    return libraries
+
 def _flutter_test_run(ctx, artifacts, native_assets):
     # The entrypoint's own `@Tags`, extracted at build time (see
     # `extract_library_tags_action`): the runner injects them as the root
@@ -322,6 +346,12 @@ def _flutter_test_run(ctx, artifacts, native_assets):
             enable_impeller = ctx.attr.enable_impeller,
             include_tags = ctx.attr.include_tags,
             exclude_tags = ctx.attr.exclude_tags,
+            coverage_libraries = test_coverage_libraries(
+                ctx.attr.package_name,
+                derive_lib_root(ctx.label.workspace_root, ctx.label.package),
+                ctx.file.main,
+                ctx.files.srcs,
+            ),
         ),
         user_env = ctx.attr.env,
         data = ctx.attr.data,

@@ -30,7 +30,11 @@ import 'dart:io';
 /// isolates `getVM` just listed are alive by construction — measured at one
 /// isolate, collected without error, on the `hello_coverage_test` path that is
 /// the only coverage run in the repo.
-Future<String> collectCoverage(Uri httpUri) async {
+///
+/// [libraries] scopes the request: URI prefixes passed to the VM as
+/// `libraryFilters`, so only the test's own code is compiled and reported. An
+/// empty list sends no filter and collects every library the VM can see.
+Future<String> collectCoverage(Uri httpUri, List<String> libraries) async {
   final WebSocket ws = await _connectVmServiceWebSocket(httpUri);
   try {
     final rpc = _VmServiceRpc(ws);
@@ -43,6 +47,7 @@ Future<String> collectCoverage(Uri httpUri) async {
         'isolateId': id,
         'reports': const ['Coverage'],
         'forceCompile': true,
+        if (libraries.isNotEmpty) 'libraryFilters': libraries,
       });
       await _formatLcov(report, lines, rpc, id);
     }

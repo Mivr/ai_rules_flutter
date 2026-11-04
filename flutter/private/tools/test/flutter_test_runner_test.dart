@@ -38,6 +38,10 @@ class _FakeVmService {
           final message = json.decode(raw as String) as Map<String, dynamic>;
           final method = message['method'] as String;
           final dynamic id = message['id'];
+          onRequest?.call(
+            method,
+            (message['params'] as Map?)?.cast<String, dynamic>() ?? {},
+          );
           final Map<String, dynamic> Function()? handler = handlers[method];
           if (handler == null) {
             socket.add(
@@ -58,6 +62,9 @@ class _FakeVmService {
   }
 
   final HttpServer _server;
+
+  /// Called with each request's method and params before it is answered.
+  void Function(String method, Map<String, dynamic> params)? onRequest;
 
   /// Keyed by RPC method; each returns the `result`/`error` half of a reply.
   final handlers = <String, Map<String, dynamic> Function()>{};
@@ -100,6 +107,7 @@ Map<String, dynamic> _tokenTable() => {
 
 void main() {
   late _FakeVmService vm;
+  final sourceReportParams = <Map<String, dynamic>>[];
 
   setUp(() async {
     vm = await _FakeVmService.start();
@@ -110,7 +118,11 @@ void main() {
         ],
       },
     };
+    sourceReportParams.clear();
     vm.handlers['getSourceReport'] = _oneScriptReport;
+    vm.onRequest = (method, params) {
+      if (method == 'getSourceReport') sourceReportParams.add(params);
+    };
     vm.handlers['getObject'] = _tokenTable;
   });
 
@@ -119,7 +131,7 @@ void main() {
   group('collectCoverage', () {
     test('renders hits and misses as LCOV line records', () async {
       expect(
-        await coverage.collectCoverage(vm.httpUri),
+        await coverage.collectCoverage(vm.httpUri, const []),
         'SF:/pkg/a.dart\n'
         'DA:5,1\n'
         'DA:7,0\n'
@@ -140,7 +152,7 @@ void main() {
         };
 
         await expectLater(
-          coverage.collectCoverage(vm.httpUri),
+          coverage.collectCoverage(vm.httpUri, const []),
           throwsA(
             isA<StateError>().having(
               (e) => e.message,
@@ -159,7 +171,7 @@ void main() {
       };
 
       await expectLater(
-        coverage.collectCoverage(vm.httpUri),
+        coverage.collectCoverage(vm.httpUri, const []),
         throwsA(
           isA<StateError>().having(
             (e) => e.message,
@@ -184,11 +196,28 @@ void main() {
         };
 
         await expectLater(
-          coverage.collectCoverage(vm.httpUri),
+          coverage.collectCoverage(vm.httpUri, const []),
           throwsA(isA<TypeError>()),
         );
       },
     );
+  });
+
+  group('coverageLibraries', () {
+    test('are sent as libraryFilters, exactly as given', () async {
+      const scope = ['package:pkg/', 'org-dartlang-app:///test/a_test.dart'];
+      await coverage.collectCoverage(vm.httpUri, scope);
+
+      expect(sourceReportParams, hasLength(1));
+      expect(sourceReportParams.single['libraryFilters'], scope);
+    });
+
+    test('an empty list sends no libraryFilters key', () async {
+      await coverage.collectCoverage(vm.httpUri, const []);
+
+      expect(sourceReportParams, hasLength(1));
+      expect(sourceReportParams.single.containsKey('libraryFilters'), isFalse);
+    });
   });
 
   group('--test-randomize-ordering-seed', () {
