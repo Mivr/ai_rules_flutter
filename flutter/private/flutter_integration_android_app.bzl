@@ -4,7 +4,7 @@ Moved out of `flutter_integration_test.bzl` so iOS support can extend that
 file without growing it.
 """
 
-load("//flutter:android.bzl", "ANDROID_MIN_SDK_VERSION", "ANDROID_TARGET_SDK_VERSION")
+load("//flutter/private:constants.bzl", "ANDROID_MIN_SDK_VERSION", "ANDROID_TARGET_SDK_VERSION")
 
 def sanitize_android_package_segment(raw):
     """Sanitizes a string into a valid Java package identifier segment.

@@ -23,8 +23,11 @@ load(
     "validate_chrome_headless_shell_downloads",
 )
 load(
-    "//flutter/private:flutter_integration_test.bzl",
+    "//flutter/private:flutter_integration_test_android.bzl",
     "ANDROID_TEST_EXECUTION_REQUIREMENTS",
+)
+load(
+    "//flutter/private:flutter_integration_test_bootstrap.bzl",
     "make_android_integration_bootstrap_content",
     "make_linux_integration_bootstrap_content",
     "make_web_integration_bootstrap_content",
