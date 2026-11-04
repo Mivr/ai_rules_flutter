@@ -86,6 +86,7 @@ load(":unused_inputs_test.bzl", "unused_inputs_test_suite")
 load(":validation_test.bzl", "validation_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
 load(":web_test.bzl", "web_test_suite")
+load(":xtool_static_xcframework_test.bzl", "xtool_static_xcframework_test_suite")
 
 # The dependency-floor table is read by //flutter/tests:dependency_floors_test
 # and by e2e/min_versions, which resolves the same declared floors.
@@ -462,6 +463,8 @@ toolchains_repo_test_suite(name = "toolchains_repo_test")
 flutter_application_test_suite(name = "flutter_application_test")
 
 flutter_apple_xcframework_import_test_suite(name = "flutter_apple_xcframework_import_test")
+
+xtool_static_xcframework_test_suite(name = "xtool_static_xcframework_test")
 
 native_assets_test_suite(name = "native_assets_test")
 
