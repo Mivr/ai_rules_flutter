@@ -164,7 +164,6 @@ def _collect_extra_apple_libraries(libs, platform, package_name, attr_name):
                     ),
                 )
             platform_name = platform
-        fw_infos = getattr(info, "framework_infos", None)
         entries.append(struct(
             platform = platform_name,
             label = lib.label,
@@ -173,7 +172,7 @@ def _collect_extra_apple_libraries(libs, platform, package_name, attr_name):
             files = lib[DefaultInfo].files,
             sdk_frameworks = tuple(info.sdk_frameworks) if info != None else (),
             sdk_dylibs = tuple(info.sdk_dylibs) if info != None else (),
-            framework_infos = fw_infos if fw_infos != None else depset(),
+            framework_infos = getattr(info, "framework_infos", depset()),
             package = package_name,
         ))
     return entries
