@@ -87,9 +87,10 @@ _DIVISION_PREAMBLES = [
 ]
 
 def _division_test_impl(ctx):
-    """Division and `Pathname#/` never start a regex, before or inside the spec block."""
+    """Division and `Pathname#/` never start a regex, yet a later regex still lexes as one."""
     env = unittest.begin(ctx)
-    for preamble in _DIVISION_PREAMBLES:
+    for division in _DIVISION_PREAMBLES:
+        preamble = division + "\ny = x.to_s.match(/['\"]#/)"
         _assert_read(env, _spec(preamble))
         _assert_read(env, _TAIL_INSIDE.format(line = preamble.replace("\n", "\n  ")))
     return unittest.end(env)
