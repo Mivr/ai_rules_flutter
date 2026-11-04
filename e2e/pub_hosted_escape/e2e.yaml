@@ -24,6 +24,8 @@ commands:
         from: file://FIXTURES_ROOT
         to: file://${WORKSPACE}/fixtures
     run: bazel build //:ok_app
+    expect:
+      exit_code: 0
   - name: refuse escaping hard-link entry
     run: bazel build //:evil_hard_out_app
     expect:

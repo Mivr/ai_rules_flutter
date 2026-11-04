@@ -42,7 +42,13 @@ commands:
       output_contains: but wanted 0000000000000000000000000000000000000000000000000000000000000000
   - name: correct download digest succeeds
     run: bazel fetch @digest_ok_download//...
+    expect:
+      exit_code: 0
   - name: correct extract digest succeeds
     run: bazel fetch @digest_ok_extract//...
+    expect:
+      exit_code: 0
   - name: build fetched ok targets
     run: bazel build @digest_ok_download//:fetched.bin @digest_ok_extract//:hello.txt
+    expect:
+      exit_code: 0

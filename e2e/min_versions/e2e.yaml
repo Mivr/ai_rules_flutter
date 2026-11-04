@@ -3,3 +3,23 @@ commands:
   - name: test all targets
     run: bazel test //... --test_output=errors
     min_tests_executed: 3
+    expect:
+      exit_code: 0
+  - name: pre-0.24.0 rules_dart fails on pub_scc.bzl
+    replace_in_files:
+      - path: MODULE.bazel
+        from: version = "0.24.0", repo_name = "rules_dart"
+        to: version = "0.21.0", repo_name = "rules_dart"
+      - path: MODULE.bazel
+        from: https://github.com/Mivr/ai_rules_dart/releases/download/v0.24.0/rules_dart-v0.24.0.tar.gz
+        to: https://github.com/Mivr/ai_rules_dart/releases/download/v0.21.0/rules_dart-v0.21.0.tar.gz
+      - path: MODULE.bazel
+        from: 754206762da10037166ae6a0cde472584312b22541de3a28d07e500120c609cd
+        to: 2c8796f98b39667be2b258b860e86c8b99ab7837aeec280180221c777ac69a9f
+      - path: MODULE.bazel
+        from: rules_dart-0.24.0
+        to: rules_dart-0.21.0
+    run: bazel query @deps//...
+    expect:
+      non_zero: true
+      output_contains: pub_scc.bzl
