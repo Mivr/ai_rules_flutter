@@ -122,6 +122,9 @@ _UNIT_TESTS = {
     "applied_versions_test": {"deps": _PATH_DEP},
     "asset_bundle_test": {"deps": _PATH_DEP},
     "attach_command_test": {},
+    "attach_e2e_first_read_test": {
+        "data": ["test/e2e/attach_e2e_test.dart"],
+    },
     "bazel_test": {
         "fakes": True,
         "deps": ["@dev_tool_deps//:logging"],
