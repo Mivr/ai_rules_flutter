@@ -452,7 +452,11 @@ void _registerTestXmlExpectationTests() {
         root,
         _xmlFakeBazelBody(p.join(root.path, 'calls.log')),
       );
-      await _runDemo(root, ws, bazel);
+      await expectLater(_runDemo(root, ws, bazel), completes);
+      expect(
+        File(p.join(root.path, 'calls.log')).readAsStringSync(),
+        contains('//:red'),
+      );
     }, skip: Platform.isWindows ? skip : false);
 
     test('names spec, command and the missing substring', () async {
@@ -475,6 +479,10 @@ void _registerTestXmlExpectationTests() {
               .having((e) => e.commandName, 'commandName', 'red twin')
               .having((e) => e.message, 'message', contains('MISSING_X')),
         ),
+      );
+      expect(
+        File(p.join(root.path, 'calls.log')).readAsStringSync(),
+        contains('//:red'),
       );
     }, skip: Platform.isWindows ? skip : false);
   });
@@ -510,7 +518,7 @@ void _registerCommandFilterTests() {
     }
 
     test('runs only the named commands in spec order', () async {
-      final run = start(['third', 'first']);
+      final ({Future<void> done, File calls}) run = start(['third', 'first']);
       await run.done;
       final List<String> calls = run.calls.readAsLinesSync();
       expect(calls, hasLength(3));
@@ -520,7 +528,7 @@ void _registerCommandFilterTests() {
     }, skip: Platform.isWindows ? skip : false);
 
     test('fails closed on an empty filter naming the spec path', () async {
-      final run = start(const []);
+      final ({Future<void> done, File calls}) run = start(const []);
       await expectLater(
         run.done,
         throwsA(
@@ -533,7 +541,7 @@ void _registerCommandFilterTests() {
     }, skip: Platform.isWindows ? skip : false);
 
     test('fails closed on a name that matches no command', () async {
-      final run = start(['first', 'nope']);
+      final ({Future<void> done, File calls}) run = start(['first', 'nope']);
       await expectLater(
         run.done,
         throwsA(
