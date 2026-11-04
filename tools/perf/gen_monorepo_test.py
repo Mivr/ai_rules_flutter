@@ -1141,5 +1141,124 @@ class PathDepStripTest(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+def read_bytes(path):
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+class LockFileStagingTest(unittest.TestCase):
+    """Workspace-local lock_file labels are staged into the workspace."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gen-mono-lock-")
+        self.rules = os.path.join(self.tmp, "rules")
+        self.hello = os.path.join(self.rules, "e2e", "hello_world")
+        os.makedirs(self.hello)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def write(self, rel, data):
+        path = os.path.join(self.hello, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(data)
+
+    def module(self, body):
+        self.write("MODULE.bazel", (
+            "module(name = \"rules_flutter_hello_world\")\n"
+            "local_path_override(\n"
+            "    module_name = \"rules_flutter\",\n"
+            "    path = \"../..\",\n"
+            ")\n" + body
+        ).encode("utf-8"))
+
+    def generate(self, name="ws"):
+        out = os.path.join(self.tmp, name)
+        stats = generate_flutter_monorepo(out, self.rules, [], small_opts())
+        return (out, stats)
+
+    def test_real_checkout_stages_android_maven_lock(self):
+        out = os.path.join(self.tmp, "real")
+        generate_flutter_monorepo(out, REPO_ROOT, [], small_opts())
+        with open(os.path.join(out, "MODULE.bazel"), encoding="utf-8") as fh:
+            self.assertIn(
+                'lock_file = "//:rules_android_maven_install.json"', fh.read())
+        self.assertEqual(
+            read_bytes(os.path.join(out, "rules_android_maven_install.json")),
+            read_bytes(os.path.join(
+                REPO_ROOT, "e2e", "hello_world",
+                "rules_android_maven_install.json")))
+        with open(os.path.join(out, "pubspec.lock"), encoding="utf-8") as fh:
+            self.assertNotIn("source: path", fh.read())
+        out2 = os.path.join(self.tmp, "real2")
+        generate_flutter_monorepo(out2, REPO_ROOT, [], small_opts())
+        self.assertEqual(tree_hash(out), tree_hash(out2))
+
+    def test_stages_each_label_form_with_exact_bytes(self):
+        self.module(
+            "maven.install(lock_file = \"//:rules_android_maven_install.json\")\n"
+            "maven.install(lock_file = \"//maven:extra_install.json\")\n"
+            "maven.install(lock_file = \"@//:at.json\")\n"
+            "maven.install(lock_file = \"@@//:atat.json\")\n"
+            "maven.install(lock_file = \":colon.json\")\n"
+            "maven.install(lock_file = \"//:rules_android_maven_install.json\")\n")
+        blobs = {
+            "rules_android_maven_install.json": b'{"a": 1}\r\n\x00',
+            "maven/extra_install.json": b"extra",
+            "at.json": b"at",
+            "atat.json": b"atat",
+            "colon.json": b"colon",
+        }
+        for rel, data in blobs.items():
+            self.write(rel, data)
+        (out, stats) = self.generate()
+        for rel, data in blobs.items():
+            self.assertEqual(
+                read_bytes(os.path.join(out, *rel.split("/"))), data)
+        plain = os.path.join(self.tmp, "plain")
+        self.module("")
+        base = generate_flutter_monorepo(plain, self.rules, [], small_opts())
+        for key in ("files", "lines", "targets"):
+            self.assertEqual(stats[key], base[key])
+
+    def test_comments_and_external_labels_ignored(self):
+        self.module(
+            "# lock_file = \"//:commented_out.json\"\n"
+            "maven.install(  # lock_file = \"//:trailing.json\"\n"
+            "    lock_file = \"@other_repo//:lock.json\",\n"
+            "    other = \"@@other_repo//pkg:lock.json\",\n"
+            "    lock_file = \"@@other//:l.json\",\n"
+            ")\n")
+        (out, _) = self.generate()
+        self.assertFalse(os.path.exists(os.path.join(out, "commented_out.json")))
+        self.assertFalse(os.path.exists(os.path.join(out, "lock.json")))
+
+    def test_missing_fixture_lockfile_raises(self):
+        self.module(
+            "maven.install(lock_file = \"//:rules_android_maven_install.json\")\n")
+        with self.assertRaises(ValueError) as ctx:
+            self.generate()
+        self.assertIn("rules_android_maven_install.json", str(ctx.exception))
+
+    def test_escaping_or_malformed_labels_raise(self):
+        for label in ("//:../outside.json", "//:", "", "plain.json",
+                      "//pkg", "//:/abs.json", "//../x:y.json", "//:a/../b"):
+            self.module("maven.install(lock_file = \"%s\")\n" % label)
+            with self.assertRaises(ValueError) as ctx:
+                self.generate()
+            self.assertIn(label, str(ctx.exception))
+            shutil.rmtree(os.path.join(self.tmp, "ws"), ignore_errors=True)
+
+    def test_module_without_lock_file_succeeds(self):
+        self.module("maven.install(name = \"x\")\n")
+        (out, _) = self.generate()
+        self.assertFalse(os.path.exists(
+            os.path.join(out, "rules_android_maven_install.json")))
+
+
 if __name__ == "__main__":
     unittest.main()
