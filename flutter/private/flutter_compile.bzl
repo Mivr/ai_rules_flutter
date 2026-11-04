@@ -620,6 +620,25 @@ def _check_kernel_request(ctx, sources, options):
         options.target,
     )
 
+def _add_worker_prefix(args, manifest, incr_worker, dev_incremental):
+    """Adds the incremental worker's argv prefix: param file, mode marker and manifest.
+
+    Does nothing when the compile does not run through the worker.
+
+    Args:
+        args: The action's args object.
+        manifest: The declared-inputs manifest file.
+        incr_worker: Whether the compile runs through the incremental worker.
+        dev_incremental: Whether to add the dev incremental serialization marker.
+    """
+    if not incr_worker:
+        return
+    args.use_param_file("@%s", use_always = True)
+    args.set_param_file_format("multiline")
+    if dev_incremental:
+        args.add("--dev-incremental-serialization")
+    args.add("--declared-inputs", manifest)
+
 def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, resource_set = None):
     """Creates a Flutter kernel compilation action.
 
@@ -676,12 +695,7 @@ def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, 
     manifest = ctx.actions.declare_file(outputs.output.basename + ".flutter_inputs")
     args = ctx.actions.args()
     dev_incremental = _is_dev_incremental(ctx, incr_worker)
-    if incr_worker:
-        args.use_param_file("@%s", use_always = True)
-        args.set_param_file_format("multiline")
-        if dev_incremental:
-            args.add("--dev-incremental-serialization")
-        args.add("--declared-inputs", manifest)
+    _add_worker_prefix(args, manifest, incr_worker, dev_incremental)
     args.add("--")
     args.add(tools.dartaotruntime)
     args.add_all(options.vm_flags)
