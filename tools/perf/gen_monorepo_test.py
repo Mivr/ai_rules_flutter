@@ -1243,6 +1243,15 @@ class LockFileStagingTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             self.generate()
         self.assertIn("rules_android_maven_install.json", str(ctx.exception))
+        self.assertIn("//:rules_android_maven_install.json", str(ctx.exception))
+        self.assertIn(os.path.join("e2e", "hello_world"), str(ctx.exception))
+
+    def test_missing_fixture_error_names_declared_label(self):
+        self.module("maven.install(lock_file = \"@//maven:extra.json\")\n")
+        with self.assertRaises(ValueError) as ctx:
+            self.generate()
+        self.assertIn("@//maven:extra.json", str(ctx.exception))
+        self.assertIn("extra.json", str(ctx.exception))
 
     def test_escaping_or_malformed_labels_raise(self):
         for label in ("//:../outside.json", "//:", "", "plain.json",
