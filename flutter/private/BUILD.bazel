@@ -1468,14 +1468,17 @@ bzl_library(
 bzl_library(
     name = "flutter_ios_xcframework",
     srcs = ["flutter_ios_xcframework.bzl"],
-    visibility = ["//flutter:__subpackages__"],
+    visibility = ["//visibility:public"],
     deps = [
+        ":constants",
         ":flutter_apple_plugins_aggregator",
         ":flutter_ios_application",
         ":flutter_ios_registrant",
         ":ios_app",
         ":validation",
         "//flutter:providers",
+        "@bazel_skylib//lib:dicts",
+        "@rules_swift//swift",
     ],
 )
 

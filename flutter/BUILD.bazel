@@ -321,6 +321,7 @@ bzl_library(
         "//flutter/private:flutter_apple_xcframework_import",
         "//flutter/private:flutter_ios_application",
         "//flutter/private:flutter_ios_registrant",
+        "//flutter/private:flutter_ios_xcframework",
         "//flutter/private:flutter_plist_merge",
         "//flutter/private:flutter_xtool_bundle",
         "//flutter/private:ios_app",
