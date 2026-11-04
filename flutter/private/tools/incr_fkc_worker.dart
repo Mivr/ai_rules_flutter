@@ -21,8 +21,10 @@
 /// declared-inputs manifest, and a failed compile is rejected, so the server
 /// stays at the last good state.
 ///
-/// Change detection reads file contents: request digests are ignored, so a
-/// stale digest never hides a change.
+/// Change detection trusts the SHA-256 digest Bazel sends with each input in
+/// the request, so a warm request does not read every input. An input without
+/// a usable digest is hashed from its contents. The trade-off: a wrong digest
+/// from Bazel silently skips a recompile.
 library;
 
 import 'dart:async';
@@ -339,6 +341,12 @@ class IncrWorker {
     }
   }
 
+  /// The hash of [rel] for change detection: Bazel's request digest when it
+  /// carries a usable one, else the file's contents.
+  String? _inputHash(String rel, Map<String, String> digests) {
+    return normalizeRequestDigest(digests[rel]) ?? _contentHash(rel);
+  }
+
   /// The refusal text for the cumulative read set, or null when clean. Uses
   /// the same messages as the batch path, decided by the manifest alone: a
   /// read under a `--filesystem-root` the argv names but the manifest does
@@ -376,11 +384,13 @@ class IncrWorker {
 
   /// Serves one request: [argv] is the action argv after argv[0]
   /// (`--declared-inputs <manifest> -- <executable> <arguments>`, flagfiles
-  /// already expanded), [inputPaths] the exec-root-relative action inputs.
+  /// already expanded), [inputPaths] the exec-root-relative action inputs and
+  /// [digests] the request's SHA-256 digest for some of those paths.
   Future<IncrResult> handleRequest(
     List<String> argv,
-    List<String> inputPaths,
-  ) async {
+    List<String> inputPaths, {
+    Map<String, String> digests = const {},
+  }) async {
     final RequestParts parts;
     try {
       parts = _parseRequest(argv);
@@ -390,7 +400,7 @@ class IncrWorker {
     final key = configurationKey(parts.fs, sha256Hex);
     var state = _servers[key];
     if (state != null) _touch(key);
-    final hashes = _changeSet(inputPaths, state);
+    final hashes = _changeSet(inputPaths, state, digests);
     final plan = _planCompile(
       state,
       hashes.changed,
@@ -471,16 +481,22 @@ class IncrWorker {
     );
   }
 
-  /// Hashes every input's contents and diffs them against the last accepted
-  /// request's hashes. Contents — never request digests — decide.
+  /// Diffs every input's hash against the last accepted request's hashes.
+  /// Bazel's request digest decides for a path listed in the request that
+  /// carries a usable one (a digest for any other path is ignored); other
+  /// paths are hashed from their contents. Both spellings are lowercase hex,
+  /// so they compare across requests. Trade-off: a wrong digest from Bazel
+  /// silently skips a recompile.
   ({Map<String, String?> current, List<String> changed}) _changeSet(
     List<String> inputPaths,
     IncrServerState? state,
+    Map<String, String> digests,
   ) {
     final stored = state?.contentHashes ?? {};
+    final Set<String> listed = inputPaths.toSet();
     final current = <String, String?>{};
     for (final p in {...inputPaths, ...stored.keys}) {
-      current[p] = _contentHash(p);
+      current[p] = _inputHash(p, listed.contains(p) ? digests : const {});
     }
     final changed = [
       for (final p in current.keys)
@@ -648,6 +664,31 @@ Future<int> runOneShotWorker(
   }
 }
 
+/// Lowercase hex of a SHA-256 [digest] as Bazel sends it (hex or base64), or
+/// null when it is absent, empty or not 32 bytes.
+String? normalizeRequestDigest(String? digest) {
+  if (digest == null || digest.isEmpty) return null;
+  if (RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(digest)) {
+    return digest.toLowerCase();
+  }
+  try {
+    final List<int> bytes = base64.decode(base64.normalize(digest));
+    if (bytes.length != 32) return null;
+    return [for (final b in bytes) b.toRadixString(16).padLeft(2, '0')].join();
+  } on FormatException {
+    return null; // Not base64: the caller hashes the contents instead.
+  }
+}
+
+/// The non-empty `digest` strings of a request's `inputs`, keyed by path.
+Map<String, String> requestDigests(List<Map<String, dynamic>> inputs) {
+  return {
+    for (final i in inputs)
+      if (i['digest'] is String && (i['digest'] as String).isNotEmpty)
+        i['path'] as String: i['digest'] as String,
+  };
+}
+
 /// Serves Bazel JSON persistent-worker requests on stdin/stdout. Returns when
 /// stdin closes, after closing every server and deleting the worker's temp
 /// directory, so no `incr_fkc_*` directory survives the worker.
@@ -673,18 +714,23 @@ Future<void> runPersistentWorker({
       final rawArgs = [
         for (final a in (req['arguments'] as List<dynamic>? ?? [])) a as String,
       ];
-      final inputs = [
+      final List<Map<String, dynamic>> reqInputs = [
         for (final i in (req['inputs'] as List<dynamic>? ?? []))
-          (i as Map<String, dynamic>)['path'] as String,
+          i as Map<String, dynamic>,
       ];
+      final List<String> inputs = [
+        for (final i in reqInputs) i['path'] as String,
+      ];
+      final Map<String, String> digests = requestDigests(reqInputs);
       int code;
       String response;
       try {
-        // Request digests are only a hint: change detection reads file
-        // contents, so a stale digest never hides a change.
+        // Request digests decide the recompile; a wrong digest from Bazel
+        // silently skips a recompile. Inputs without one are hashed.
         final result = await worker.handleRequest(
           expandWorkerFlagfiles(stripWorkerArgv0(rawArgs)),
           inputs,
+          digests: digests,
         );
         code = result.exitCode;
         response = result.output;
