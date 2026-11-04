@@ -120,7 +120,7 @@ void main() {
       }
       expect(free, contains('skip: '));
       expect(free, contains('cannot remove'));
-      expect(free, contains('exit "\$status"'));
+      expect(free, contains(r'exit "$status"'));
       expect(free, contains('df -h /'));
     });
     test('keeps the Android SDK the rules discover through ANDROID_HOME', () {
@@ -155,7 +155,7 @@ void main() {
               s.contains('label: $label\n') &&
               s.contains('if: always()\n'),
         );
-        var previous = at('before first workspace');
+        int previous = at('before first workspace');
         expect(previous, greaterThan(1), reason: 'no report before workspaces');
         for (final w in workspaces) {
           final int run = steps.indexWhere(
