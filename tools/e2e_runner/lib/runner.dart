@@ -301,7 +301,7 @@ Future<void> runE2e(E2eRunnerOptions options) async {
       environment: childEnv,
       isWindows: win,
     );
-    _deleteScratchTree(scratchRoot);
+    deleteScratchTree(scratchRoot);
   }
 }
 
@@ -669,12 +669,50 @@ Future<void> _shutdownScratchBazel({
   }
 }
 
-void _deleteScratchTree(Directory scratchRoot) {
+/// Deletes [scratchRoot], the per-workspace scratch tree of one e2e run.
+///
+/// Bazel makes its output base read-only (external repositories, execroot), so
+/// a plain recursive delete fails and would leak the whole tree, several GB per
+/// workspace. The tree is made writable first, without following symlinks. A
+/// delete that still fails is reported on stderr with the path and the error.
+void deleteScratchTree(Directory scratchRoot) {
+  if (!scratchRoot.existsSync()) {
+    return;
+  }
   try {
-    if (scratchRoot.existsSync()) {
-      scratchRoot.deleteSync(recursive: true);
-    }
-  } on FileSystemException {
-    // Best-effort scratch cleanup after `bazel shutdown` releases locks.
+    _makeTreeWritable(scratchRoot);
+    scratchRoot.deleteSync(recursive: true);
+  } on FileSystemException catch (e) {
+    stderr.writeln(
+      'warning: e2e_runner could not delete scratch tree '
+      '${scratchRoot.path}: $e',
+    );
+  } on ProcessException catch (e) {
+    stderr.writeln(
+      'warning: e2e_runner could not delete scratch tree '
+      '${scratchRoot.path}: $e',
+    );
+  }
+}
+
+/// Adds owner read, write and search permission to every entry under [root]
+/// (and [root] itself) so it can be deleted. `chmod -R` and `attrib /S /D` do
+/// not follow symlinks.
+void _makeTreeWritable(Directory root) {
+  final ProcessResult result = Platform.isWindows
+      ? Process.runSync('cmd', <String>[
+          '/c',
+          'attrib',
+          '-r',
+          p.join(root.path, '*'),
+          '/s',
+          '/d',
+        ])
+      : Process.runSync('chmod', <String>['-R', 'u+rwx', root.path]);
+  if (result.exitCode != 0) {
+    stderr.writeln(
+      'warning: e2e_runner could not make ${root.path} writable '
+      '(exit ${result.exitCode}): ${result.stderr}',
+    );
   }
 }

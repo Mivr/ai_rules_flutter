@@ -13,6 +13,7 @@ void main() {
   _registerClientResolutionTests();
   _registerGreenExecutionTests();
   _registerFailureAndShutdownTests();
+  _registerScratchDeletionTests();
 }
 
 String _writeFakeBazel(Directory dir, String scriptBody) {
@@ -362,5 +363,27 @@ commands:
       },
       skip: Platform.isWindows ? 'POSIX /bin/sh fake bazel fixture' : false,
     );
+  });
+}
+
+void _registerScratchDeletionTests() {
+  test('deleteScratchTree removes a tree with read-only directories', () {
+    if (Platform.isWindows) {
+      return;
+    }
+    final Directory root = Directory.systemTemp.createTempSync('scratch_del_');
+    final Directory outputBase = Directory(
+      p.join(root.path, 'ob', 'external', 'repo'),
+    )..createSync(recursive: true);
+    File(p.join(outputBase.path, 'file.txt')).writeAsStringSync('x');
+    Process.runSync('chmod', <String>['-R', 'a-w', p.join(root.path, 'ob')]);
+    addTearDown(() {
+      if (root.existsSync()) {
+        Process.runSync('chmod', <String>['-R', 'u+rwx', root.path]);
+        root.deleteSync(recursive: true);
+      }
+    });
+    deleteScratchTree(root);
+    expect(root.existsSync(), isFalse);
   });
 }
