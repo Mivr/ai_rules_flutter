@@ -44,6 +44,7 @@ const Map<String, List<String>> _externalRuleTargets = <String, List<String>>{
   '@rules_apple//apple:apple.bzl': ['@rules_apple//apple:apple'],
   '@rules_apple//apple:ios.bzl': ['@rules_apple//apple:ios'],
   '@rules_apple//apple:macos.bzl': ['@rules_apple//apple:macos'],
+  '@rules_apple//apple:providers.bzl': ['@rules_apple//apple:providers'],
   '@rules_apple//apple:resources.bzl': ['@rules_apple//apple:resources'],
   '@rules_apple//apple:versioning.bzl': ['@rules_apple//apple:versioning'],
   '@rules_cc//cc:action_names.bzl': ['@rules_cc//cc:action_names_bzl'],

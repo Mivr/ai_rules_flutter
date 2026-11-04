@@ -26,6 +26,7 @@ load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_d
 load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter:providers.bzl", _FlutterApplePluginInfo = "FlutterApplePluginInfo")
+load(":flutter_apple_framework_modulemap.bzl", "apple_framework_modulemap_import")
 load(
     ":flutter_apple_plugin_defines.bzl",
     "plugin_objc_copts",
@@ -99,10 +100,15 @@ def _emit_xtool_plugin_branch(spec):
     )
 
 def _emit_apple_framework_import(spec):
-    """Emit the Flutter engine framework import target for the `rules_apple` backend."""
+    """Emit the Flutter engine framework import target for the `rules_apple` backend.
+
+    The raw import is wrapped so its `Modules/module.modulemap` reaches
+    `CcInfo` headers and `@import Flutter;` resolves in a sandboxed compile.
+    """
+    raw = "%s_raw" % spec.framework_target
     if spec.platform == "macos":
         apple_dynamic_framework_import(
-            name = spec.framework_target,
+            name = raw,
             framework_imports = spec.engine_imports,
             tags = spec.internal_tags,
             target_compatible_with = spec.target_compatible_with,
@@ -110,12 +116,19 @@ def _emit_apple_framework_import(spec):
         )
     else:
         apple_dynamic_xcframework_import(
-            name = spec.framework_target,
+            name = raw,
             xcframework_imports = spec.engine_imports,
             tags = spec.internal_tags,
             target_compatible_with = spec.target_compatible_with,
             visibility = ["//visibility:private"],
         )
+    apple_framework_modulemap_import(
+        name = spec.framework_target,
+        dep = ":" + raw,
+        tags = spec.internal_tags,
+        target_compatible_with = spec.target_compatible_with,
+        visibility = ["//visibility:private"],
+    )
 
 def _emit_plugin_objc_target(spec, objc_files, headers):
     """Emit the inner `objc_library`; return `(objc_module_name, dep_label_or_None)`."""
@@ -182,6 +195,7 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
         sdk_frameworks = spec.sdk_frameworks,
         weak_sdk_frameworks = spec.weak_sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
+        enable_modules = True,
         copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
         deps = [":" + spec.framework_target] + swift_deps,
         tags = spec.internal_tags,

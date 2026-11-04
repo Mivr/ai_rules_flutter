@@ -19,6 +19,7 @@ Usage:
 """
 
 load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_dynamic_xcframework_import", "apple_static_framework_import", "apple_static_xcframework_import")
+load(":flutter_apple_framework_modulemap.bzl", "apple_framework_modulemap_import")
 load(":flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import")
 
 _XCFRAMEWORK_SUFFIX = ".xcframework"
@@ -187,10 +188,11 @@ def _emit_rules_apple_branch(spec):
             _emit_error(spec.rules_apple_name, _dynamic_error(offending))
             return
 
+    raw = "%s__raw_import" % spec.rules_apple_name
     if spec.shape == "xcframework":
         if spec.linkage == "static":
             apple_static_xcframework_import(
-                name = spec.rules_apple_name,
+                name = raw,
                 tags = ["manual"],
                 alwayslink = spec.alwayslink,
                 sdk_dylibs = spec.sdk_dylibs,
@@ -200,13 +202,13 @@ def _emit_rules_apple_branch(spec):
             )
         else:
             apple_dynamic_xcframework_import(
-                name = spec.rules_apple_name,
+                name = raw,
                 tags = ["manual"],
                 xcframework_imports = [spec.framework],
             )
     elif spec.linkage == "static":
         apple_static_framework_import(
-            name = spec.rules_apple_name,
+            name = raw,
             tags = ["manual"],
             alwayslink = spec.alwayslink,
             framework_imports = [spec.framework],
@@ -216,10 +218,16 @@ def _emit_rules_apple_branch(spec):
         )
     else:
         apple_dynamic_framework_import(
-            name = spec.rules_apple_name,
+            name = raw,
             tags = ["manual"],
             framework_imports = [spec.framework],
         )
+    apple_framework_modulemap_import(
+        name = spec.rules_apple_name,
+        dep = ":" + raw,
+        tags = ["manual"],
+        visibility = ["//visibility:private"],
+    )
 
 def _emit_xtool_branch(spec):
     """Declare the xtool import target for any shape and linkage.
