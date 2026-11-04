@@ -7,6 +7,8 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("//flutter:native_assets.bzl", "flutter_data_asset", "flutter_native_asset", "flutter_native_assets_manifest")
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo", "FlutterNativeAssetInfo")
+
+# buildifier: disable=bzl-visibility
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 load(":rule_coverage.bzl", "expect_action", "expect_default_outputs", "expect_no_actions")
 
