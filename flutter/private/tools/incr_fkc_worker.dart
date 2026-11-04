@@ -415,7 +415,6 @@ class IncrWorker {
       parts.manifest,
       roots,
       guard,
-      hashes.current,
     );
     if (guardError != null) {
       return (exitCode: 1, output: guardError);
@@ -522,19 +521,22 @@ class IncrWorker {
   }
 
   /// Runs the directive guard before the compiler on every request: any
-  /// changed `.dart` file invalidates its content-digest cache. Returns the
+  /// changed `.dart` file (by its contents, read here) invalidates its
+  /// content-digest cache. Returns the
   /// refusal text, or null when the sources are clean.
   String? _checkGuard(
     KernelInputsManifest manifest,
     List<String> roots,
     GuardCache guard,
-    Map<String, String?> current,
   ) {
     final dartSources = [
       for (final p in manifest.sources)
         if (p.endsWith('.dart')) p,
     ];
-    final errors = guard.check(dartSources, roots, current);
+    // The guard's cache key comes from the sources' own contents, never from
+    // the request digests that decide the recompile.
+    final contents = {for (final p in dartSources) p: _contentHash(p)};
+    final errors = guard.check(dartSources, roots, contents);
     if (errors.isEmpty) return null;
     return errors.join('\n');
   }
