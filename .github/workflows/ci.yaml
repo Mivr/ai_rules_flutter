@@ -231,22 +231,11 @@ jobs:
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
           mkdir -p "$dir"
           echo "build --disk_cache=$dir" >> ~/.bazelrc
-      - name: bazel test //... (e2e/smoke)
-        working-directory: e2e/smoke
-        run: bazel test //... --test_output=errors
-      # Compile-soundness red path (cross-module): the entrypoint imports a
-      # sibling that is never declared, so executing the compile must fail
-      # on the guard's refusal. Manual so `//...` stays green; the grep pins
-      # the guard message so a crash or a skipped check cannot pass as red.
-      - name: Undeclared-import compile fails on the guard refusal
-        working-directory: e2e/smoke
-        run: |
-          if out=$(bazel build //:consumer_negative 2>&1); then
-            echo "$out"
-            echo "expected the undeclared-import compile to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F "is not a declared input"
+      # The e2e/smoke spec runs `bazel test //...` and the cross-module
+      # undeclared-import compile negative (`//:consumer_negative` must fail on
+      # the guard refusal); //tools/e2e_runner enforces both.
+      - name: Run e2e/smoke
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/smoke --bazel=bazel
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -374,160 +363,27 @@ jobs:
               fi
             done
           done
-      # Digest red path: e2e/digest_mismatch fetches a real engine artifact
-      # (sky_engine.zip) with a deliberately wrong checksum. The fetch must
-      # fail, and the failure must be Bazel's checksum comparison — the grep
-      # pins the exact error so a 404 or a refactor that skips the download
-      # cannot pass as red.
-      - name: Wrong-digest fetch fails on the checksum comparison
-        working-directory: e2e/digest_mismatch
-        run: |
-          if out=$(bazel fetch @red_sky_engine//... 2>&1); then
-            echo "$out"
-            echo "expected the wrong-digest fetch to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F "but wanted 0000000000000000000000000000000000000000000000000000000000000000"
-      # Pinned-helper red paths: e2e/digest_mismatch fetches committed
-      # fixture files through file:// URLs (no network) with one repo per
-      # digest shape. Bad digests must fail on the helper's message (which
-      # names the URL) or on the checksum comparison; correct digests must
-      # succeed and produce the fixture bytes.
-      - name: Pinned-helper digests fail closed on file fixtures
-        working-directory: e2e/digest_mismatch
-        run: |
-          expect_fail() {
-            if out=$(bazel fetch "@$1//..." 2>&1); then
-              echo "$out"
-              echo "expected @$1 fetch to fail, but it succeeded"
-              exit 1
-            fi
-            echo "$out" | grep -F "$2" || {
-              echo "$out"
-              echo "expected @$1 failure to mention [$2]"
-              exit 1
-            }
-          }
-          expect_fail digest_empty "sha256 must be exactly 64 lowercase hex characters"
-          expect_fail digest_short "sha256 must be exactly 64 lowercase hex characters"
-          expect_fail digest_upper "sha256 must be exactly 64 lowercase hex characters"
-          expect_fail digest_sri "sha256 must be exactly 64 lowercase hex characters"
-          expect_fail digest_conditional "sha256 must be exactly 64 lowercase hex characters"
-          expect_fail digest_wrong_download "but wanted 0000000000000000000000000000000000000000000000000000000000000000"
-          expect_fail digest_wrong_extract "but wanted 0000000000000000000000000000000000000000000000000000000000000000"
-          bazel fetch @digest_ok_download//... || {
-            echo "expected the correct-digest download fetch to succeed"
-            exit 1
-          }
-          bazel fetch @digest_ok_extract//... || {
-            echo "expected the correct-digest extract fetch to succeed"
-            exit 1
-          }
-          bazel build @digest_ok_download//:fetched.bin @digest_ok_extract//:hello.txt
-      # Xtool red path: e2e/xtool_sdk_invalid opts into `flutter.darwin_sdk`
-      # with a bundle path that does not exist. The fetch must fail on that
-      # path — before any LLVM download starts — so an opting-in consumer
-      # with a bad path gets the configuration error rather than an LLVM
-      # resolution error. The grep pins the exact error so an LLVM failure
-      # or a refactor that skips the path check cannot pass as red.
-      - name: Invalid xtool SDK path fails on the path
-        working-directory: e2e/xtool_sdk_invalid
-        run: |
-          if out=$(bazel fetch @flutter_xtool_darwin_sdk//... 2>&1); then
-            echo "$out"
-            echo "expected the invalid-SDK-path fetch to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F "configured darwin.artifactbundle path '/nonexistent/darwin.artifactbundle' does not exist"
-      # Pubspec-shape red path: e2e/pub_flutter_shape_red carries a path
-      # package whose pubspec says `assets: assets/a.png` (a string where
-      # flutter_tools requires a list). The spoke fetch must fail on the
-      # shape refusal instead of bundling no assets with a green build.
-      # The grep pins the exact refusal so a skip or a differently-worded
-      # failure cannot pass as red.
-      - name: Malformed flutter.assets fetch fails on the shape refusal
-        working-directory: e2e/pub_flutter_shape_red
-        run: |
-          if out=$(bazel fetch @red_deps//:bad_shape 2>&1); then
-            echo "$out"
-            echo "expected the malformed-assets fetch to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F 'Expected "assets" to be a list'
-      # Font-shape red path: e2e/pub_flutter_shape_red also carries a path
-      # package whose pubspec declares a font `weight: 150` (flutter_tools
-      # only accepts 100..900). The spoke fetch must fail on the weight
-      # refusal naming `pubspec.yaml` line 18 instead of bundling the font
-      # with an unset weight. Both greps pin the refusal and its line so a
-      # skip or a differently-worded failure cannot pass as red.
-      - name: Invalid font weight fetch fails on the weight refusal
-        working-directory: e2e/pub_flutter_shape_red
-        run: |
-          if out=$(bazel fetch @red_deps//:bad_font 2>&1); then
-            echo "$out"
-            echo "expected the invalid-weight fetch to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F 'for font -> weight'
-          echo "$out" | grep -F 'pubspec.yaml line 18'
-      # SDK-constraint red path: e2e/pub_flutter_shape_red also carries a
-      # path package whose pubspec declares `environment.sdk: "3.10"` (a
-      # string pub_semver refuses). The spoke fetch must fail on the sdk
-      # refusal naming the package, its pubspec.yaml and environment.sdk
-      # instead of deriving a default language version. Both greps pin the
-      # refusal so a skip or a differently-worded failure cannot pass as
-      # red.
-      - name: Unreadable environment.sdk fetch fails on the sdk refusal
-        working-directory: e2e/pub_flutter_shape_red
-        run: |
-          if out=$(bazel fetch @red_deps//:bad_sdk 2>&1); then
-            echo "$out"
-            echo "expected the bad-sdk fetch to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F 'bad_sdk in bad_sdk/pubspec.yaml: invalid environment.sdk constraint "3.10"'
-      # SDK-type red path: e2e/pub_flutter_shape_red also carries a path
-      # package whose pubspec declares a non-string `environment.sdk: 3.5`.
-      # The spoke fetch must fail on the same sdk refusal. Both greps pin
-      # the refusal so a skip or a differently-worded failure cannot pass
-      # as red.
-      - name: Non-string environment.sdk fetch fails on the sdk refusal
-        working-directory: e2e/pub_flutter_shape_red
-        run: |
-          if out=$(bazel fetch @red_deps//:bad_sdk_type 2>&1); then
-            echo "$out"
-            echo "expected the non-string-sdk fetch to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F 'bad_sdk_type in bad_sdk_type/pubspec.yaml: invalid environment.sdk constraint "3.5"'
-      # Podfile.lock evaluation red path: e2e/podfile_lock_red carries a
-      # tab-indented Podfile.lock fixture. Hub registration must fail on the
-      # reader's tab refusal at evaluation, before toolchain selection or
-      # download. Both greps pin the refusal and line so a skip or an unlocated
-      # error cannot pass as red.
-      - name: Tab-indented Podfile.lock fails at hub evaluation
-        working-directory: e2e/podfile_lock_red
-        run: |
-          if out=$(bazel query @red_deps//... 2>&1); then
-            echo "$out"
-            echo "expected the tab-indented Podfile.lock query to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F "Podfile.lock line 2"
-          echo "$out" | grep -F "an indentation tab is not part of the Podfile.lock YAML subset rules_flutter reads"
+      # Digest red paths: e2e/digest_mismatch pins each failing fetch to its
+      # checksum or shape diagnostic, then proves the correct digests build.
+      - name: Run e2e/digest_mismatch
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/digest_mismatch --bazel=bazel
+      # Xtool red path: the invalid darwin.artifactbundle path must fail on the
+      # path diagnostic before any LLVM download starts.
+      - name: Run e2e/xtool_sdk_invalid
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/xtool_sdk_invalid --bazel=bazel
+      # Pubspec-shape red paths: each malformed pubspec fails on its own refusal.
+      - name: Run e2e/pub_flutter_shape_red
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/pub_flutter_shape_red --bazel=bazel
+      # Podfile.lock evaluation red path: the tab-indented fixture fails at hub
+      # evaluation on the reader's tab refusal.
+      - name: Run e2e/podfile_lock_red
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/podfile_lock_red --bazel=bazel
       # CocoaPods unmapped pod red path: deps_pods_unmapped carries no mapping
       # and no ignore entry for BigInt, so querying the spoke fails at fetch
-      # time with Message 11.
-      - name: CocoaPods unmapped pod fails at fetch time (e2e/integration_ios)
-        working-directory: e2e/integration_ios
-        run: |
-          if out=$(bazel query @deps_pods_unmapped__pod_bigint_plugin//:all 2>&1); then
-            echo "$out"
-            echo "expected the unmapped CocoaPods spoke query to fail, but it succeeded"
-            exit 1
-          fi
-          echo "$out" | grep -F 'Flutter plugin "pod_bigint_plugin" depends on pod "BigInt" (6.0.1 in '
-          echo "$out" | grep -F ':ios/Podfile.lock), which no Bazel target provides. Map it with flutter.pub(ios_pod_deps = {"BigInt": "<label>"}) or declare it unneeded with flutter.pub(ios_pod_ignore = ["BigInt"]).'
+      # time. Only this portable command runs here; the macOS simulator
+      # commands of the spec run in full.yaml.
+      - name: Run e2e/integration_ios (CocoaPods unmapped pod red path)
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_ios --command="CocoaPods unmapped pod red path" --bazel=bazel
       # Compile-soundness red path: the entrypoint imports a sibling that
       # exists on disk but is never declared, so executing the compile must
       # fail on the guard's refusal — never with a built dill. The target is
@@ -610,31 +466,11 @@ jobs:
               exit 1
             fi
           done
-      # Maven lock enforcement red path: changing an artifact version in an
-      # Android workspace's rules_android_maven install while keeping its
-      # checked-in lock must fail fetch on rules_jvm_external's input signature
-      # check, proving the lock is enforced.
-      - name: Modified rules_android_maven install fails on invalid input signature
-        run: |
-          tmp_ws="$PWD/e2e/hello_world_tmp"
-          rm -rf "$tmp_ws"
-          trap '(cd "$tmp_ws" 2>/dev/null && bazel shutdown) >/dev/null 2>&1 || true; rm -rf "$tmp_ws"' EXIT
-          cp -r e2e/hello_world "$tmp_ws"
-          sed -i 's/"androidx.privacysandbox.tools:tools:1.0.0-alpha06"/"androidx.privacysandbox.tools:tools:1.0.0-alpha07"/' "$tmp_ws/MODULE.bazel"
-          grep -Fq '"androidx.privacysandbox.tools:tools:1.0.0-alpha07"' "$tmp_ws/MODULE.bazel"
-          if out=$(cd "$tmp_ws" && bazel fetch @rules_android_maven//:all 2>&1); then
-            echo "$out"
-            echo "expected fetch with changed artifact version to fail, but it succeeded"
-            exit 1
-          fi
-          if ! echo "$out" | grep -F "invalid input signature"; then
-            echo "$out"
-            echo "expected fetch to fail with rules_jvm_external invalid input signature"
-            exit 1
-          fi
-          (cd "$tmp_ws" && bazel shutdown)
-          rm -rf "$tmp_ws"
-          trap - EXIT
+      # Maven lock enforcement red path: changing an artifact version in the
+      # staged hello_world workspace while keeping its checked-in lock must
+      # fail fetch on rules_jvm_external's input signature check.
+      - name: Run e2e/hello_world (Maven lock red path)
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/hello_world --command="modified rules_android_maven install fails on invalid input signature" --bazel=bazel
       # Release archive loading at min_versions floors: prove every package
       # shipped in the release archive (including @rules_flutter//lint) loads
       # cleanly against the declared floor graph.
@@ -647,32 +483,10 @@ jobs:
           (cd e2e/min_versions && bazel shutdown) >/dev/null 2>&1 || true
           rm -rf "$archive_dir"
           trap - EXIT
-      # Pre-0.24.0 red path: lowering ai_rules_dart to v0.21.0 must fail
-      # on the missing pub_scc.bzl symbol.
-      - name: Pre-0.24.0 rules_dart fails on pub_scc.bzl
-        run: |
-          tmp_ws="$(mktemp -d "$PWD/e2e/_min_versions_red.XXXXXX")"
-          trap '(cd "$tmp_ws" 2>/dev/null && bazel shutdown) >/dev/null 2>&1 || true; rm -rf "$tmp_ws"' EXIT
-          cp -R e2e/min_versions/. "$tmp_ws/"
-          rm -f "$tmp_ws"/bazel-*
-          sed -i 's/version = "0.24.0", repo_name = "rules_dart"/version = "0.21.0", repo_name = "rules_dart"/' "$tmp_ws/MODULE.bazel"
-          sed -i 's|https://github.com/Mivr/ai_rules_dart/releases/download/v0.24.0/rules_dart-v0.24.0.tar.gz|https://github.com/Mivr/ai_rules_dart/releases/download/v0.21.0/rules_dart-v0.21.0.tar.gz|' "$tmp_ws/MODULE.bazel"
-          sed -i 's/754206762da10037166ae6a0cde472584312b22541de3a28d07e500120c609cd/2c8796f98b39667be2b258b860e86c8b99ab7837aeec280180221c777ac69a9f/' "$tmp_ws/MODULE.bazel"
-          sed -i 's/rules_dart-0.24.0/rules_dart-0.21.0/' "$tmp_ws/MODULE.bazel"
-          grep -Fq "rules_dart-v0.21.0.tar.gz" "$tmp_ws/MODULE.bazel"
-          if out=$(cd "$tmp_ws" && bazel query @deps//... 2>&1); then
-            echo "$out"
-            echo "expected pre-0.24.0 rules_dart query to fail, but it succeeded"
-            exit 1
-          fi
-          if ! echo "$out" | grep -F "pub_scc.bzl"; then
-            echo "$out"
-            echo "expected query failure to mention pub_scc.bzl"
-            exit 1
-          fi
-          (cd "$tmp_ws" && bazel shutdown) >/dev/null 2>&1 || true
-          rm -rf "$tmp_ws"
-          trap - EXIT
+      # Pre-0.24.0 red path: lowering ai_rules_dart to v0.21.0 in the staged
+      # min_versions workspace must fail on the missing pub_scc.bzl symbol.
+      - name: Run e2e/min_versions (pre-0.24.0 rules_dart red path)
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/min_versions --command="pre-0.24.0 rules_dart fails on pub_scc.bzl" --bazel=bazel
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -761,28 +575,11 @@ jobs:
           fi
       - name: Run e2e/codegen
         run: bazel run //tools/e2e_runner -- --workspace=e2e/codegen --bazel=bazel
-      # Red path for release signing: the wrong-password twin of the
-      # release-signed app must fail in apksigner (not in analysis), proving
-      # the keystore attributes reach the signing action. grep -F pins the
-      # failure to apksigner's wrong-password message rather than any other
-      # error; a passing build fails the job.
       - name: Disk report (after e2e/codegen)
         if: always()
         uses: ./.github/actions/disk-report
         with:
           label: after e2e/codegen
-      - name: Release signing red path (wrong keystore password)
-        run: |
-          cd e2e/hello_world
-          set +e
-          bazel build :hello_world_android_release_wrong_password > /tmp/wrong-pass.log 2>&1
-          rc=$?
-          set -e
-          if [ $rc -eq 0 ]; then
-            echo "expected the wrong-password build to fail"
-            exit 1
-          fi
-          grep -F 'keystore password was incorrect' /tmp/wrong-pass.log
       # Real-compiler proof that a warm incremental worker's dill is
       # byte-for-byte the one-shot compile's, over an edit sequence on
       # e2e/hello_world. Fails the job on any difference. Timed so the
@@ -905,29 +702,11 @@ jobs:
             git status --porcelain -- e2e/dual_hub
             exit 1
           fi
-      - name: pub_hosted_escape hosted archives refuse link escapes
-        working-directory: e2e/pub_hosted_escape
-        run: |
-          trap 'git checkout -- locks/' EXIT
-          sed -i "s|file://FIXTURES_ROOT|file://$PWD/fixtures|" locks/*.lock
-          bazel build //:ok_app
-          check_refusal() {
-            if bazel build "//:$1_app" 2>refusal.log; then
-              echo "expected //:$1_app to fail, but it built"
-              exit 1
-            fi
-            grep -F -q "$2" refusal.log || {
-              echo "//:$1_app failed without the expected diagnostic:"
-              cat refusal.log
-              exit 1
-            }
-          }
-          check_refusal evil_hard_out 'pub package "evil_hard_out": hard-link "lib/evil.dart" points at "../../outside.txt"'
-          check_refusal evil_hard_in 'pub package "evil_hard_in": hard-link "lib/evil.dart" points at "lib/ok.dart"'
-          check_refusal evil_abs 'pub package "evil_abs": symlink "lib/evil.dart" escapes the package (points at "/etc/passwd")'
-          check_refusal evil_esc 'pub package "evil_esc": symlink "lib/evil.dart" escapes the package (points at "../../outside.txt")'
-          check_refusal evil_path_abs 'pub package "evil_path_abs": entry "/abs.dart" escapes the package'
-          check_refusal evil_path_dotdot 'pub package "evil_path_dotdot": entry "../outside.dart" escapes the package'
+      # pub_hosted_escape: the staged lock fixtures point at the local archives;
+      # the ok app builds and each hostile archive is refused with its
+      # per-package diagnostic.
+      - name: Run e2e/pub_hosted_escape
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/pub_hosted_escape --bazel=bazel
       # Lazy Android path: the Dart build must resolve the plugin's spoke
       # without reading its Gradle build (which names an unmapped coordinate),
       # and reaching the hub's Android aggregator must then fail closed on
