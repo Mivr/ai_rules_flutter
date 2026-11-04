@@ -421,6 +421,49 @@ test_suite(
     tests = [":plugin_objc_dep_headers_build_test"],
 )
 
+# `@import Flutter;` and `@import TinyPluginKit;` in sandboxed `.m` compiles.
+# Each plugin is built for iOS from the macOS host, as above.
+plugin_ios_build(
+    name = "plugin_import_flutter_ios_build",
+    target = "//plugin_import_flutter:pure_objc_plugin",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+plugin_ios_build(
+    name = "plugin_import_flutter_local_ios_build",
+    target = "//plugin_import_flutter:local_objc_plugin",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+plugin_ios_build(
+    name = "plugin_import_flutter_mixed_ios_build",
+    target = "//plugin_import_flutter:mixed_plugin",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+plugin_ios_build(
+    name = "plugin_import_flutter_xcframework_ios_build",
+    target = "//plugin_import_flutter:xcframework_plugin",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+build_test(
+    name = "plugin_import_flutter_build_test",
+    size = "small",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [
+        ":plugin_import_flutter_ios_build",
+        ":plugin_import_flutter_local_ios_build",
+        ":plugin_import_flutter_mixed_ios_build",
+        ":plugin_import_flutter_xcframework_ios_build",
+    ],
+)
+
+test_suite(
+    name = "plugin_import_flutter_test",
+    tests = [":plugin_import_flutter_build_test"],
+)
+
 flutter_ios_simulator_build_test(
     name = "ios_app_build_test",
     size = "small",

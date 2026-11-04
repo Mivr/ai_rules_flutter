@@ -496,26 +496,27 @@ def _mixed_plugin_swift_header_test_impl(ctx):
     )
     return analysistest.end(env)
 
-def _mixed_plugin_objc_input_test_impl(ctx):
-    """The ObjC half compiles against the Swift module's generated header.
+def _assert_modulemap_in_headers(env, tut, suffix):
+    """The framework's module map is among `CcInfo` headers, so a sandbox stages it."""
+    paths = [h.path for h in tut[CcInfo].compilation_context.headers.to_list()]
+    asserts.true(
+        env,
+        any([path.endswith(suffix) for path in paths]),
+        "Expected a header ending with %s in %s CcInfo headers, got: %s" % (suffix, tut.label, paths),
+    )
 
-    Starlark's view of an analysis action (`action.inputs`) lists the source
-    and module-map inputs the rule declares directly, not the headers the
-    C++ rules pull from `CcCompilationContext` when they form the final
-    compile command (`bazel aquery` shows those). So this test proves the
-    observable facts the compile command is built from: the ObjC target's
-    CcInfo carries the Swift module's generated header, the header's
-    directory is a quote include path (so the plain-basename `#import`
-    resolves from a source `.m`), and the target registers an ObjC compile
-    action for its `.m` source.
+def _assert_objc_compiles_with_modules(env, tut):
+    """Every ObjC compile of the target carries `-fmodules`, so `@import` parses."""
+    compiles = [a for a in analysistest.target_actions(env) if a.mnemonic == "ObjcCompile"]
+    for action in compiles:
+        asserts.true(
+            env,
+            "-fmodules" in action.argv,
+            "Expected -fmodules in the ObjcCompile argv of %s, got: %s" % (tut.label, action.argv),
+        )
 
-    A dependency may export a header with the same basename from another
-    directory; only the Swift module's own header may contribute a quote
-    include path, so the test also pins that the dependency's directory is
-    not one. `excluded_quote_include_suffix` names it.
-    """
-    env = analysistest.begin(ctx)
-    tut = analysistest.target_under_test(env)
+def _assert_swift_header_reachable(env, tut, ctx):
+    """The Swift module's generated header is reachable and the target compiles `.m`."""
     header_files = [
         f
         for f in tut[CcInfo].compilation_context.headers.to_list()
@@ -574,6 +575,31 @@ def _mixed_plugin_objc_input_test_impl(ctx):
             [action.mnemonic for action in analysistest.target_actions(env)],
         ),
     )
+
+def _mixed_plugin_objc_input_test_impl(ctx):
+    """The ObjC half compiles against the Swift module's generated header.
+
+    Starlark's view of an analysis action (`action.inputs`) lists the source
+    and module-map inputs the rule declares directly, not the headers the
+    C++ rules pull from `CcCompilationContext` when they form the final
+    compile command (`bazel aquery` shows those). So this test proves the
+    observable facts the compile command is built from: the ObjC target's
+    CcInfo carries the Swift module's generated header, the header's
+    directory is a quote include path (so the plain-basename `#import`
+    resolves from a source `.m`), and the target registers an ObjC compile
+    action for its `.m` source.
+
+    A dependency may export a header with the same basename from another
+    directory; only the Swift module's own header may contribute a quote
+    include path, so the test also pins that the dependency's directory is
+    not one. `excluded_quote_include_suffix` names it.
+    """
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    _assert_modulemap_in_headers(env, tut, ctx.attr.expected_modulemap_suffix)
+    _assert_objc_compiles_with_modules(env, tut)
+    if ctx.attr.expected_header_basename:
+        _assert_swift_header_reachable(env, tut, ctx)
     return analysistest.end(env)
 
 def _apple_plugin_public_test_impl(ctx):
@@ -595,6 +621,7 @@ def _apple_plugin_public_test_impl(ctx):
     asserts.equals(env, ctx.attr.expected_sdk_dylibs, list(info.sdk_dylibs))
     asserts.true(env, len(tut[DefaultInfo].files.to_list()) > 0, "Expected output files")
 
+    _assert_modulemap_in_headers(env, tut, ctx.attr.expected_modulemap_suffix)
     headers = [h.basename for h in tut[CcInfo].compilation_context.headers.to_list()]
     for expected in ctx.attr.expected_header_basenames:
         asserts.true(
@@ -885,7 +912,8 @@ _ios_mixed_plugin_objc_input_test = analysistest.make(
     _mixed_plugin_objc_input_test_impl,
     attrs = {
         "excluded_quote_include_suffix": attr.string(),
-        "expected_header_basename": attr.string(mandatory = True),
+        "expected_header_basename": attr.string(),
+        "expected_modulemap_suffix": attr.string(mandatory = True),
     },
     config_settings = _IOS_APPLE_PLUGIN_TEST_SETTINGS,
 )
@@ -893,6 +921,7 @@ _ios_apple_plugin_public_test = analysistest.make(
     _apple_plugin_public_test_impl,
     attrs = {
         "expected_header_basenames": attr.string_list(mandatory = True),
+        "expected_modulemap_suffix": attr.string(mandatory = True),
         "expected_module_name": attr.string(mandatory = True),
         "expected_platform": attr.string(mandatory = True),
         "expected_sdk_dylibs": attr.string_list(mandatory = True),
@@ -910,7 +939,8 @@ _macos_mixed_plugin_objc_input_test = analysistest.make(
     _mixed_plugin_objc_input_test_impl,
     attrs = {
         "excluded_quote_include_suffix": attr.string(),
-        "expected_header_basename": attr.string(mandatory = True),
+        "expected_header_basename": attr.string(),
+        "expected_modulemap_suffix": attr.string(mandatory = True),
     },
     config_settings = _MACOS_APPLE_PLUGIN_TEST_SETTINGS,
 )
@@ -918,6 +948,7 @@ _macos_apple_plugin_public_test = analysistest.make(
     _apple_plugin_public_test_impl,
     attrs = {
         "expected_header_basenames": attr.string_list(mandatory = True),
+        "expected_modulemap_suffix": attr.string(mandatory = True),
         "expected_module_name": attr.string(mandatory = True),
         "expected_platform": attr.string(mandatory = True),
         "expected_sdk_dylibs": attr.string_list(mandatory = True),
@@ -951,8 +982,10 @@ def _apple_plugin_analysis_tests(
     header = fixtures.mixed_module + "-Swift.h"
     if platform == "ios":
         platform_framework = "UIKit/UIKit.h"
+        modulemap = "Flutter.framework/Modules/module.modulemap"
     elif platform == "macos":
         platform_framework = "AppKit/AppKit.h"
+        modulemap = "FlutterMacOS.framework/Modules/module.modulemap"
     else:
         fail("apple_plugin_fixtures: platform must be 'ios' or 'macos', got '%s'" % platform)
     swift_header_name = name + "_mixed_swift_header"
@@ -969,6 +1002,7 @@ def _apple_plugin_analysis_tests(
         name = objc_input_name,
         target_under_test = ":_" + fixtures.mixed + "__objc",
         expected_header_basename = header,
+        expected_modulemap_suffix = modulemap,
     )
     objc_input_test(
         name = shadow_objc_input_name,
@@ -976,15 +1010,38 @@ def _apple_plugin_analysis_tests(
         target_under_test = ":_" + fixtures.shadow_mixed + "__objc",
         expected_header_basename = fixtures.shadow_module + "-Swift.h",
         excluded_quote_include_suffix = fixtures.shadow_header_dir,
+        expected_modulemap_suffix = modulemap,
     )
     public_test(
         name = public_name,
         target_under_test = ":" + fixtures.mixed,
         expected_header_basenames = [fixtures.mixed + ".h", header],
+        expected_modulemap_suffix = modulemap,
         expected_module_name = fixtures.mixed_module,
         expected_platform = platform,
         expected_sdk_dylibs = ["sqlite3"],
         expected_sdk_frameworks = ["AVFoundation"],
+    )
+    pure_objc_headers_name = name + "_pure_objc_modulemap_headers"
+    objc_input_test(
+        name = pure_objc_headers_name,
+        size = "small",
+        target_under_test = ":_" + fixtures.pure_objc + "__objc",
+        expected_modulemap_suffix = modulemap,
+    )
+    objc_module_headers_name = name + "_mixed_objc_module_modulemap_headers"
+    objc_input_test(
+        name = objc_module_headers_name,
+        size = "small",
+        target_under_test = ":_" + fixtures.mixed + "__objc_module",
+        expected_modulemap_suffix = modulemap,
+    )
+    pure_objc_public_name = name + "_pure_objc_modulemap_public"
+    objc_input_test(
+        name = pure_objc_public_name,
+        size = "small",
+        target_under_test = ":" + fixtures.pure_objc,
+        expected_modulemap_suffix = modulemap,
     )
     _apple_plugin_bridging_copts_test(
         name = bridging_name,
@@ -997,12 +1054,14 @@ def _apple_plugin_analysis_tests(
 
     pure_swift_kinds = {
         fixtures.pure_swift: "swift_library",
-        "_" + fixtures.pure_swift + "__flutter_framework": framework_kind,
+        "_" + fixtures.pure_swift + "__flutter_framework": "apple_framework_modulemap_import",
+        "_" + fixtures.pure_swift + "__flutter_framework_raw": framework_kind,
     }
     pure_objc_kinds = {
         "_" + fixtures.pure_objc + "__swift_placeholder": "_write_file",
         "_" + fixtures.pure_objc + "__objc": "objc_library",
-        "_" + fixtures.pure_objc + "__flutter_framework": framework_kind,
+        "_" + fixtures.pure_objc + "__flutter_framework": "apple_framework_modulemap_import",
+        "_" + fixtures.pure_objc + "__flutter_framework_raw": framework_kind,
         fixtures.pure_objc: "swift_library",
     }
     mixed_kinds = {
@@ -1010,7 +1069,8 @@ def _apple_plugin_analysis_tests(
         "_" + fixtures.mixed + "__swift": "swift_library",
         "_" + fixtures.mixed + "__swift_include": "_swift_generated_header_include",
         "_" + fixtures.mixed + "__objc": "objc_library",
-        "_" + fixtures.mixed + "__flutter_framework": framework_kind,
+        "_" + fixtures.mixed + "__flutter_framework": "apple_framework_modulemap_import",
+        "_" + fixtures.mixed + "__flutter_framework_raw": framework_kind,
         fixtures.mixed: "flutter_apple_plugin_bundle",
     }
     attrs_name = name + "_mixed_swift_attrs"
@@ -1044,6 +1104,9 @@ def _apple_plugin_analysis_tests(
         objc_input_name,
         shadow_objc_input_name,
         public_name,
+        pure_objc_headers_name,
+        objc_module_headers_name,
+        pure_objc_public_name,
         bridging_name,
         attrs_name,
         surface_name,

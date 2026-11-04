@@ -10,6 +10,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@rules_apple//apple:providers.bzl", "AppleDynamicFrameworkInfo", "AppleFrameworkImportInfo")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
+load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:ios.bzl", "flutter_apple_xcframework_import")
 load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
 
@@ -33,7 +34,9 @@ def _xtool_config(platform):
 _XTOOL_IOS = _xtool_config("ios")
 
 _MACOS_RULES_APPLE = {
+    "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
     "//command_line_option:platforms": str(Label("//flutter/platforms:macos_arm64")),
+    "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
     str(Label("//flutter/settings:apple_backend")): "rules_apple",
 }
 
@@ -139,6 +142,13 @@ def _apple_import_test_impl(ctx):
             ctx.attr.expected_dynamic,
             tut.label,
         ),
+    )
+    asserts.true(env, SwiftInfo in tut, "Expected SwiftInfo on %s" % tut.label)
+    paths = [h.path for h in tut[CcInfo].compilation_context.headers.to_list()]
+    asserts.true(
+        env,
+        any([path.endswith("TinyKit.framework/Modules/module.modulemap") for path in paths]),
+        "Expected TinyKit.framework/Modules/module.modulemap in CcInfo headers, got %s" % paths,
     )
     return analysistest.end(env)
 
@@ -305,7 +315,7 @@ def _declare_xtool_tests(name):
     return tests
 
 def _declare_rules_apple_tests(name):
-    """Declare the macOS-only provider cases.
+    """Declare the `rules_apple` provider cases, which also run on Linux.
 
     Args:
         name: Prefix for the targets.
@@ -322,7 +332,6 @@ def _declare_rules_apple_tests(name):
                 name = test,
                 target_under_test = ":" + target,
                 expected_dynamic = linkage == "dynamic",
-                target_compatible_with = ["@platforms//os:macos"],
             )
             tests.append(test)
     return tests

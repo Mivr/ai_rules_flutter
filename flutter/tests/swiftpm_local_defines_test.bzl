@@ -44,6 +44,12 @@ def _objc_define_argv_test_impl(ctx):
     tut = analysistest.target_under_test(env)
     asserts.true(env, CcInfo in tut, "Expected CcInfo on %s" % tut.label)
     if CcInfo in tut:
+        paths = [h.path for h in tut[CcInfo].compilation_context.headers.to_list()]
+        asserts.true(
+            env,
+            any([path.endswith("Flutter.framework/Modules/module.modulemap") for path in paths]),
+            "Flutter's module map missing from CcInfo headers: %s" % paths,
+        )
         defines = tut[CcInfo].compilation_context.defines.to_list()
         for name in ["LOCAL_C_DEF", "PERMISSION_CAMERA", "PLUGIN_FLAG"]:
             asserts.false(
