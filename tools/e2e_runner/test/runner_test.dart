@@ -372,7 +372,7 @@ void _registerScratchDeletionTests() {
       return;
     }
     final Directory root = Directory.systemTemp.createTempSync('scratch_del_');
-    final Directory outputBase = Directory(
+    final outputBase = Directory(
       p.join(root.path, 'ob', 'external', 'repo'),
     )..createSync(recursive: true);
     File(p.join(outputBase.path, 'file.txt')).writeAsStringSync('x');
