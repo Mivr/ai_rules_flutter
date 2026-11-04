@@ -341,6 +341,9 @@ class _Harness {
   WebSocket? _ws;
   bool _socketClosed = false;
 
+  /// Started when [run] begins; the coverage bound is measured against it.
+  final Stopwatch _clock = Stopwatch();
+
   /// Per-channel inbound dispatchers, keyed by inputId.
   final Map<int, void Function(Object?)> _inbound = {};
 
@@ -430,6 +433,7 @@ class _Harness {
   /// Runs [run] against the combined kernel [effectiveDill] [_runOnce]
   /// prepared (the base `.dill` pre-appended when the rule shares one).
   Future<int> run(FlutterTestRun run, String effectiveDill) async {
+    _clock.start();
     final enableVmService = run.coverageOutput != null;
     _process = await _spawnTester(
       _testerCommand(
@@ -484,6 +488,7 @@ class _Harness {
     // Collect coverage before tearing the tester down — the isolate must still
     // be alive when we fetch source reports.
     final coverageError = await _collectCoverage(
+      elapsed: _clock.elapsed,
       enableVmService: enableVmService,
       coverageVmServiceUri: coverageVmServiceUri,
       coverageOutput: run.coverageOutput,
@@ -763,9 +768,11 @@ class _Harness {
   /// Returns the failure to report, or null when there is nothing to report.
   /// Bounded: a VM service that stops answering mid-collection would
   /// otherwise park here until Bazel's outer test timeout, killed with no
-  /// reason given. Measured at ~2s for the whole Flutter framework (958
-  /// scripts), so the bound is headroom, not a deadline.
+  /// reason given. The bound is what is left of the test's `TEST_TIMEOUT`
+  /// budget after [elapsed] ([coverageBound]), so a loaded machine that
+  /// slows the collection is not failed while the test still had budget.
   static Future<String?> _collectCoverage({
+    required Duration elapsed,
     required bool enableVmService,
     required Uri? coverageVmServiceUri,
     required String? coverageOutput,
@@ -781,7 +788,9 @@ class _Harness {
           .collectCoverage(
             coverageVmServiceUri,
           )
-          .timeout(const Duration(minutes: 2));
+          .timeout(
+            coverageBound(Platform.environment['TEST_TIMEOUT'], elapsed),
+          );
       // Every healthy run yields at least the bootstrap's own record, so an
       // empty report means collection reached no source at all. Writing it
       // would produce exactly the green-test-with-empty-LCOV outcome the

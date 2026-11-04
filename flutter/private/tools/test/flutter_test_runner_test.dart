@@ -417,6 +417,41 @@ void main() {
     });
   });
 
+  group('coverageBound', () {
+    Duration bound(String? t, int elapsedSeconds) =>
+        support.coverageBound(t, Duration(seconds: elapsedSeconds));
+
+    test('is the whole ceiling at zero elapsed', () {
+      expect(bound('1200', 0), support.testCeiling('1200'));
+      expect(bound('1200', 0).inSeconds, 1140);
+    });
+
+    test('is the ceiling minus the elapsed time', () {
+      expect(bound('1200', 1100), const Duration(seconds: 40));
+      expect(bound('1200', 600), const Duration(seconds: 540));
+      expect(bound('1200', 600), lessThan(support.testCeiling('1200')));
+    });
+
+    test('is one second once the budget is used up', () {
+      const one = Duration(seconds: 1);
+      expect(bound('1200', 1140), one);
+      expect(bound('1200', 5000), one);
+    });
+
+    test('falls back to five minutes without a usable TEST_TIMEOUT', () {
+      for (final String? t in [null, '', 'not-a-number', '0']) {
+        expect(bound(t, 0), const Duration(minutes: 5), reason: '$t');
+      }
+    });
+
+    test('subtracts the elapsed time exactly', () {
+      expect(
+        bound('1200', 200) - bound('1200', 300),
+        const Duration(seconds: 100),
+      );
+    });
+  });
+
   group('cleanupQuietly', () {
     test('runs the action and swallows a filesystem race', () {
       var ran = false;
