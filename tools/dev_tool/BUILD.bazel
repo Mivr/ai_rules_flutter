@@ -30,6 +30,7 @@ dart_library(
 
 dart_binary(
     name = "flutter_bazel",
+    package_name = "flutter_bazel_dev_tool",
     srcs = glob(["lib/**/*.dart"]),
     compile_mode = "exe",
     # iOS device screenshots (pymobiledevice3) work from any host, so they are
@@ -52,7 +53,6 @@ dart_binary(
     }),
     defines = ["RUNFILES_SOURCE_REPO=" + SOURCE_REPO],
     main = "bin/flutter_bazel.dart",
-    package_name = "flutter_bazel_dev_tool",
     visibility = ["//visibility:public"],
     deps = _LIB_DEPS,
 )
