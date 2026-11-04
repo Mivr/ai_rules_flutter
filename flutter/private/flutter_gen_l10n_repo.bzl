@@ -56,7 +56,7 @@ applies is a loud failure, where a rewrite would quietly drift.
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download_and_extract")
-load("//flutter/private:local_sdk.bzl", "copy_local_file", "read_local_sdk_version", "resolve_local_sdk_root")
+load("//flutter/private:local_sdk.bzl", "copy_local_text_file", "read_local_sdk_version", "resolve_local_sdk_root")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
 # edges are cut. Listed explicitly rather than globbed: the subset boundary is
@@ -109,13 +109,10 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
         sdk_root = resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", ""))
         version = read_local_sdk_version(repository_ctx, sdk_root).flutter_version
         for src in _SUBSET_SRCS:
-            repository_ctx.file(src + ".keep", "")
-            repository_ctx.delete(src + ".keep")
-        for src in _SUBSET_SRCS:
-            copy_local_file(
+            copy_local_text_file(
                 repository_ctx,
                 str(sdk_root.get_child("packages/flutter_tools/" + src)),
-                str(repository_ctx.path(src)),
+                src,
                 "the gen-l10n subset file " + src,
             )
     else:

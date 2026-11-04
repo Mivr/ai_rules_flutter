@@ -73,6 +73,7 @@ load(":pubspec_errors_test.bzl", "pubspec_errors_test_suite")
 load(":rules_dart_floor_test.bzl", "rules_dart_floor_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shader_keys_test.bzl", "shader_keys_test_suite")
+load(":starlark_hygiene_test.bzl", "starlark_hygiene_test_suite")
 load(":starlark_literal_test.bzl", "starlark_literal_test_suite")
 load(":swiftpm_local_defines_test.bzl", "swiftpm_local_defines_test_suite")
 load(":swiftpm_local_refusal_test.bzl", "swiftpm_local_refusal_test_suite")
@@ -467,6 +468,8 @@ linux_sysroot_link_test_suite(name = "linux_sysroot_link_test")
 language_version_test_suite(name = "language_version_test")
 
 local_sdk_test_suite(name = "local_sdk_test")
+
+starlark_hygiene_test_suite(name = "starlark_hygiene_test")
 
 profile_mode_test_suite(name = "profile_mode_test")
 

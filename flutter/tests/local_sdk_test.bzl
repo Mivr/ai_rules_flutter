@@ -9,7 +9,10 @@ failure messages whose placeholders once rendered literally.
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 
 # buildifier: disable=bzl-visibility
-load("//flutter/private:local_sdk.bzl", "copy_failed_message", "engine_cache_dir", "host_engine_cache_dir", "macos_framework_cache_path", "missing_local_file_message", "missing_local_source_message")
+load("//flutter/private:flutter_sky_engine_repo.bzl", "scan_local_files")
+
+# buildifier: disable=bzl-visibility
+load("//flutter/private:local_sdk.bzl", "copy_failed_message", "engine_cache_dir", "host_engine_cache_dir", "local_sdk_vm_environment", "local_sdk_vm_path", "macos_framework_cache_path", "missing_local_file_message", "missing_local_source_message")
 load("//flutter/private:versions.bzl", "unknown_version_message")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
@@ -144,6 +147,62 @@ def _copy_failed_message_test_impl(ctx):
     asserts.true(env, "{err}" not in message)
     return unittest.end(env)
 
+def _fake_file(name):
+    """A fake non-directory `readdir` entry (a file or a file symlink)."""
+    return struct(basename = name, is_dir = False, realpath = "/real/" + name)
+
+def _fake_dir(name, entries, real = None):
+    """A fake directory entry whose `readdir` lists `entries`."""
+    return struct(
+        basename = name,
+        is_dir = True,
+        realpath = real or "/real/" + name,
+        readdir = lambda: entries,
+    )
+
+def _fake_root(entries):
+    """A fake walk root listing `entries`."""
+    return _fake_dir("root", entries, "/real/root")
+
+def _scan_local_files_test_impl(ctx):
+    """Checks the walk's nested, symlinked and sorted output."""
+    env = unittest.begin(ctx)
+    root = _fake_root([
+        _fake_dir("b", [_fake_file("z.dart"), _fake_dir("deep", [_fake_file("y.dart")])]),
+        _fake_file("link.dart"),
+        _fake_dir("a", [_fake_file("x.dart")]),
+    ])
+    result = scan_local_files(root, "lib", "/sdk/lib")
+    asserts.equals(env, "", result.error)
+    asserts.equals(env, ["a/x.dart", "b/deep/y.dart", "b/z.dart", "link.dart"], result.files)
+    return unittest.end(env)
+
+def _scan_local_files_failures_test_impl(ctx):
+    """Checks the empty, step-bound and cycle failures."""
+    env = unittest.begin(ctx)
+    chain = _fake_root([_fake_dir("d", [_fake_dir("e", [_fake_file("f")])])])
+    empty = scan_local_files(_fake_root([_fake_dir("d", [])]), "the lib", "/sdk/lib")
+    asserts.true(env, "listed no files under the lib (/sdk/lib)" in empty.error, empty.error)
+    bound = scan_local_files(chain, "the lib", "/sdk/lib", 2)
+    asserts.true(env, "the lib (/sdk/lib) exceeded 2 directories" in bound.error, bound.error)
+    asserts.equals(env, ["d/e/f"], scan_local_files(chain, "the lib", "/sdk/lib", 3).files)
+    loop = _fake_root([_fake_dir("loop", [_fake_dir("again", [], "/real/root")])])
+    cycle = scan_local_files(loop, "the lib", "/sdk/lib")
+    asserts.true(env, "directory symlink cycle at loop/again" in cycle.error, cycle.error)
+    return unittest.end(env)
+
+def _vm_selection_test_impl(ctx):
+    """Checks the bundled VM choice and its scrubbed environment."""
+    env = unittest.begin(ctx)
+    present = lambda *names: struct(get_child = lambda n: struct(exists = n in names, name = n))
+    asserts.equals(env, "dartvm", local_sdk_vm_path(present("dartvm", "dart"), False).name)
+    asserts.equals(env, "dart", local_sdk_vm_path(present("dart"), False).name)
+    asserts.equals(env, "dartvm.exe", local_sdk_vm_path(present("dartvm.exe", "dart.exe"), True).name)
+    asserts.equals(env, "dart.exe", local_sdk_vm_path(present("dart.exe"), True).name)
+    asserts.equals(env, {"HOME": ""}, local_sdk_vm_environment(False))
+    asserts.equals(env, {"USERPROFILE": "", "LOCALAPPDATA": ""}, local_sdk_vm_environment(True))
+    return unittest.end(env)
+
 _t0_test = unittest.make(_engine_cache_dir_test_impl)
 _t1_test = unittest.make(_host_engine_cache_dir_test_impl)
 _t2_test = unittest.make(_macos_framework_cache_path_test_impl)
@@ -151,6 +210,21 @@ _t3_test = unittest.make(_missing_local_source_message_test_impl)
 _t4_test = unittest.make(_unknown_version_message_test_impl)
 _t5_test = unittest.make(_missing_local_file_message_test_impl)
 _t6_test = unittest.make(_copy_failed_message_test_impl)
+_t7_test = unittest.make(_scan_local_files_test_impl)
+_t8_test = unittest.make(_scan_local_files_failures_test_impl)
+_t9_test = unittest.make(_vm_selection_test_impl)
 
 def local_sdk_test_suite(name):
-    small_unittest_suite(name, _t0_test, _t1_test, _t2_test, _t3_test, _t4_test, _t5_test, _t6_test)
+    small_unittest_suite(
+        name,
+        _t0_test,
+        _t1_test,
+        _t2_test,
+        _t3_test,
+        _t4_test,
+        _t5_test,
+        _t6_test,
+        _t7_test,
+        _t8_test,
+        _t9_test,
+    )

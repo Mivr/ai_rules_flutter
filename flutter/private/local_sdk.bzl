@@ -268,41 +268,93 @@ def copy_failed_message(src, what, err):
         err = err,
     )
 
-def copy_local_file(repository_ctx, src, dst, what):
-    """Stages one SDK file as a repo-owned copy, without network or listing.
+def local_sdk_vm_path(sdk_bin, is_windows):
+    """Resolves the local SDK's bundled Dart VM inside its `bin` directory.
+
+    Args:
+        sdk_bin: The SDK's `bin` directory path.
+        is_windows: Whether the fetching host is Windows.
+
+    Returns:
+        The `dartvm` (`dartvm.exe`) path when present, else `dart` (`dart.exe`).
+    """
+    names = ["dartvm.exe", "dart.exe"] if is_windows else ["dartvm", "dart"]
+    for name in names:
+        candidate = sdk_bin.get_child(name)
+        if candidate.exists:
+            return candidate
+    return sdk_bin.get_child(names[-1])
+
+def local_sdk_vm_environment(is_windows):
+    """The scrubbed environment for running the local SDK's Dart VM.
+
+    Args:
+        is_windows: Whether the fetching host is Windows.
+
+    Returns:
+        Environment overrides that blank the user's home-directory variables.
+    """
+    if is_windows:
+        return {"USERPROFILE": "", "LOCALAPPDATA": ""}
+    return {"HOME": ""}
+
+def copy_local_file(repository_ctx, sdk_bin, src, dst, what, executable):
+    """Stages one SDK file as a repo-owned copy, without network or host tools.
 
     Symlinks cannot be patched or rewritten in place without writing through
     into the user's SDK tree, so files the fetch must modify (the dartdev AOT
-    snapshot, the gen-l10n subset) are copied instead. The source is watched,
-    so an SDK edit refetches the repository. The destination's parent
-    directories must already exist (a `repository_ctx.file` placeholder creates
-    them).
+    snapshot) or must own (the `dart` launcher) are copied instead. The copy
+    runs `copy_local_file.dart` on the SDK's own bundled Dart VM, so binary
+    bytes survive and no `cp` or `cmd` is needed. The source is watched, so an
+    SDK edit refetches the repository. The destination's parent directories
+    must already exist.
+
+    Args:
+        repository_ctx: The repository rule context.
+        sdk_bin: The local SDK's `bin` directory path, holding the Dart VM.
+        src: Absolute source path string inside the local SDK.
+        dst: Absolute destination path string inside the repository.
+        what: Human-readable description for the failure message.
+        executable: Whether the copy is made executable (`0755`, else `0644`).
+    """
+    src_path = repository_ctx.path(src)
+    if not src_path.exists:
+        fail(missing_local_file_message(src, what))
+    repository_ctx.watch(src_path)
+    is_windows = "windows" in repository_ctx.os.name.lower()
+    result = repository_ctx.execute(
+        [
+            str(local_sdk_vm_path(sdk_bin, is_windows)),
+            "--packages=" + str(repository_ctx.path(Label("//flutter/private/dartdev_patch:empty.json"))),
+            str(repository_ctx.path(Label("//flutter/private/tools:copy_local_file.dart"))),
+            src,
+            dst,
+            "true" if executable else "false",
+        ],
+        environment = local_sdk_vm_environment(is_windows),
+    )
+    if result.return_code != 0:
+        fail(copy_failed_message(src, what, result.stderr.strip()))
+
+def copy_local_text_file(repository_ctx, src, dst_rel, what):
+    """Stages one UTF-8 text SDK file as a repo-owned copy in pure Starlark.
+
+    For trimmed SDK fixtures that carry no bundled Dart VM. The source is
+    watched, so an SDK edit refetches the repository.
 
     Args:
         repository_ctx: The repository rule context.
         src: Absolute source path string inside the local SDK.
-        dst: Absolute destination path string inside the repository.
+        dst_rel: Destination path relative to the repository root.
         what: Human-readable description for the failure message.
     """
     src_path = repository_ctx.path(src)
     if not src_path.exists:
         fail(missing_local_file_message(src, what))
     repository_ctx.watch(src_path)
-    if "windows" in repository_ctx.os.name.lower():
-        result = repository_ctx.execute([
-            "cmd",
-            "/c",
-            "copy",
-            "/y",
-            src.replace("/", "\\"),
-            dst.replace("/", "\\"),
-        ])
-    else:
-        result = repository_ctx.execute(["cp", src, dst])
-    if result.return_code != 0:
-        fail(copy_failed_message(src, what, result.stderr.strip()))
+    repository_ctx.file(dst_rel, repository_ctx.read(src_path), executable = False)
 
-def _stage_sdk_snapshots(repository_ctx, sdk_snapshots):
+def _stage_sdk_snapshots(repository_ctx, sdk_bin, sdk_snapshots):
     """Stages the Dart `bin/snapshots` directory: symlinks plus one copy.
 
     Every snapshot is a symlink into the SDK except
@@ -312,6 +364,7 @@ def _stage_sdk_snapshots(repository_ctx, sdk_snapshots):
 
     Args:
         repository_ctx: The repository rule context.
+        sdk_bin: The SDK's `bin` directory path, holding the Dart VM.
         sdk_snapshots: The SDK's `bin/snapshots` directory path.
     """
     for entry in sdk_snapshots.readdir():
@@ -319,9 +372,11 @@ def _stage_sdk_snapshots(repository_ctx, sdk_snapshots):
         if name == "dartdev_aot.dart.snapshot":
             copy_local_file(
                 repository_ctx,
+                sdk_bin,
                 str(entry),
                 str(repository_ctx.path("dart-sdk/bin/snapshots/" + name)),
                 "the dartdev AOT snapshot",
+                False,
             )
         else:
             repository_ctx.symlink(entry, "dart-sdk/bin/snapshots/" + name)
@@ -343,13 +398,15 @@ def _stage_sdk_bin(repository_ctx, sdk_bin):
     for entry in sdk_bin.readdir():
         name = entry.basename
         if name == "snapshots":
-            _stage_sdk_snapshots(repository_ctx, entry)
+            _stage_sdk_snapshots(repository_ctx, sdk_bin, entry)
         elif name == "dart" or name == "dart.exe":
             copy_local_file(
                 repository_ctx,
+                sdk_bin,
                 str(entry),
                 str(repository_ctx.path("dart-sdk/bin/" + name)),
                 "the Dart launcher",
+                True,
             )
         else:
             repository_ctx.symlink(entry, "dart-sdk/bin/" + name)

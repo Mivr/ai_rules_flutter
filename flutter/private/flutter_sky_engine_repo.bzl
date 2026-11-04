@@ -128,6 +128,76 @@ def _plant_trimmed_part_stubs(repository_ctx):
         if not repository_ctx.path("sky_engine/" + stub).exists:
             repository_ctx.file("sky_engine/" + stub, _TRIMMED_PART_STUB)
 
+# Upper bound on directories one `list_local_files` walk visits.
+_MAX_WALK_STEPS = 100000
+
+def scan_local_files(source, what, src, max_steps = _MAX_WALK_STEPS):
+    """Lists the files under a directory with a pure, bounded iterative walk.
+
+    Starlark forbids recursion, so the walk keeps an explicit worklist and
+    visits at most `max_steps` directories. A directory symlink whose real
+    path is already one of its own ancestors is a cycle.
+
+    Args:
+        source: The directory `path` to walk (anything with `readdir()`
+            and `realpath`).
+        what: Human-readable description for failure messages.
+        src: The directory's string path, for failure messages.
+        max_steps: The most directories the walk may visit.
+
+    Returns:
+        `struct(files, error)`: the sorted `/`-separated paths, relative to
+        `source`, of every regular file and file symlink beneath it, and a
+        failure message (empty on success).
+    """
+    files = []
+    stack = [(source, "", [str(source.realpath)])]
+    for _ in range(max_steps):
+        if not stack:
+            break
+        directory, prefix, ancestors = stack.pop()
+        for entry in directory.readdir():
+            rel = prefix + entry.basename
+            if not entry.is_dir:
+                files.append(rel)
+                continue
+            real = str(entry.realpath)
+            if real in ancestors:
+                return struct(files = [], error = "flutter local SDK: directory symlink cycle at {rel} while listing {what} ({src})".format(
+                    rel = rel,
+                    what = what,
+                    src = src,
+                ))
+            stack.append((entry, rel + "/", ancestors + [real]))
+    if stack:
+        return struct(files = [], error = "flutter local SDK: listing {what} ({src}) exceeded {n} directories".format(
+            what = what,
+            src = src,
+            n = max_steps,
+        ))
+    if not files:
+        return struct(files = [], error = "flutter local SDK: listed no files under {what} ({src}); refusing to ship an empty package".format(
+            what = what,
+            src = src,
+        ))
+    return struct(files = sorted(files), error = "")
+
+def list_local_files(source, what, src):
+    """Lists the files under a directory, failing when the walk reports an error.
+
+    Args:
+        source: The directory `path` to walk.
+        what: Human-readable description for failure messages.
+        src: The directory's string path, for failure messages.
+
+    Returns:
+        The sorted relative file paths, from `scan_local_files`.
+    """
+    result = scan_local_files(source, what, src)
+    if result.error:
+        fail(result.error)
+    return result.files
+
 def _mirror_local_lib(repository_ctx, sdk_root, sdk_rel, repo_rel, what):
     """Mirrors one local SDK directory into the repo file by file.
 
@@ -147,67 +217,7 @@ def _mirror_local_lib(repository_ctx, sdk_root, sdk_rel, repo_rel, what):
         ))
     repository_ctx.watch_tree(source)
     src = str(source)
-    if "windows" in repository_ctx.os.name.lower():
-        result = repository_ctx.execute([
-            "cmd",
-            "/c",
-            "dir",
-            "/s",
-            "/b",
-            "/a-d",
-            src.replace("/", "\\"),
-        ])
-        if result.return_code != 0:
-            fail(
-                "flutter local SDK: could not list {what} ({src}); {err}".format(
-                    what = what,
-                    src = src,
-                    err = result.stderr.strip(),
-                ),
-            )
-        raws = [
-            line.strip().replace("\\", "/")
-            for line in result.stdout.split("\n")
-        ]
-    else:
-        result = repository_ctx.execute([
-            "find",
-            src,
-            "(",
-            "-type",
-            "f",
-            "-o",
-            "-type",
-            "l",
-            ")",
-            "-print",
-        ])
-        if result.return_code != 0:
-            fail(
-                "flutter local SDK: could not list {what} ({src}); {err}".format(
-                    what = what,
-                    src = src,
-                    err = result.stderr.strip(),
-                ),
-            )
-        raws = [line.strip() for line in result.stdout.split("\n")]
-    files = []
-    for raw in raws:
-        if not raw:
-            continue
-        if not raw.lower().startswith(src.lower() + "/"):
-            fail(
-                "flutter local SDK: listing {what} escaped its root: {line}".format(
-                    what = what,
-                    line = raw,
-                ),
-            )
-        files.append(raw[len(src) + 1:])
-    if not files:
-        fail((
-            "flutter local SDK: listed no files under {what} ({src}); " +
-            "refusing to ship an empty package"
-        ).format(what = what, src = src))
+    files = list_local_files(source, what, src)
     for rel in files:
         repository_ctx.symlink(
             repository_ctx.path(src + "/" + rel),
