@@ -36,7 +36,7 @@ def _header_only_info_impl(env, target):
 def _header_only_info_test(name):
     analysis_test(
         name = name,
-        target = "//flutter/tests/header_only_fixture:header",
+        target = "//flutter/tests/rules_testing/header_only_fixture:header",
         attrs = {"target": {"aspects": [flutter_kernel_module_aspect]}},
         attr_values = {"size": "small"},
         impl = _header_only_info_impl,

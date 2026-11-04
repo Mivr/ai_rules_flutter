@@ -1,7 +1,7 @@
 load("//flutter:defs.bzl", "flutter_library")
 
 # Its own Bazel package: each library derives its `lib_root` from its package.
-package(default_visibility = ["//flutter/tests:__pkg__"])
+package(default_visibility = ["//flutter/tests/rules_testing:__pkg__"])
 
 flutter_library(
     name = "leaf",
