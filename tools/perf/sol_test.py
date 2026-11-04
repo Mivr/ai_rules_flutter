@@ -1146,6 +1146,70 @@ class FakeCapture:
         return ""
 
 
+class InheritingCapture(FakeCapture):
+    """Reproduces cquery's `.bazelrc` `test` inheritance: `--output=files`
+    also lists the unbuilt aspect outputs, `--output=starlark` over
+    `target.files` lists DefaultInfo.files only."""
+
+    def __init__(self, execroot, files, unbuilt):
+        super().__init__(execroot, files)
+        self.unbuilt = unbuilt
+
+    def __call__(self, argv, cwd=None):
+        if "cquery" in argv and "--output=files" in argv:
+            return "\n".join(self.unbuilt + self.files) + "\n"
+        return super().__call__(argv, cwd)
+
+
+class CqueryArgvTest(unittest.TestCase):
+    def test_argv_shape_in_both_modes(self):
+        flags = ["-c", "opt"]
+        for batch in (True, False):
+            argv = sol.cquery_argv("/ob", "//app:app_web", flags, batch)
+            head = (sol.command_prefix(batch)
+                    + sol.startup_options("/ob"))
+            self.assertEqual(argv[:len(head)], head)
+            self.assertEqual(argv[len(head)], "cquery")
+            self.assertIn("--output=starlark", argv)
+            self.assertNotIn("--output=files", argv)
+            exprs = [a for a in argv if a.startswith("--starlark:expr=")]
+            self.assertEqual(len(exprs), 1)
+            self.assertIn("target.files", exprs[0])
+            self.assertIn("//app:app_web", argv)
+            self.assertEqual(argv[-2:], flags)
+
+    def test_web_listing_ignores_unbuilt_aspect_outputs(self):
+        tmp = tempfile.mkdtemp(prefix="sol-web-query-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        out_base = os.path.join(tmp, "out")
+        root = os.path.join(out_base, "execroot", "ws")
+        bundle = "bazel-out/k8-opt/bin/app/app_web_web"
+        staging = "bazel-out/k8-dbg/bin/app/app_web_dev"
+        for rel in (bundle, staging):
+            os.makedirs(os.path.join(root, rel))
+        with open(os.path.join(root, bundle, "index.html"), "wb") as fh:
+            fh.write(b"page")
+        unbuilt = ["bazel-out/k8-opt/bin/app/app_web.dart_analyze.analyzed",
+                   "bazel-out/k8-opt/bin/app/app_web.dart_analyze.formatted"]
+        capture = InheritingCapture(root, [bundle, staging], unbuilt)
+        with self.assertRaisesRegex(RuntimeError, "does not exist"):
+            capture_files = sol.cquery_argv  # sanity: helper exists
+            self.assertTrue(capture_files)
+            capture(["bazel", "cquery", "--output=files"])  # leaks
+            sol.check_under_base(os.path.join(root, unbuilt[0]),
+                                     out_base, "cquery")
+        files = sol.query_target_files(
+            capture, tmp, out_base, "//app:app_web", [], False)
+        self.assertEqual(files, [os.path.join(root, bundle),
+                                 os.path.join(root, staging)])
+        for config in ("web_release", "web_debug"):
+            plan = plan_verify_snapshot(capture, tmp, out_base, root,
+                                        config, True)
+            snapshot = read_verify_snapshot(plan)
+            self.assertEqual([k.split("::", 1)[1] for k in snapshot],
+                             ["index.html"])
+
+
 class QueryTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="sol-query-")
@@ -1629,6 +1693,19 @@ IPA_FIXED = (
     "archive.close()" % (IPA_ENTRIES,))
 
 
+# Writes the web bundle tree (index.html, JS and WASM) and, when asked,
+# a sibling DDC staging directory, from the source file's bytes.
+WEB_CHAIN = (
+    "import os, shutil, sys; "
+    "data = open(sys.argv[1], 'rb').read(); "
+    "[shutil.rmtree(d, ignore_errors=True) for d in sys.argv[2:]]; "
+    "[os.makedirs(d) for d in sys.argv[2:]]; "
+    "[open(os.path.join(sys.argv[2], n), 'wb').write(n.encode() + data) "
+    "for n in ('index.html', 'main.dart.js', 'main.dart.wasm')]; "
+    "[open(os.path.join(d, 'main.dart'), 'wb').write(data) "
+    "for d in sys.argv[3:]]")
+
+
 def server_file(name):
     return os.path.join(out_base, "sol-server", name)
 
@@ -1718,6 +1795,11 @@ fail_config = os.environ.get("SOL_FAIL_CONFIG", "")
 sidecar = os.environ.get("SOL_SIDEEFFECT", "") == "1"
 dirty = os.environ.get("SOL_DIRTY", "") == "1"
 is_sim = "sim_debug" in out_base
+is_web = "web_release" in out_base or "web_debug" in out_base
+web_debug = "web_debug" in out_base
+web_bundle = "bazel-out/k8-fastbuild/bin/app/app_web_web"
+web_dev = "bazel-out/k8-fastbuild/bin/app/app_web_dev"
+web_unbuilt = "bazel-out/k8-fastbuild/bin/app/app_web.dart_analyze.analyzed"
 rel = "bazel-out/x/App.framework/App"
 sim_rel = "bazel-out/x/Bench.ipa"
 if mode == "info":
@@ -1729,7 +1811,15 @@ if mode == "info":
 elif mode == "cquery":
     if not batch:
         ensure_daemon()
-    if case == "dirfail":
+    if is_web:
+        # DefaultInfo.files only; `--output=files` would inherit the
+        # `test` aspect output groups, which `build` never builds.
+        if "--output=files" in sys.argv[1:]:
+            print(web_unbuilt)
+        print(web_bundle)
+        if web_debug:
+            print(web_dev)
+    elif case == "dirfail":
         print("bazel-out/x/App.framework/App")
     elif is_sim:
         print(sim_rel)
@@ -1779,6 +1869,31 @@ elif mode == "build":
                 fh.write("")
             write_profile()
             sys.exit(0)
+    if is_web:
+        src = os.environ["SOL_SRC"]
+        dst = os.path.join(execroot, web_bundle)
+        dev = os.path.join(execroot, web_dev)
+        args = [src, dst] + ([dev] if web_debug else [])
+        cmd = [sys.executable, "-c", WEB_CHAIN] + args
+        if batch:
+            subprocess.run(cmd, check=True)
+        else:
+            daemon_run(cmd, {})
+        listed = [web_bundle] + ([web_dev] if web_debug else [])
+        spawn = {
+            "commandArgs": cmd,
+            "environmentVariables": [],
+            "listedOutputs": listed,
+            "actualOutputs": [],
+            "mnemonic": "Genrule",
+            "exitCode": 0,
+            "targetLabel": "//app:app_web",
+        }
+        with open(log, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(spawn) + "\\n")
+        write_marker([os.path.join(execroot, p) for p in listed])
+        write_profile()
+        sys.exit(0)
     if case == "hosttools" and not is_sim:
         # One target spawn plus one host-tool build (outputs under an
         # -exec- directory): the chain runs the first, the host-tools
@@ -2092,6 +2207,26 @@ class SolEndToEndTest(unittest.TestCase):
                            "bazel-out", "x", "App.framework", "App")
         with open(dst, encoding="utf-8") as fh:
             self.assertTrue(fh.read().startswith("v1\nedit:apply-app-edit"))
+
+    def test_run_chain_summarize_web_identical(self):
+        out = os.path.join(self.tmp, "web-sol.json")
+        with mock.patch.dict(os.environ, self.env):
+            self.assertEqual(
+                sol.main(self.run_argv(["web_release", "web_debug"])), 0)
+            self.assertEqual(sol.main(self.summarize_argv(out)), 0)
+        with open(out, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        for kind in ("release", "debug"):
+            for flow, method in (("clean", "batch"),
+                                 ("app", "warm-server"),
+                                 ("body", "warm-server")):
+                name = "web-%s-%s" % (kind, flow)
+                entry = summary["flows"][name]
+                self.assertTrue(entry["identical"], name)
+                self.assertEqual(entry["reason"], "ok", name)
+                self.assertGreaterEqual(entry["sol"], 0.0, name)
+                self.assertEqual(entry["method"], method, name)
+        self.assertEqual(self.live_server_pids(), [])
 
     def test_profile_parts_sum_to_bazel(self):
         # Every flow carries a profile whose parts are present and sum
@@ -2507,10 +2642,6 @@ class SolEndToEndTest(unittest.TestCase):
             self.assertEqual(entry["chain"]["status"], "error", flow)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class OutputDriftTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="sol-drift-")
@@ -2562,3 +2693,7 @@ class OutputDriftTest(unittest.TestCase):
         drift = output_drift(spawns, self.tmp)
         self.assertEqual(drift["n"], 12)
         self.assertEqual(len(drift["paths"]), 10)
+
+
+if __name__ == "__main__":
+    unittest.main()
