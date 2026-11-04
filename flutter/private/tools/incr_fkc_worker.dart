@@ -47,41 +47,82 @@ typedef RequestParts = ({
   KernelInputsManifest manifest,
 });
 
-/// The directive guard with its result cached by content digest.
+/// Scans [subset] against the full [declared] set under the roots, returning
+/// each readable source's diagnostics.
+typedef GuardScan = Map<String, List<String>> Function(
+  List<String> subset,
+  List<String> declared,
+  List<String> roots,
+);
+
+/// The directive guard with a per-source verdict cache.
 ///
-/// The key mixes every declared source's content hash with the filesystem
-/// roots: any changed `.dart` file invalidates the cache and re-runs the
-/// guard over all sources, so every changed file is always checked.
+/// A source's verdict depends on its own content, the declared set (sources
+/// that exist) and the roots. While the declared set and roots are those of the
+/// previous check, only sources whose content digest changed are rescanned;
+/// any other change of the declared set or roots rescans every source. The
+/// first check scans everything and so seeds the per-source verdicts.
 class GuardCache {
-  GuardCache({List<String> Function(List<String>, List<String>)? runGuard})
-    : _runGuard = runGuard ?? _defaultRunGuard;
+  GuardCache({GuardScan? scan}) : _scan = scan ?? _defaultScan;
 
-  final List<String> Function(List<String>, List<String>) _runGuard;
-  String? _key;
-  List<String>? _errors;
+  final GuardScan _scan;
+  Set<String>? _declared;
+  List<String>? _roots;
+  final Map<String, String?> _digests = {};
+  final Map<String, List<String>> _verdicts = {};
 
-  static List<String> _defaultRunGuard(
-    List<String> sources,
+  static Map<String, List<String>> _defaultScan(
+    List<String> subset,
+    List<String> declared,
     List<String> roots,
-  ) => findDisallowedFlutterDirectives(sources, roots, tool: 'flutter');
+  ) => scanFlutterDirectivesAgainst(subset, declared, roots, tool: 'flutter');
 
   /// The guard errors for [dartSources] under [roots] given the current
-  /// content [hashes] (null marks a missing file).
+  /// content [hashes] (null marks a missing file), in a full scan's order.
   List<String> check(
     List<String> dartSources,
     List<String> roots,
     Map<String, String?> hashes,
   ) {
-    final parts = [
-      for (final s in dartSources) '${hashes[s] ?? '<missing>'} $s',
-      ...roots,
-    ]..sort();
-    final key = sha256Hex(utf8.encode(parts.join('\x00')));
-    if (key == _key) return _errors!;
-    final errors = _runGuard(dartSources, roots);
-    _key = key;
-    _errors = errors;
-    return errors;
+    final Set<String> declared = {
+      for (final s in dartSources)
+        if (hashes[s] != null) s,
+    };
+    final List<String> stale = _staleSources(declared, roots, hashes);
+    if (stale.isNotEmpty) {
+      _verdicts.addAll(_scan(stale, declared.toList(), roots));
+      for (final s in stale) {
+        _digests[s] = hashes[s];
+      }
+    }
+    return [
+      for (final s in declared.toList()..sort()) ...?_verdicts[s],
+    ];
+  }
+
+  /// The sources to rescan; resets the cache first when the declared set or
+  /// roots differ from the previous check's.
+  List<String> _staleSources(
+    Set<String> declared,
+    List<String> roots,
+    Map<String, String?> hashes,
+  ) {
+    final Set<String>? prior = _declared;
+    final bool same =
+        prior != null &&
+        prior.length == declared.length &&
+        prior.containsAll(declared) &&
+        _roots!.join('\x00') == roots.join('\x00');
+    if (!same) {
+      _digests.clear();
+      _verdicts.clear();
+      _declared = declared;
+      _roots = List.of(roots);
+    }
+    return [
+      for (final s in declared)
+        if (!_digests.containsKey(s) || _digests[s] != hashes[s]) s,
+    ];
   }
 }
 

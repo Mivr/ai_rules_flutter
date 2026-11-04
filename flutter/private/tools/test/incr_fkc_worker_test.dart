@@ -516,23 +516,147 @@ void main() {
   });
 
   group('GuardCache', () {
-    test('reuses the cached result until a content digest changes', () {
-      var runs = 0;
-      final cache = GuardCache(
-        runGuard: (sources, roots) {
-          runs++;
-          return const <String>[];
+    // Records each scan's subset; a file's verdict is one error per `bad`
+    // marker in [text] and, for `needs:<path>` text, one error when that path
+    // is not in the declared set — the declared-set dependence of the guard.
+    late List<List<String>> scans;
+    late Map<String, String> text;
+
+    GuardCache newCache() {
+      scans = [];
+      return GuardCache(
+        scan: (subset, declared, roots) {
+          scans.add(List.of(subset));
+          return {
+            for (final s in subset)
+              s: [
+                if (text[s]!.startsWith('needs:') &&
+                    !declared.contains(text[s]!.substring(6)))
+                  'e:$s',
+                if (text[s]!.contains('bad')) 'bad:$s:${roots.join(',')}',
+              ],
+          };
         },
       );
-      final hashes = {'lib/main.dart': 'h1'};
-      expect(cache.check(['lib/main.dart'], ['stage'], hashes), isEmpty);
-      expect(cache.check(['lib/main.dart'], ['stage'], hashes), isEmpty);
-      expect(runs, 1);
+    }
+
+    Map<String, String?> digests() => {
+      for (final e in text.entries) e.key: 'h-${e.value}',
+    };
+
+    List<String> run(GuardCache c, [List<String> roots = const ['r']]) =>
+        c.check(text.keys.toList(), roots, digests());
+
+    setUp(() => text = {'a': 'ok', 'b': 'ok', 'c': 'ok'});
+
+    test('reuses the cached result while nothing changed', () {
+      final GuardCache cache = newCache();
+      expect(run(cache), isEmpty);
+      expect(run(cache), isEmpty);
+      expect(scans, hasLength(1));
+    });
+
+    test('a warm edit rescans only the changed source', () {
+      final GuardCache cache = newCache();
+      run(cache);
+      text['b'] = 'bad';
+      expect(run(cache), ['bad:b:r']);
+      expect(scans.last, ['b']);
+      text['d'] = 'ok';
+      run(cache);
       expect(
-        cache.check(['lib/main.dart'], ['stage'], {'lib/main.dart': 'h2'}),
-        isEmpty,
+        scans.last.toSet(),
+        {'a', 'b', 'c', 'd'},
+        reason: 'a new source changes the declared set',
       );
-      expect(runs, 2);
+      text['d'] = 'bad';
+      run(cache);
+      expect(scans.last, ['d']);
+    });
+
+    test('a cold scan seeds the verdicts the first warm edit reuses', () {
+      final GuardCache cache = newCache();
+      text['a'] = 'bad';
+      expect(run(cache), ['bad:a:r']);
+      expect(scans.single.toSet(), {'a', 'b', 'c'});
+      text['c'] = 'ok2';
+      expect(run(cache), ['bad:a:r']);
+      expect(scans, hasLength(2));
+      expect(scans.last, ['c']);
+    });
+
+    test("errors come back in a full scan's order", () {
+      text = {'z': 'bad', 'a': 'bad', 'm': 'bad'};
+      final GuardCache cache = newCache();
+      expect(run(cache), ['bad:a:r', 'bad:m:r', 'bad:z:r']);
+      text['m'] = 'bad2';
+      expect(run(cache), ['bad:a:r', 'bad:m:r', 'bad:z:r']);
+    });
+
+    test('a changed declared set rescans everything, both ways', () {
+      text = {'a': 'needs:b', 'b': 'ok'};
+      final GuardCache cache = newCache();
+      expect(run(cache), isEmpty);
+      text.remove('b');
+      expect(run(cache), ['e:a']);
+      expect(scans.last, ['a']);
+      text['b'] = 'ok';
+      expect(run(cache), isEmpty);
+      expect(scans.last.toSet(), {'a', 'b'});
+    });
+
+    test('a source turning missing or present changes the declared set', () {
+      text = {'a': 'needs:b', 'b': 'ok'};
+      final GuardCache cache = newCache();
+      run(cache);
+      final Map<String, String?> hashes = digests()..['b'] = null;
+      expect(cache.check(['a', 'b'], ['r'], hashes), ['e:a']);
+      expect(cache.check(['a', 'b'], ['r'], digests()), isEmpty);
+    });
+
+    test('changed roots rescan every source', () {
+      final GuardCache cache = newCache();
+      run(cache);
+      run(cache, ['other']);
+      expect(scans.last.toSet(), {'a', 'b', 'c'});
+    });
+
+    test('a digest changed back is never served a stale verdict', () {
+      text = {'a': 'needs:b', 'b': 'ok'};
+      final GuardCache cache = newCache();
+      run(cache);
+      text.remove('b');
+      run(cache);
+      text['b'] = 'ok2';
+      run(cache);
+      text['b'] = 'ok';
+      expect(run(cache), isEmpty);
+      text.remove('b');
+      expect(run(cache), ['e:a']);
+    });
+
+    test('a cache that never rescans a changed source is caught', () {
+      // The same warm-edit scenario against the real cache and a mutant that
+      // returns its first result forever: the scenario's expectation holds
+      // for the first and fails for the second.
+      List<String> warmEdit(
+        List<String> Function(List<String>, List<String>, Map<String, String?>)
+        check,
+      ) {
+        text = {'a': 'ok', 'b': 'ok'};
+        check(text.keys.toList(), ['r'], digests());
+        text['b'] = 'bad';
+        return check(text.keys.toList(), ['r'], digests());
+      }
+
+      expect(warmEdit(newCache().check), ['bad:b:r']);
+      List<String>? first;
+      List<String> neverRescans(
+        List<String> sources,
+        List<String> roots,
+        Map<String, String?> hashes,
+      ) => first ??= newCache().check(sources, roots, hashes);
+      expect(warmEdit(neverRescans), isNot(['bad:b:r']));
     });
   });
 

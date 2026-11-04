@@ -450,33 +450,88 @@ List<String> findDisallowedFlutterDirectives(
   String tool = 'flutter',
   String multiRootPrefix = flutterMultiRootPrefix,
 }) {
-  final contents = _readDeclaredSourceContents(sources);
-  final declared = <String>{
-    for (final path in contents.keys) normalizeStagedPath(path),
-  };
-  final declaredKeys = <String>{
-    for (final path in contents.keys) flutterSourceKey(path, fsRoots),
-  };
-  final errors = <String>[];
-  final paths = contents.keys.toList()..sort();
-  for (final path in paths) {
-    final content = contents[path];
-    if (content == null) continue;
-    final from = normalizeStagedPath(path);
-    final fromKey = flutterSourceKey(path, fsRoots);
-    for (final ref in scanAllDirectiveUris(content)) {
-      if (_isAllowedFlutterDirective(
-        ref.uri,
-        from,
-        fromKey,
-        declared,
-        declaredKeys,
-        multiRootPrefix: multiRootPrefix,
-      )) {
-        continue;
-      }
-      errors.add(_refuseFlutterDirective(tool, path, ref.kind, ref.uri));
-    }
+  final Map<String, List<String>> verdicts = scanFlutterDirectivesPerSource(
+    sources,
+    fsRoots,
+    tool: tool,
+    multiRootPrefix: multiRootPrefix,
+  );
+  return [
+    for (final path in verdicts.keys.toList()..sort()) ...verdicts[path]!,
+  ];
+}
+
+/// The diagnostics [findDisallowedFlutterDirectives] returns, per source: one
+/// entry for every [sources] path that exists and is readable (an empty list
+/// when that source is clean), in its diagnostics' order.
+Map<String, List<String>> scanFlutterDirectivesPerSource(
+  List<String> sources,
+  List<String> fsRoots, {
+  String tool = 'flutter',
+  String multiRootPrefix = flutterMultiRootPrefix,
+}) {
+  final Map<String, String> contents = _readDeclaredSourceContents(sources);
+  return _directiveVerdicts(
+    contents,
+    _declaredSet(contents.keys, fsRoots),
+    fsRoots,
+    tool: tool,
+    multiRootPrefix: multiRootPrefix,
+  );
+}
+
+/// The diagnostics for only the [subset] of sources, checked against the full
+/// [declared] set (every declared source that exists and is readable): a
+/// source's verdict depends on its own content, the declared set and
+/// [fsRoots], so a caller that knows which sources changed rescans just those.
+/// Per-source results as in [scanFlutterDirectivesPerSource]; a [subset] path
+/// that cannot be read is absent from the result.
+Map<String, List<String>> scanFlutterDirectivesAgainst(
+  List<String> subset,
+  Iterable<String> declared,
+  List<String> fsRoots, {
+  String tool = 'flutter',
+  String multiRootPrefix = flutterMultiRootPrefix,
+}) => _directiveVerdicts(
+  _readDeclaredSourceContents(subset),
+  _declaredSet(declared, fsRoots),
+  fsRoots,
+  tool: tool,
+  multiRootPrefix: multiRootPrefix,
+);
+
+/// The normalised paths and multi-root keys of the declared sources.
+typedef _DeclaredSet = ({Set<String> paths, Set<String> keys});
+
+_DeclaredSet _declaredSet(Iterable<String> paths, List<String> fsRoots) => (
+  paths: {for (final path in paths) normalizeStagedPath(path)},
+  keys: {for (final path in paths) flutterSourceKey(path, fsRoots)},
+);
+
+Map<String, List<String>> _directiveVerdicts(
+  Map<String, String> contents,
+  _DeclaredSet declared,
+  List<String> fsRoots, {
+  required String tool,
+  required String multiRootPrefix,
+}) {
+  final verdicts = <String, List<String>>{};
+  for (final entry in contents.entries) {
+    final String path = entry.key;
+    final String from = normalizeStagedPath(path);
+    final String fromKey = flutterSourceKey(path, fsRoots);
+    verdicts[path] = [
+      for (final ref in scanAllDirectiveUris(entry.value))
+        if (!_isAllowedFlutterDirective(
+          ref.uri,
+          from,
+          fromKey,
+          declared.paths,
+          declared.keys,
+          multiRootPrefix: multiRootPrefix,
+        ))
+          _refuseFlutterDirective(tool, path, ref.kind, ref.uri),
+    ];
   }
-  return errors;
+  return verdicts;
 }
