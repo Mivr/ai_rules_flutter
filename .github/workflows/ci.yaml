@@ -5,7 +5,10 @@
 #
 # WHAT RUNS WHERE: branch and pull-request pushes run every job below with
 # warm caches (one repository cache per OS from setup-bazel plus one Bazel
-# disk cache per OS per shard, restored and re-saved on pushes). The nightly
+# disk cache per OS per shard, restored on pushes and re-saved only by pushes
+# to main: a branch restores main's keys, and a branch save (the gate's ci/
+# candidates) would only duplicate them and evict main's under the 10 GB
+# repository cache limit). The nightly
 # schedule run executes the same jobs uncached (no disk-cache restore and no
 # save of any kind; the content-addressed repository cache still restores).
 # A release-tag push (`v*`) runs every job below uncached too — no disk-cache
@@ -138,7 +141,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -174,7 +177,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -184,7 +187,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -207,7 +210,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -242,7 +245,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -252,7 +255,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -272,7 +275,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -643,7 +646,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -653,7 +656,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -673,7 +676,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -741,7 +744,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -751,7 +754,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -771,7 +774,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -855,7 +858,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -865,7 +868,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -885,7 +888,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -922,7 +925,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -932,7 +935,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -957,7 +960,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -980,7 +983,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -990,7 +993,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1010,7 +1013,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -1031,7 +1034,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1041,7 +1044,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1065,7 +1068,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -1124,7 +1127,7 @@ jobs:
         shell: bash
         run: du -sh D:/_bazel-disk D:/_bazel-repo C:/_bazel-disk C:/_bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         shell: bash
         env:
@@ -1135,7 +1138,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -1205,7 +1208,7 @@ jobs:
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
-          cache-save: ${{ github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
       - name: Restore disk cache
         if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
         continue-on-error: true
@@ -1259,7 +1262,7 @@ jobs:
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
       - name: Delete stale disk cache key
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1269,7 +1272,7 @@ jobs:
           ids=$(gh api "repos/$REPO/actions/caches?per_page=100" --jq '.actions_caches[] | select(.key == env.DISK_CACHE_KEY and .ref == env.REF) | .id' || true)
           for id in $ids; do gh api -X DELETE "repos/$REPO/actions/caches/$id" >/dev/null || true; done
       - name: Save disk cache
-        if: github.event_name == 'push' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
