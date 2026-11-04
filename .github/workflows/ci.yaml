@@ -695,6 +695,11 @@ jobs:
         uses: ./.github/actions/disk-report
         with:
           label: after e2e/web_example
+      # The runner builds in a temp copy, so build in the tree here for the
+      # check below to see writes through the dirlinks.
+      - name: Build e2e/dual_hub in tree
+        working-directory: e2e/dual_hub
+        run: bazel test //... --test_output=errors
       - name: dual_hub source tree unchanged by the dirlink fetch
         run: |
           if [ -n "$(git status --porcelain -- e2e/dual_hub)" ]; then
@@ -1023,12 +1028,9 @@ jobs:
         run: |
           $ndk = $env:ANDROID_NDK_HOME ?? $env:ANDROID_NDK_ROOT
           "ANDROID_NDK_HOME=$($ndk -replace '\\','/')" >> $env:GITHUB_ENV
-      # Off Windows, run e2e/hello_world through //tools/e2e_runner over its
-      # e2e.yaml spec; the Windows step below keeps its short output root and
-      # -no-windows-ci tag filters.
-      - name: Run e2e/hello_world
-        if: runner.os != 'Windows'
-        run: bazel run //tools/e2e_runner -- --workspace=e2e/hello_world --bazel=bazel
+      # The Windows e2e_runner step is not done: the runner always passes its own
+      # temp-dir --output_base, which overrides the short --output_user_root
+      # below, and it has no way to carry the -no-windows-ci tag filters.
       # On Windows, Bazel's default output root lives under a long per-user
       # temp path; nested runfiles (e.g. the hermetic Python interpreter's
       # _socket.pyd used by rules_android's aar_embedded_jars_extractor) then
