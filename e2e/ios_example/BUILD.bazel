@@ -421,6 +421,40 @@ test_suite(
     tests = [":plugin_objc_dep_headers_build_test"],
 )
 
+# String-literal `plugin_defines` must keep their C quotes through the
+# Bourne-tokenized `objc_library` copts: `@LIBRARY_NAME` only compiles when the
+# macro expands to `"my-plugin"`. The compile runs on macOS (darwin-sandbox).
+flutter_apple_plugin_library(
+    name = "plugin_string_defines_library",
+    srcs = ["plugin_string_defines/string_defines_plugin.m"],
+    module_name = "plugin_string_defines",
+    platform = "ios",
+    plugin_defines = [
+        'LIBRARY_NAME="my-plugin"',
+        'ESCAPED_NAME=\\"from-podspec\\"',
+        'GREETING="hello world"',
+    ],
+    target_compatible_with = ["@platforms//os:ios"],
+)
+
+plugin_ios_build(
+    name = "plugin_string_defines_ios_build",
+    target = ":plugin_string_defines_library",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+build_test(
+    name = "plugin_string_defines_build_test",
+    size = "small",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [":plugin_string_defines_ios_build"],
+)
+
+test_suite(
+    name = "plugin_string_defines_test",
+    tests = [":plugin_string_defines_build_test"],
+)
+
 flutter_ios_simulator_build_test(
     name = "ios_app_build_test",
     size = "small",
