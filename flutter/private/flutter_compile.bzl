@@ -313,14 +313,9 @@ def _run_kernel_action(ctx, run):
 # `flutter_kernel_compile_action` — the Flutter half of what rules_dart
 # publishes as `KERNEL_MODULE_ATTRS`. Carries no user-facing attrs: the
 # caller's rule declares its own `main`, `srcs` and `deps`.
-FLUTTER_KERNEL_COMPILE_ATTRS = {
-    "_kernel_filter_tool": attr.label(
-        doc = "The kernel-filter guard the compile runs through (checks " +
-              "directives before, verifies the read set after).",
-        default = Label("//flutter/private/tools:kernel_filter"),
-        executable = True,
-        cfg = "exec",
-    ),
+# The incremental kernel settings every kernel rule reads, shared so the
+# rules that spread it declare both together.
+INCREMENTAL_KERNEL_ATTRS = {
     "_incremental_kernel": attr.label(
         default = Label("//flutter:incremental_kernel"),
         doc = "Opt-in incremental kernel worker flag (a BuildSettingInfo).",
@@ -329,13 +324,23 @@ FLUTTER_KERNEL_COMPILE_ATTRS = {
         default = Label("//flutter:dev_incremental_serialization"),
         doc = "Opt-in dev-only incremental serialization flag (a BuildSettingInfo).",
     ),
+}
+
+FLUTTER_KERNEL_COMPILE_ATTRS = {
+    "_kernel_filter_tool": attr.label(
+        doc = "The kernel-filter guard the compile runs through (checks " +
+              "directives before, verifies the read set after).",
+        default = Label("//flutter/private/tools:kernel_filter"),
+        executable = True,
+        cfg = "exec",
+    ),
     "_incr_worker_tool": attr.label(
         default = Label("//flutter/private/tools:incr_fkc_worker"),
         executable = True,
         cfg = "exec",
         doc = "Persistent incremental kernel compile worker tool.",
     ),
-}
+} | INCREMENTAL_KERNEL_ATTRS
 
 # Toolchains a downstream rule declares to call `flutter_kernel_compile_action`
 # (via `flutter_kernel_compile_tools`) and `compile_package_config` — the
