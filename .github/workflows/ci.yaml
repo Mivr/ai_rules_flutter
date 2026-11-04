@@ -11,13 +11,12 @@
 # repository cache limit). The nightly
 # schedule run executes the same jobs uncached (no disk-cache restore and no
 # save of any kind; the content-addressed repository cache still restores).
-# A release-tag push (`v*`) runs every job below uncached too — no disk-cache
-# restore, no setup-bazel cache save, no actions/cache save — so the release
-# gate (release.yaml) proves every test actually executed on the tagged
-# commit instead of replaying cached results. The gate waits for the tag
-# push's own ci.yaml run (event `push`, head branch = the tag, head SHA = the
-# tagged commit) and the tag push's full.yaml run, and releases only if both
-# concluded `success`.
+# A release pushes no tag run. The release gate (release.yaml) reuses this
+# workflow's passing nightly run on the tagged commit when there is one.
+# Otherwise it dispatches this workflow on the tag with `uncached: true`, which
+# runs every job below uncached — no disk-cache restore, no setup-bazel cache
+# save, no actions/cache save — so every test executes on the tagged commit
+# instead of replaying cached results.
 #
 # No job checks out rules_dart: every workspace below takes it as a registry
 # `bazel_dep`. Local sibling overrides live in gitignored `.bazelrc.user` files,
@@ -74,8 +73,8 @@
 # fresh content. Pull requests and dispatches only restore. Each shard is the
 # only writer of its key; the repository key stays shared per OS with
 # setup-bazel's first-finisher-wins save. Scheduled (nightly) and
-# `uncached` dispatches restore nothing and save nothing. Tag pushes (`v*`)
-# restore no disk cache and save nothing either (no disk-cache restore, no
+# `uncached` dispatches restore nothing and save nothing. Tag runs (release dispatches,
+# `github.ref_type == 'tag'`) restore no disk cache and save nothing either (no disk-cache restore, no
 # setup-bazel cache save, no actions/cache save), so every test executes cold
 # on the tagged commit; the content-addressed repository cache (and the
 # bazelisk cache) still restore, since every fetch through them is
@@ -89,9 +88,6 @@ name: CI
 on:
   push:
     branches: [main, "ci/**"]
-    # Release tags run the whole matrix uncached; release.yaml waits for the
-    # tag push's own run before publishing (see the header comment).
-    tags: ["v*"]
   pull_request:
     branches: [main]
   # Nightly uncached run: every job rebuilds and re-executes everything with
@@ -113,7 +109,7 @@ concurrency:
   # dispatches never queue behind each other. Branch pushes and PR runs still
   # share one group per branch or PR and cancel the superseded run.
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}${{ github.ref == 'refs/heads/main' && format('::{0}', github.run_id) || '' }}
-  # Tag pushes gate releases: never cancel them, so a newer trigger cannot
+  # Tag runs (release dispatches) gate releases: never cancel them, so a newer trigger cannot
   # leave the release gate waiting on a cancelled run. Branch and PR pushes
   # still cancel superseded runs.
   cancel-in-progress: ${{ github.ref_type != 'tag' }}

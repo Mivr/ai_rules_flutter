@@ -6,13 +6,13 @@
 # Android example (too heavy for push CI) on Linux, plus the dev tool's own
 # iOS simulator e2e cases (`dev-tool-ios`) on a booted simulator on macOS.
 # Linux and Windows coverage otherwise lives in push CI. Triggered by release
-# tags, nightly, or manually; the release workflow waits for this workflow AND
-# ci.yaml to pass on the tagged commit (see the gate job in release.yaml)
-# before publishing.
+# nightly, or manually. A release reuses a passing nightly run of this workflow
+# on the tagged commit, or dispatches it on the tag with `uncached: true`, before
+# publishing (see the gate job in release.yaml).
 #
 # WHAT IS CACHED: nightly schedule runs restore no disk cache (only the plugin
-# job re-saves its own key, on pushes and schedules). Release-tag pushes
-# (`v*`) run fully uncached — no disk-cache restore, no setup-bazel cache
+# job re-saves its own key, on pushes and schedules). Release dispatches on a tag
+# (`uncached: true`) run fully uncached — no disk-cache restore, no setup-bazel cache
 # save, no actions/cache save of any kind — so the release gate proves every
 # test actually executed on the tagged commit; only the content-addressed
 # repository cache (and the bazelisk cache) still restore, since every fetch
@@ -28,8 +28,6 @@ permissions:
   contents: read
 name: Full
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       uncached:
@@ -42,7 +40,7 @@ on:
     - cron: "0 6 * * *"
 concurrency:
   # Runs on main never share a group: each gets its own run-id suffix, so the
-  # nightly run, a manual dispatch and a tag push never cancel or queue behind
+  # nightly run, a manual dispatch and a tag dispatch never cancel or queue behind
   # each other. Full never cancels a run in progress: every Full run may be
   # gating a release or a merge.
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}${{ github.ref == 'refs/heads/main' && format('::{0}', github.run_id) || '' }}
@@ -64,7 +62,7 @@ jobs:
       fail-fast: false
       # At most 2 of the 5 macOS slots shared with rules_dart, so a push run's
       # macOS jobs (2) and rules_dart's (1) still get slots while this runs.
-      # A release tag takes 4: its Full gates the release, and at 2 the 11
+      # A release dispatch on a tag takes 4: its Full gates the release, and at 2 the 11
       # legs (~180 job-minutes cold) need about 90 minutes of wall clock.
       max-parallel: ${{ github.ref_type == 'tag' && 4 || 2 }}
       matrix:
@@ -311,7 +309,7 @@ jobs:
           key: ${{ env.DISK_CACHE_KEY }}
   # The Android example builds on Linux but stays out of push CI: its APK +
   # Kotlin actions would make a push job the longest one. It runs here,
-  # nightly (and on tags), as `bazel test //...` — the emulator-attached
+  # nightly (and on tag dispatches), as `bazel test //...` — the emulator-attached
   # `verify_android_app_test` is `manual`-tagged and excluded, so no KVM.
   e2e-linux-nightly:
     name: E2E nightly (android_example, ubuntu-latest)
