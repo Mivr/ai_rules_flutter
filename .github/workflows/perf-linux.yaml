@@ -63,6 +63,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: tools-src
+      - name: Enable Linux sandbox user namespaces
+        run: tools-src/.github/scripts/enable_linux_sandbox.sh
       - name: Check out rules_flutter at head_ref
         uses: actions/checkout@v7
         with:
