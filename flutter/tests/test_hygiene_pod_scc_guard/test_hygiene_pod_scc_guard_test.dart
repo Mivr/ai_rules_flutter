@@ -67,7 +67,8 @@ void main(List<String> args) {
       expect(_hasSize(text, 't', 'small'), isFalse);
     });
     test('rejects the wrong size', () {
-      const text = 'dart_test(\n    name = "flaky_guard_test",\n'
+      const text =
+          'dart_test(\n    name = "flaky_guard_test",\n'
           '    size = "small",\n)\n';
       expect(_hasSize(text, 'flaky_guard_test', 'medium'), isFalse);
       expect(_hasSize(text, 'plugin_pod_test', 'large'), isFalse);
