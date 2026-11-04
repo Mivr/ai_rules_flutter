@@ -34,6 +34,34 @@ def _lock_error_test_impl(ctx):
         ios_plugin_defines_lock_error({"ghost": ["PERMISSION_CAMERA"]}, [_PLUGIN]),
     )
 
+    expected_sdk = (
+        'flutter.pub(ios_plugin_defines = ...): key "integration_test" is a Flutter SDK ' +
+        "package; Flutter SDK packages are not configurable through ios_plugin_defines. " +
+        "Remove the entry."
+    )
+    sdk_lock = [_PLUGIN, "integration_test"]
+    asserts.equals(
+        env,
+        expected_sdk,
+        ios_plugin_defines_lock_error({"integration_test": ["FOO=1"]}, sdk_lock, ["integration_test"]),
+    )
+    asserts.equals(
+        env,
+        expected_sdk,
+        ios_plugin_defines_lock_error({"integration_test": [""]}, sdk_lock, {"integration_test": True}),
+    )
+    asserts.equals(
+        env,
+        'flutter.pub(ios_plugin_defines = ...): key "ghost" is not a package in the lock. ' +
+        "Name a locked package, or remove the entry.",
+        ios_plugin_defines_lock_error({"ghost": ["A"], "integration_test": ["A"]}, sdk_lock, ["integration_test"]),
+    )
+    asserts.equals(
+        env,
+        expected_sdk,
+        ios_plugin_defines_lock_error({"zebra": ["A"], "integration_test": ["A"]}, sdk_lock, ["integration_test"]),
+    )
+
     expected_entry_error = (
         'flutter.pub(ios_plugin_defines = ...): "' + _PLUGIN + '" lists ' +
         '"%s", which is not a preprocessor name or NAME=VALUE. Use a name ' +

@@ -66,13 +66,15 @@ def _entry_name(entry):
         return entry
     return entry[:separator]
 
-def ios_plugin_defines_lock_error(defines, lock_packages):
+def ios_plugin_defines_lock_error(defines, lock_packages, sdk_packages = ()):
     """Refuses a define key or entry that cannot reach a locked plugin.
 
     Args:
         defines: The `flutter.pub` tag's plugin-name -> define strings
             dictionary.
         lock_packages: The package names the lock resolves.
+        sdk_packages: The locked Flutter SDK package names; a key naming one
+            is refused.
 
     Returns:
         The first error in sorted-key order naming
@@ -81,12 +83,19 @@ def ios_plugin_defines_lock_error(defines, lock_packages):
         is a preprocessor name or `NAME=VALUE`.
     """
     available = {name: True for name in lock_packages}
+    sdk = {name: True for name in sdk_packages}
     for plugin in sorted(defines.keys()):
         if plugin not in available:
             return (
                 "flutter.pub(ios_plugin_defines = ...): key \"{plugin}\" " +
                 "is not a package in the lock. Name a locked package, or " +
                 "remove the entry."
+            ).format(plugin = plugin)
+        if plugin in sdk:
+            return (
+                "flutter.pub(ios_plugin_defines = ...): key \"{plugin}\" " +
+                "is a Flutter SDK package; Flutter SDK packages are not " +
+                "configurable through ios_plugin_defines. Remove the entry."
             ).format(plugin = plugin)
         for entry in defines[plugin]:
             if not _is_preprocessor_name(_entry_name(entry)):
