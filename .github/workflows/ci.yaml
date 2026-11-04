@@ -125,6 +125,11 @@ jobs:
   # Apple SDKs and the Apple bundle rules (packaging, simulator runtime).
   e2e-macos-apple:
     name: macOS Apple bundles (hello_world macOS + iOS)
+    # macOS is deferred to the nightly (owner decision 2026-11-04): pushes and
+    # PRs skip this job, and the nightly schedule and dispatched (release)
+    # runs keep it. The gate accepts it as skipped by its exact name
+    # (control ctl/config.py DEFERRED_JOBS); a red nightly becomes a queue item.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -194,6 +199,11 @@ jobs:
   # load, on the OS whose toolchain is the most fragile.
   e2e-macos-toolchain:
     name: macOS toolchain resolution (smoke)
+    # macOS is deferred to the nightly (owner decision 2026-11-04): pushes and
+    # PRs skip this job, and the nightly schedule and dispatched (release)
+    # runs keep it. The gate accepts it as skipped by its exact name
+    # (control ctl/config.py DEFERRED_JOBS); a red nightly becomes a queue item.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 60
     env:
