@@ -158,18 +158,18 @@ def stage_lock_files(out_dir, rules_flutter_dir, module_text):
     The lockfiles come from the hello_world fixture, byte for byte. A
     declared lockfile missing from the fixture raises ValueError.
     """
-    seen = []
+    seen = {}
     for label in _LOCK_FILE_RE.findall(_strip_comments(module_text)):
         rel = lock_file_rel_path(label)
-        if rel is not None and rel not in seen:
-            seen.append(rel)
+        if rel is not None:
+            seen.setdefault(rel, label)
     fixture = os.path.join(rules_flutter_dir, "e2e", "hello_world")
-    for rel in seen:
+    for rel, label in seen.items():
         src = os.path.join(fixture, *rel.split("/"))
         if not os.path.isfile(src):
             raise ValueError(
-                "lock_file %r needs fixture %s, which is missing"
-                % (rel, src))
+                "lock_file %r (%s) needs fixture %s, which is missing"
+                % (label, rel, src))
         dest = os.path.join(out_dir, *rel.split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(src, "rb") as fh:
