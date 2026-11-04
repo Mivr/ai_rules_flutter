@@ -12,7 +12,7 @@
 /// the define was pointing at, with nothing between the two to connect them.
 library;
 
-import 'dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 
 /// Fail when [rest] is non-empty, naming what was dropped and the two spellings
 /// that would have worked.

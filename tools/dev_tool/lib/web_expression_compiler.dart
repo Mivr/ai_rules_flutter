@@ -15,8 +15,7 @@ library;
 import 'dart:io';
 
 import 'package:dwds/dwds.dart';
-
-import 'frontend_server.dart';
+import 'package:flutter_bazel_dev_tool/frontend_server.dart';
 
 /// DWDS's [ExpressionCompiler], answered by our resident frontend server.
 ///

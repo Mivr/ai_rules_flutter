@@ -11,24 +11,23 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:args/args.dart';
-
-import 'app_log_sink.dart';
-import 'bazel.dart';
-import 'device.dart';
-import 'hot_reload/file_clock.dart';
-import 'hot_reload/source_watcher.dart';
-import 'logging.dart';
-import 'machine_protocol.dart';
-import 'native_pipeline_assembler.dart';
-import 'reload_pipeline.dart';
-import 'run_command.dart';
-import 'run_plan.dart';
-import 'session.dart';
-import 'session_host.dart';
-import 'teardown.dart';
-import 'toolchain_info.dart';
-import 'vm_service_client.dart';
-import 'vm_service_logs.dart';
+import 'package:flutter_bazel_dev_tool/app_log_sink.dart';
+import 'package:flutter_bazel_dev_tool/bazel.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/file_clock.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/source_watcher.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/machine_protocol.dart';
+import 'package:flutter_bazel_dev_tool/native_pipeline_assembler.dart';
+import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
+import 'package:flutter_bazel_dev_tool/run_command.dart';
+import 'package:flutter_bazel_dev_tool/run_plan.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/session_host.dart';
+import 'package:flutter_bazel_dev_tool/teardown.dart';
+import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_logs.dart';
 
 class AttachCommand {
   static final parser = ArgParser()

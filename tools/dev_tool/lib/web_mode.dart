@@ -13,7 +13,7 @@
 /// point at any site that forgot a shape.
 library;
 
-import 'dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 
 /// One of the three shapes a web run can take. `null` stands for "not a web
 /// run at all" — [resolveWebMode] returns `WebMode?`, and a `switch` over it

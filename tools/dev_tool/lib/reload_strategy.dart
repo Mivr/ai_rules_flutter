@@ -6,15 +6,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/cdp_console.dart';
+import 'package:flutter_bazel_dev_tool/frontend_server.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/asset_bundle.dart'
+    show touchesFonts;
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/web_module_server.dart';
 import 'package:vm_service/vm_service.dart' as vm;
-
-import 'cdp_console.dart';
-import 'frontend_server.dart';
-import 'hot_reload/asset_bundle.dart' show touchesFonts;
-import 'logging.dart';
-import 'session.dart';
-import 'vm_service_client.dart';
-import 'web_module_server.dart';
 
 final _logger = Logger('dev_tool.reload');
 

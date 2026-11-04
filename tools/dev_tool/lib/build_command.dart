@@ -2,10 +2,9 @@
 import 'dart:io';
 
 import 'package:args/args.dart';
-
-import 'bazel.dart';
-import 'run_command.dart';
-import 'shutdown_signals.dart';
+import 'package:flutter_bazel_dev_tool/bazel.dart';
+import 'package:flutter_bazel_dev_tool/run_command.dart';
+import 'package:flutter_bazel_dev_tool/shutdown_signals.dart';
 
 class BuildCommand {
   static final parser = ArgParser()

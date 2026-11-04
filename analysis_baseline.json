@@ -721,7 +721,6 @@
     "specify_nonobvious_local_variable_types": 6
   },
   "tools/dev_tool/lib/agent_command.dart": {
-    "always_use_package_imports": 10,
     "async_return_with_no_await": 1,
     "avoid_catching_errors": 1,
     "avoid_escaping_inner_quotes": 3,
@@ -744,12 +743,10 @@
     "unnecessary_type_name_in_constructor": 4
   },
   "tools/dev_tool/lib/app_log_sink.dart": {
-    "always_use_package_imports": 2,
     "dangling_library_doc_comments": 1,
     "non_constant_identifier_names": 2
   },
   "tools/dev_tool/lib/attach_command.dart": {
-    "always_use_package_imports": 17,
     "avoid_catches_without_on_clauses": 1,
     "avoid_redundant_argument_values": 2,
     "dangling_library_doc_comments": 1,
@@ -760,7 +757,6 @@
     "unnecessary_type_name_in_constructor": 4
   },
   "tools/dev_tool/lib/bazel.dart": {
-    "always_use_package_imports": 3,
     "avoid_redundant_argument_values": 1,
     "cast_nullable_to_non_nullable": 4,
     "comment_references": 4,
@@ -773,7 +769,6 @@
     "unnecessary_type_name_in_constructor": 9
   },
   "tools/dev_tool/lib/build_command.dart": {
-    "always_use_package_imports": 3,
     "avoid_redundant_argument_values": 1,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 4,
@@ -782,7 +777,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/build_info.dart": {
-    "always_use_package_imports": 3,
     "public_member_api_docs": 1,
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 2,
@@ -799,7 +793,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/cdp_console.dart": {
-    "always_use_package_imports": 2,
     "async_return_with_no_await": 1,
     "avoid_catches_without_on_clauses": 2,
     "comment_references": 2,
@@ -810,23 +803,18 @@
     "specify_nonobvious_local_variable_types": 18,
     "unnecessary_type_name_in_constructor": 1
   },
-  "tools/dev_tool/lib/cli_args.dart": {
-    "always_use_package_imports": 1
-  },
   "tools/dev_tool/lib/command_failure.dart": {
     "public_member_api_docs": 7,
     "sort_constructors_first": 5,
     "unnecessary_type_name_in_constructor": 5
   },
   "tools/dev_tool/lib/command_report.dart": {
-    "always_use_package_imports": 7,
     "public_member_api_docs": 7,
     "sort_constructors_first": 2,
     "specify_nonobvious_local_variable_types": 3,
     "unnecessary_type_name_in_constructor": 2
   },
   "tools/dev_tool/lib/command_runner.dart": {
-    "always_use_package_imports": 1,
     "comment_references": 2,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 1,
@@ -835,7 +823,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/compiler_config.dart": {
-    "always_use_package_imports": 1,
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 5,
@@ -848,7 +835,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/device.dart": {
-    "always_use_package_imports": 12,
     "avoid_catches_without_on_clauses": 1,
     "comment_references": 4,
     "dangling_library_doc_comments": 1,
@@ -859,7 +845,6 @@
     "use_setters_to_change_properties": 1
   },
   "tools/dev_tool/lib/device_android.dart": {
-    "always_use_package_imports": 7,
     "annotate_overrides": 1,
     "async_return_with_no_await": 2,
     "avoid_escaping_inner_quotes": 3,
@@ -874,7 +859,6 @@
     "unnecessary_type_name_in_constructor": 2
   },
   "tools/dev_tool/lib/device_desktop.dart": {
-    "always_use_package_imports": 6,
     "annotate_overrides": 3,
     "async_return_with_no_await": 3,
     "avoid_catching_errors": 1,
@@ -887,7 +871,6 @@
     "unnecessary_type_name_in_constructor": 3
   },
   "tools/dev_tool/lib/device_id.dart": {
-    "always_use_package_imports": 10,
     "async_return_with_no_await": 1,
     "avoid_catches_without_on_clauses": 1,
     "directives_ordering": 2,
@@ -899,7 +882,6 @@
     "unnecessary_type_name_in_constructor": 2
   },
   "tools/dev_tool/lib/device_ios.dart": {
-    "always_use_package_imports": 11,
     "avoid_catching_errors": 1,
     "avoid_dynamic_calls": 2,
     "dangling_library_doc_comments": 1,
@@ -913,7 +895,6 @@
     "unnecessary_type_name_in_constructor": 2
   },
   "tools/dev_tool/lib/device_ios_lldb.dart": {
-    "always_use_package_imports": 5,
     "avoid_dynamic_calls": 1,
     "avoid_redundant_argument_values": 1,
     "dangling_library_doc_comments": 1,
@@ -924,7 +905,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/device_ios_sim.dart": {
-    "always_use_package_imports": 8,
     "annotate_overrides": 1,
     "async_return_with_no_await": 2,
     "dangling_library_doc_comments": 1,
@@ -939,14 +919,12 @@
     "use_null_aware_elements": 1
   },
   "tools/dev_tool/lib/device_ios_sim_discovery.dart": {
-    "always_use_package_imports": 3,
     "prefer_foreach": 1,
     "specify_nonobvious_local_variable_types": 14,
     "unnecessary_type_name_in_constructor": 2,
     "use_raw_strings": 1
   },
   "tools/dev_tool/lib/device_launcher.dart": {
-    "always_use_package_imports": 8,
     "avoid_catches_without_on_clauses": 5,
     "avoid_catching_errors": 1,
     "public_member_api_docs": 4,
@@ -956,7 +934,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/device_web.dart": {
-    "always_use_package_imports": 14,
     "async_return_with_no_await": 3,
     "avoid_catches_without_on_clauses": 1,
     "avoid_dynamic_calls": 4,
@@ -974,7 +951,6 @@
     "use_setters_to_change_properties": 1
   },
   "tools/dev_tool/lib/file_snapshot.dart": {
-    "always_use_package_imports": 1,
     "avoid_slow_async_io": 2,
     "comment_references": 2,
     "public_member_api_docs": 1,
@@ -983,7 +959,6 @@
     "unnecessary_type_name_in_constructor": 2
   },
   "tools/dev_tool/lib/frontend_server.dart": {
-    "always_use_package_imports": 3,
     "async_return_with_no_await": 3,
     "avoid_catching_errors": 2,
     "dangling_library_doc_comments": 1,
@@ -1006,7 +981,6 @@
     "unnecessary_type_name_in_constructor": 2
   },
   "tools/dev_tool/lib/hot_reload/app_instance.dart": {
-    "always_use_package_imports": 2,
     "avoid_catching_errors": 1,
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
@@ -1018,7 +992,6 @@
     "unnecessary_type_name_in_constructor": 6
   },
   "tools/dev_tool/lib/hot_reload/applied_versions.dart": {
-    "always_use_package_imports": 1,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 2,
     "sort_constructors_first": 2,
@@ -1035,7 +1008,6 @@
     "unnecessary_type_name_in_constructor": 2
   },
   "tools/dev_tool/lib/hot_reload/compiler.dart": {
-    "always_use_package_imports": 1,
     "async_return_with_no_await": 2,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 6,
@@ -1045,7 +1017,6 @@
     "unnecessary_type_name_in_constructor": 4
   },
   "tools/dev_tool/lib/hot_reload/file_clock.dart": {
-    "always_use_package_imports": 1,
     "avoid_slow_async_io": 1
   },
   "tools/dev_tool/lib/hot_reload/flutter_error_report.dart": {
@@ -1062,7 +1033,6 @@
   },
   "tools/dev_tool/lib/hot_reload/reload_orchestrator.dart": {
     "always_put_required_named_parameters_first": 1,
-    "always_use_package_imports": 4,
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 12,
@@ -1071,7 +1041,6 @@
     "unnecessary_type_name_in_constructor": 6
   },
   "tools/dev_tool/lib/hot_reload/session_reloader.dart": {
-    "always_use_package_imports": 4,
     "comment_references": 4,
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
@@ -1092,7 +1061,6 @@
     "unnecessary_type_name_in_constructor": 3
   },
   "tools/dev_tool/lib/hot_reload/workspace.dart": {
-    "always_use_package_imports": 1,
     "avoid_equals_and_hash_code_on_mutable_classes": 2,
     "comment_references": 1,
     "dangling_library_doc_comments": 1,
@@ -1102,7 +1070,6 @@
     "unnecessary_type_name_in_constructor": 3
   },
   "tools/dev_tool/lib/http_control_channel.dart": {
-    "always_use_package_imports": 7,
     "async_return_with_no_await": 3,
     "avoid_catches_without_on_clauses": 4,
     "avoid_escaping_inner_quotes": 1,
@@ -1114,7 +1081,6 @@
     "unnecessary_type_name_in_constructor": 2
   },
   "tools/dev_tool/lib/ios_sim_log_fallback.dart": {
-    "always_use_package_imports": 3,
     "comment_references": 1,
     "no_adjacent_strings_in_list": 1,
     "sort_constructors_first": 1,
@@ -1132,7 +1098,6 @@
     "unnecessary_type_name_in_constructor": 6
   },
   "tools/dev_tool/lib/logging.dart": {
-    "always_use_package_imports": 1,
     "cast_nullable_to_non_nullable": 2,
     "combinators_ordering": 1,
     "dangling_library_doc_comments": 1,
@@ -1143,7 +1108,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/machine_protocol.dart": {
-    "always_use_package_imports": 2,
     "avoid_catches_without_on_clauses": 2,
     "dangling_library_doc_comments": 1,
     "prefer_initializing_formals": 2,
@@ -1167,11 +1131,9 @@
     "unnecessary_type_name_in_constructor": 7
   },
   "tools/dev_tool/lib/native_assembly_gate.dart": {
-    "always_use_package_imports": 1,
     "comment_references": 2
   },
   "tools/dev_tool/lib/native_hot_patch_tool.dart": {
-    "always_use_package_imports": 1,
     "prefer_constructors_over_static_methods": 1,
     "public_member_api_docs": 8,
     "sort_constructors_first": 5,
@@ -1179,7 +1141,6 @@
     "unnecessary_type_name_in_constructor": 7
   },
   "tools/dev_tool/lib/native_hot_patcher.dart": {
-    "always_use_package_imports": 10,
     "avoid_slow_async_io": 1,
     "comment_references": 2,
     "prefer_initializing_formals": 3,
@@ -1200,7 +1161,6 @@
     "specify_nonobvious_local_variable_types": 23
   },
   "tools/dev_tool/lib/native_libs_relauncher.dart": {
-    "always_use_package_imports": 11,
     "async_return_with_no_await": 2,
     "avoid_catches_without_on_clauses": 2,
     "avoid_catching_errors": 1,
@@ -1215,14 +1175,12 @@
     "unnecessary_type_name_in_constructor": 5
   },
   "tools/dev_tool/lib/native_libs_watch.dart": {
-    "always_use_package_imports": 2,
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 5,
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/native_patch_delivery.dart": {
-    "always_use_package_imports": 1,
     "async_return_with_no_await": 1,
     "avoid_escaping_inner_quotes": 3,
     "prefer_initializing_formals": 3,
@@ -1238,7 +1196,6 @@
   },
   "tools/dev_tool/lib/native_pipeline_assembler.dart": {
     "always_put_required_named_parameters_first": 4,
-    "always_use_package_imports": 28,
     "avoid_catches_without_on_clauses": 1,
     "comment_references": 1,
     "directives_ordering": 2,
@@ -1248,14 +1205,12 @@
     "unnecessary_type_name_in_constructor": 3
   },
   "tools/dev_tool/lib/outcome_renderer.dart": {
-    "always_use_package_imports": 5,
     "no_adjacent_strings_in_list": 1,
     "specify_nonobvious_local_variable_types": 21,
     "unnecessary_null_checks": 4,
     "use_null_aware_elements": 2
   },
   "tools/dev_tool/lib/package_roots.dart": {
-    "always_use_package_imports": 1,
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 11,
@@ -1268,7 +1223,6 @@
     "unnecessary_type_name_in_constructor": 5
   },
   "tools/dev_tool/lib/reload_pipeline.dart": {
-    "always_use_package_imports": 15,
     "async_return_with_no_await": 3,
     "avoid_catches_without_on_clauses": 1,
     "comment_references": 14,
@@ -1280,7 +1234,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/reload_strategy.dart": {
-    "always_use_package_imports": 7,
     "avoid_catches_without_on_clauses": 5,
     "comment_references": 4,
     "dangling_library_doc_comments": 1,
@@ -1291,7 +1244,6 @@
     "unnecessary_type_name_in_constructor": 9
   },
   "tools/dev_tool/lib/run_command.dart": {
-    "always_use_package_imports": 18,
     "avoid_escaping_inner_quotes": 4,
     "avoid_redundant_argument_values": 8,
     "comment_references": 2,
@@ -1303,7 +1255,6 @@
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/run_plan.dart": {
-    "always_use_package_imports": 12,
     "avoid_catching_errors": 1,
     "avoid_escaping_inner_quotes": 1,
     "avoid_positional_boolean_parameters": 1,
@@ -1329,7 +1280,6 @@
   },
   "tools/dev_tool/lib/session.dart": {
     "always_put_required_named_parameters_first": 1,
-    "always_use_package_imports": 12,
     "avoid_catches_without_on_clauses": 5,
     "avoid_positional_boolean_parameters": 4,
     "comment_references": 4,
@@ -1344,7 +1294,6 @@
     "use_null_aware_elements": 2
   },
   "tools/dev_tool/lib/session_host.dart": {
-    "always_use_package_imports": 12,
     "async_return_with_no_await": 1,
     "avoid_catches_without_on_clauses": 1,
     "prefer_initializing_formals": 2,
@@ -1372,12 +1321,10 @@
     "specify_nonobvious_local_variable_types": 1
   },
   "tools/dev_tool/lib/temp_dir.dart": {
-    "always_use_package_imports": 1,
     "dangling_library_doc_comments": 1,
     "specify_nonobvious_local_variable_types": 1
   },
   "tools/dev_tool/lib/toolchain_info.dart": {
-    "always_use_package_imports": 1,
     "comment_references": 4,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 22,
@@ -1386,12 +1333,10 @@
     "unnecessary_type_name_in_constructor": 4
   },
   "tools/dev_tool/lib/tunnel_command.dart": {
-    "always_use_package_imports": 1,
     "dangling_library_doc_comments": 1,
     "specify_nonobvious_local_variable_types": 4
   },
   "tools/dev_tool/lib/vm_service_client.dart": {
-    "always_use_package_imports": 4,
     "async_return_with_no_await": 3,
     "avoid_catches_without_on_clauses": 17,
     "avoid_escaping_inner_quotes": 7,
@@ -1411,7 +1356,6 @@
   },
   "tools/dev_tool/lib/vm_service_discovery.dart": {
     "always_put_required_named_parameters_first": 1,
-    "always_use_package_imports": 2,
     "async_return_with_no_await": 1,
     "comment_references": 2,
     "discarded_futures": 1,
@@ -1423,7 +1367,6 @@
     "unnecessary_type_name_in_constructor": 10
   },
   "tools/dev_tool/lib/vm_service_logs.dart": {
-    "always_use_package_imports": 1,
     "dangling_library_doc_comments": 1,
     "public_member_api_docs": 2,
     "sort_constructors_first": 1,
@@ -1435,19 +1378,16 @@
     "specify_nonobvious_local_variable_types": 1
   },
   "tools/dev_tool/lib/web_expression_compiler.dart": {
-    "always_use_package_imports": 1,
     "public_member_api_docs": 1,
     "sort_constructors_first": 1,
     "specify_nonobvious_local_variable_types": 1,
     "unnecessary_type_name_in_constructor": 1
   },
   "tools/dev_tool/lib/web_mode.dart": {
-    "always_use_package_imports": 1,
     "public_member_api_docs": 3,
     "unnecessary_type_name_in_constructor": 4
   },
   "tools/dev_tool/lib/web_module_server.dart": {
-    "always_use_package_imports": 5,
     "async_return_with_no_await": 2,
     "avoid_catches_without_on_clauses": 2,
     "avoid_escaping_inner_quotes": 2,
@@ -1466,7 +1406,6 @@
     "use_raw_strings": 1
   },
   "tools/dev_tool/lib/web_options.dart": {
-    "always_use_package_imports": 3,
     "avoid_escaping_inner_quotes": 4,
     "avoid_positional_boolean_parameters": 2,
     "missing_whitespace_between_adjacent_strings": 1,
@@ -1476,7 +1415,6 @@
     "unnecessary_type_name_in_constructor": 4
   },
   "tools/dev_tool/lib/web_pipeline_assembler.dart": {
-    "always_use_package_imports": 24,
     "avoid_catches_without_on_clauses": 2,
     "avoid_escaping_inner_quotes": 1,
     "prefer_const_constructors": 1,

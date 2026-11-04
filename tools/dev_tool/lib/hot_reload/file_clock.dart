@@ -10,7 +10,7 @@ library;
 
 import 'dart:io';
 
-import '../temp_dir.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
 
 /// The mtime of a file written now, as the filesystem stamps it.
 ///

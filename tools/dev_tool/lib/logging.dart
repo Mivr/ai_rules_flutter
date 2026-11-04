@@ -27,9 +27,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:logging/logging.dart';
-
-import 'dev_tool_exception.dart';
 
 export 'package:logging/logging.dart' show Logger, Level;
 

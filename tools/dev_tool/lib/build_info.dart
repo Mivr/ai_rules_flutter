@@ -14,11 +14,10 @@ library;
 
 import 'dart:convert';
 
+import 'package:flutter_bazel_dev_tool/bazel.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:vm_service/vm_service.dart' show RPCError;
-
-import 'bazel.dart';
-import 'dev_tool_exception.dart';
-import 'vm_service_client.dart';
 
 /// The service extension the app answers with. Registered pre-main, outside
 /// the agent's binding guard, so it is answerable before `runApp`.

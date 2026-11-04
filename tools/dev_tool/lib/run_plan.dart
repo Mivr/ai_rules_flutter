@@ -13,19 +13,18 @@ library;
 import 'dart:async';
 
 import 'package:args/args.dart';
-
-import 'bazel.dart';
-import 'dev_tool_exception.dart';
-import 'device.dart';
-import 'device_web.dart';
-import 'device_ios_sim.dart';
-import 'device_android.dart';
-import 'device_id.dart';
-import 'logging.dart';
-import 'toolchain_info.dart';
-import 'vm_service_discovery.dart';
-import 'web_mode.dart';
-import 'web_options.dart';
+import 'package:flutter_bazel_dev_tool/bazel.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/device_android.dart';
+import 'package:flutter_bazel_dev_tool/device_id.dart';
+import 'package:flutter_bazel_dev_tool/device_ios_sim.dart';
+import 'package:flutter_bazel_dev_tool/device_web.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
+import 'package:flutter_bazel_dev_tool/web_mode.dart';
+import 'package:flutter_bazel_dev_tool/web_options.dart';
 
 /// Refuses a compilation mode no device in [devices] can actually run.
 ///

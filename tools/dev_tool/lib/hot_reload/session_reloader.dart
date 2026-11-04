@@ -29,10 +29,10 @@
 /// is already here.
 library;
 
-import 'app_instance.dart';
-import 'applied_versions.dart';
-import 'compiler.dart';
-import 'workspace.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/app_instance.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/applied_versions.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/compiler.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
 
 class SessionReloader {
   /// The session's appId — how a request targets this unit.

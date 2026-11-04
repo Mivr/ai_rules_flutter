@@ -33,9 +33,8 @@
 /// command finishes."
 import 'dart:async';
 
+import 'package:flutter_bazel_dev_tool/command_failure.dart';
 import 'package:pool/pool.dart';
-
-import 'command_failure.dart';
 
 /// Handler signature for a registered command.
 typedef CommandHandler = Future<Map<String, dynamic>> Function(

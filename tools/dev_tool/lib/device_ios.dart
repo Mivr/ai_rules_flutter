@@ -9,19 +9,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/app_log.dart';
+import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/device_ios_lldb.dart';
+import 'package:flutter_bazel_dev_tool/host_tools.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/mdns_vm_service_discovery.dart';
+import 'package:flutter_bazel_dev_tool/native_patch_delivery.dart';
+import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_discovery.dart';
 import 'package:path/path.dart' as p;
-
-import 'app_log.dart';
-import 'device.dart';
-import 'device_ios_lldb.dart';
-import 'host_tools.dart';
-import 'logging.dart';
-import 'mdns_vm_service_discovery.dart';
-import 'native_patch_delivery.dart';
-import 'runfiles_helper.dart';
-import 'temp_dir.dart';
-import 'vm_service_client.dart';
-import 'vm_service_discovery.dart';
 
 final _logger = Logger('dev_tool.device');
 

@@ -75,8 +75,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'command_failure.dart';
-import 'command_runner.dart';
+import 'package:flutter_bazel_dev_tool/command_failure.dart';
+import 'package:flutter_bazel_dev_tool/command_runner.dart';
 
 /// Machine-readable JSON protocol handler.
 class MachineProtocol {

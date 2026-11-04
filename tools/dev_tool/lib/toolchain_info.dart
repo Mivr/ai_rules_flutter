@@ -13,9 +13,8 @@ import 'dart:convert';
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:path/path.dart' as p;
-
-import 'dev_tool_exception.dart';
 
 /// Toolchain paths resolved from Bazel.
 class ToolchainPaths {

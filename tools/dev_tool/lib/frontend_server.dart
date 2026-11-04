@@ -7,11 +7,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/compiler_config.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
 import 'package:pool/pool.dart';
-
-import 'compiler_config.dart';
-import 'logging.dart';
-import 'temp_dir.dart';
 
 final _logger = Logger('dev_tool.frontend_server');
 

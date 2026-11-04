@@ -22,23 +22,22 @@ library;
 
 import 'dart:async';
 
+import 'package:flutter_bazel_dev_tool/command_report.dart';
+import 'package:flutter_bazel_dev_tool/frontend_server.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/app_instance.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/applied_versions.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/asset_bundle.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/file_clock.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/readiness_gate.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/reload_orchestrator.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/source_uri_resolver.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/workspace.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/outcome_renderer.dart';
+import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
+import 'package:flutter_bazel_dev_tool/session.dart';
+import 'package:flutter_bazel_dev_tool/session_host.dart';
 import 'package:path/path.dart' as p;
-
-import 'frontend_server.dart';
-import 'hot_reload/app_instance.dart';
-import 'hot_reload/applied_versions.dart';
-import 'hot_reload/asset_bundle.dart';
-import 'hot_reload/file_clock.dart';
-import 'hot_reload/source_uri_resolver.dart';
-import 'hot_reload/readiness_gate.dart';
-import 'hot_reload/reload_orchestrator.dart';
-import 'hot_reload/workspace.dart';
-import 'command_report.dart';
-import 'logging.dart';
-import 'outcome_renderer.dart';
-import 'reload_strategy.dart';
-import 'session.dart';
-import 'session_host.dart';
 
 final _logger = Logger('dev_tool.reload_pipeline');
 

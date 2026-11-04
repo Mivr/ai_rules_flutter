@@ -41,9 +41,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:path/path.dart' as p;
-
-import 'dev_tool_exception.dart';
 
 /// Where [stabilizePackageRoots] wrote its copy, and what it changed.
 class StabilizedPackageConfig {

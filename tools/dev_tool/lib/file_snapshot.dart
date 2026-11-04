@@ -20,7 +20,7 @@ library;
 
 import 'dart:io';
 
-import 'native_libs_fingerprint.dart';
+import 'package:flutter_bazel_dev_tool/native_libs_fingerprint.dart';
 
 /// How much older than the last content read a file's mtime must be before a
 /// matching stamp proves its bytes unchanged.

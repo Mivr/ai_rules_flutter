@@ -6,7 +6,7 @@
 ///
 /// `Compiler` does not track "what's already applied to the running app"
 /// — that's `AppliedVersions`'s job, and the orchestrator composes them.
-import '../frontend_server.dart';
+import 'package:flutter_bazel_dev_tool/frontend_server.dart';
 
 /// Outcome of a single compile request.
 sealed class CompileOutcome {

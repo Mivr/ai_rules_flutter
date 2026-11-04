@@ -37,19 +37,18 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/bazel.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/file_snapshot.dart';
+import 'package:flutter_bazel_dev_tool/logging.dart';
+import 'package:flutter_bazel_dev_tool/native_hot_patch_tool.dart';
+import 'package:flutter_bazel_dev_tool/native_image_identity.dart';
+import 'package:flutter_bazel_dev_tool/native_libs_fingerprint.dart';
+import 'package:flutter_bazel_dev_tool/native_patch_delivery.dart';
+import 'package:flutter_bazel_dev_tool/native_patch_outcome.dart';
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
 import 'package:path/path.dart' as p;
 import 'package:vm_service/vm_service.dart' show RPCError;
-
-import 'bazel.dart';
-import 'dev_tool_exception.dart';
-import 'file_snapshot.dart';
-import 'logging.dart';
-import 'native_hot_patch_tool.dart';
-import 'native_image_identity.dart';
-import 'native_libs_fingerprint.dart';
-import 'native_patch_delivery.dart';
-import 'native_patch_outcome.dart';
-import 'temp_dir.dart';
 
 export 'native_patch_outcome.dart';
 

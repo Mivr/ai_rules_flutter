@@ -15,7 +15,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
-import 'dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 
 /// The one file a `hot_patch` target builds that the dev tool looks for by name.
 const hotPatchManifestSuffix = '.hot_patch.json';

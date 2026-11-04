@@ -15,9 +15,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter_bazel_dev_tool/app_log.dart';
 import 'package:vm_service/vm_service.dart';
-
-import 'app_log.dart';
 
 /// Decode a `Stdout`/`Stderr` event's payload, or null when the event carries
 /// none at all.

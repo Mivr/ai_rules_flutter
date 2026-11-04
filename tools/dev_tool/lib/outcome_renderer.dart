@@ -7,11 +7,11 @@
 /// whether a reload worked.
 library;
 
-import 'command_report.dart';
-import 'hot_reload/app_instance.dart';
-import 'hot_reload/flutter_error_report.dart';
-import 'hot_reload/reload_orchestrator.dart';
-import 'reload_strategy.dart';
+import 'package:flutter_bazel_dev_tool/command_report.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/app_instance.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/flutter_error_report.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/reload_orchestrator.dart';
+import 'package:flutter_bazel_dev_tool/reload_strategy.dart';
 
 /// The protocol / HTTP shape.
 ///

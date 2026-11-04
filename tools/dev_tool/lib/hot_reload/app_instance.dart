@@ -10,9 +10,8 @@
 /// is `.ignore()`d here.
 import 'dart:async';
 
-import 'flutter_error_report.dart';
-
-import '../vm_service_client.dart';
+import 'package:flutter_bazel_dev_tool/hot_reload/flutter_error_report.dart';
+import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 
 enum ApplyMode {
   hotReload,

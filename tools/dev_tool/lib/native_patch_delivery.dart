@@ -14,9 +14,8 @@ library;
 
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/temp_dir.dart';
 import 'package:path/path.dart' as p;
-
-import 'temp_dir.dart';
 
 /// Runs a process to completion. Injected so tests see every command.
 typedef DeliveryProcessRunner = Future<ProcessResult> Function(
