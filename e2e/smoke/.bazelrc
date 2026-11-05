@@ -1,1 +1,10 @@
 try-import %workspace%/.bazelrc.user
+
+# `dart analyze` and the `dart format` check run as an aspect over every Dart
+# target a `bazel test` names. The config line is `test`-scoped too: a `common`
+# flag also applies to `bazel fetch`, where it makes `@local_linux-x64` depend on
+# the real Flutter SDK download and breaks the offline lazy-fetch CI proof.
+test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
+test --output_groups=+dart_analyze
+test --output_groups=+dart_format
+test --@rules_dart//dart:analysis_config=//:analysis_config
