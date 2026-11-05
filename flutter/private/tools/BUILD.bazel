@@ -58,7 +58,6 @@ exports_files(
         "flutter_integration_test_runner.dart",
         "flutter_integration_test_launcher.dart",
         "flutter_integration_test_web_serve.dart",
-        "android_discovery_diagnostics.dart",
         "flutter_integration_test_android.dart",
         "flutter_integration_test_ios.dart",
         "ios_simulator_boot.dart",
@@ -119,7 +118,6 @@ dart_binary(
 dart_binary(
     name = "flutter_integration_test_runner",
     srcs = [
-        "android_discovery_diagnostics.dart",
         "bazel_test_protocol.dart",
         "chmod.dart",
         "crc32.dart",
@@ -475,7 +473,6 @@ _TOOL_SRCS = {
         "bazel_test_protocol.dart",
         "chmod.dart",
         "crc32.dart",
-        "android_discovery_diagnostics.dart",
         "flutter_integration_test_android.dart",
         "flutter_integration_test_ios.dart",
         "flutter_integration_test_launcher.dart",
@@ -490,7 +487,6 @@ _TOOL_SRCS = {
         "bazel_test_protocol.dart",
         "chmod.dart",
         "crc32.dart",
-        "android_discovery_diagnostics.dart",
         "flutter_integration_test_android.dart",
         "flutter_integration_test_launcher.dart",
         "flutter_integration_test_runner.dart",
@@ -502,7 +498,6 @@ _TOOL_SRCS = {
         "zip_writer.dart",
     ],
     "flutter_integration_test_android.dart": [
-        "android_discovery_diagnostics.dart",
         "flutter_integration_test_launcher.dart",
         "test_support.dart",
     ],
