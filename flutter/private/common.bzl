@@ -603,9 +603,7 @@ def collect_binding_contracts(native_deps):
             for lib in dep[FlutterNativeLibraryInfo].libraries.to_list():
                 pairs.append(struct(library = lib, contract = contract))
         else:
-            for f in dep[DefaultInfo].files.to_list():
-                if f.extension in ("so", "dylib", "dll"):
-                    pairs.append(struct(library = f, contract = ()))
+            pairs.extend([struct(library = f, contract = ()) for f in collect_native_libs([dep])])
     return pairs
 
 def _kernel_source_inputs(ctx):

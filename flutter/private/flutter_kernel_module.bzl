@@ -481,7 +481,6 @@ def flutter_kernel_module_action(ctx, tools, module, options):
     args = _kernel_module_base_args(ctx = ctx, package_config = package_config, stage = stage, sdk = sdk, options = options)
     _kernel_module_source_args(args = args, module = module, excluded = excluded, unused_inputs_list = unused_inputs_list, options = options)
 
-    runtime_files = getattr(tools, "runtime_files", None)
     direct_inputs = [
         package_config,
         tools.dartaotruntime,
@@ -510,7 +509,7 @@ def flutter_kernel_module_action(ctx, tools, module, options):
         ),
         tools = depset(
             direct = action_tools,
-            transitive = [runtime_files] if runtime_files != None else [],
+            transitive = [r for r in [getattr(tools, "runtime_files", None)] if r != None],
         ),
         outputs = [module.output, excluded] + ([unused_inputs_list] if unused_inputs_list != None else []) + ([module.koutline] if module.koutline != None else []),
         unused_inputs_list = unused_inputs_list,

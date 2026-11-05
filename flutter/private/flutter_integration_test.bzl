@@ -1297,13 +1297,9 @@ def _linux_integration_test_bundle(ctx, setup, kernel_dill, aot_output, assets, 
     bundle_config_file = ctx.actions.declare_file(ctx.label.name + "_linux_bundle_config.json")
     ctx.actions.write(bundle_config_file, json.encode(bundle_config))
 
-    extra_bundle_inputs = [kernel_dill] if setup.is_debug else [aot_output]
-    all_bundle_inputs = (
-        [bundle_config_file, assets, setup.sdk.icu_data, runner.binary] +
-        extra_bundle_inputs +
-        native_libs +
-        runner.engine_files
-    )
+    all_bundle_inputs = [bundle_config_file, assets, setup.sdk.icu_data, runner.binary]
+    all_bundle_inputs += [kernel_dill] if setup.is_debug else [aot_output]
+    all_bundle_inputs += native_libs + runner.engine_files
     exec_dart, dart_vm_files = resolve_exec_dart_vm(ctx, setup.sdk)
     ctx.actions.run(
         executable = exec_dart,

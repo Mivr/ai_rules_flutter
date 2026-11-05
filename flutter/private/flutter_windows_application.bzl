@@ -343,6 +343,27 @@ flutter_windows_runner_lib = rule(
 # Bundle assembly rule (pure assembler — no compilation)
 # =============================================================================
 
+def _find_runner_binary(ctx):
+    """Picks the runner executable out of the `runner` target's files.
+
+    Args:
+      ctx: The rule context.
+
+    Returns:
+      The runner `File`: the first `.exe` or non-header, non-source file, else the first file.
+    """
+    runner_files = ctx.attr.runner[DefaultInfo].files.to_list()
+    runner_binary = None
+    for f in runner_files:
+        if f.path.endswith(".exe") or (not f.path.endswith(".h") and not f.path.endswith(".cc")):
+            runner_binary = f
+            break
+    if not runner_binary and runner_files:
+        runner_binary = runner_files[0]
+    if not runner_binary:
+        fail("No runner binary found in runner target.")
+    return runner_binary
+
 def _flutter_windows_bundle_impl(ctx):
     app_info = ctx.attr.application[FlutterApplicationInfo]
     flutter_assets = app_info.flutter_assets
@@ -402,16 +423,7 @@ def _flutter_windows_bundle_impl(ctx):
         extra_inputs.append(app_info.aot_output)
 
     # Get the runner executable from the runner target.
-    runner_files = ctx.attr.runner[DefaultInfo].files.to_list()
-    runner_binary = None
-    for f in runner_files:
-        if f.path.endswith(".exe") or (not f.path.endswith(".h") and not f.path.endswith(".cc")):
-            runner_binary = f
-            break
-    if not runner_binary and runner_files:
-        runner_binary = runner_files[0]
-    if not runner_binary:
-        fail("No runner binary found in runner target.")
+    runner_binary = _find_runner_binary(ctx)
 
     copies.append({"src": runner_binary.path, "dst": app_name + ".exe"})
 
