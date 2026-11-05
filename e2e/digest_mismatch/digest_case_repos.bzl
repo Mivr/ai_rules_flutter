@@ -8,7 +8,9 @@ CI fetches each separately and greps the exact failure message (or the
 fetched bytes, for the correct digests).
 """
 
-load(":download.bzl", "pinned_download", "pinned_download_and_extract")
+load("@rules_flutter//flutter:utils.bzl", "pinned_download", "pinned_download_and_extract")
+
+visibility("private")
 
 def _fixture_url(repository_ctx):
     return "file://" + str(repository_ctx.path(repository_ctx.attr.fixture))

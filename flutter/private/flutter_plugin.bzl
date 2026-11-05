@@ -31,6 +31,8 @@ load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_chan
 load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
+visibility(["//flutter/..."])
+
 def build_plugin_struct(name, plugin_platforms):
     """Build a plugin metadata struct from per-platform metadata.
 

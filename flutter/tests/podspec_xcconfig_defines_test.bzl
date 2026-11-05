@@ -15,6 +15,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _copts_test_impl(ctx):
     """String-literal, whitespace and `$` defines survive objc_library tokenization."""
     env = unittest.begin(ctx)

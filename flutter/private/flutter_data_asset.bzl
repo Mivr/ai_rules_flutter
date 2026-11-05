@@ -11,6 +11,8 @@ hook's data asset and `rootBundle` loads it by.
 load("//flutter:providers.bzl", "FlutterDataAssetInfo", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_native_channels", flutter_info_provider = "flutter_info")
 
+visibility(["//flutter/..."])
+
 def _split_asset_id(asset_id):
     """Split a `package:<pkg>/<name>` asset id into (package, name).
 

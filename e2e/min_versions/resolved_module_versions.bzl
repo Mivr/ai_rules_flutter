@@ -8,6 +8,8 @@ carries. `ai_rules_dart` resolves from its `archive_override` in the root
 and their documented lifts.
 """
 
+visibility("private")
+
 def _version_from_module(text, module):
     """The first literal `version = "..."` in [text], failing when absent."""
     marker = 'version = "'

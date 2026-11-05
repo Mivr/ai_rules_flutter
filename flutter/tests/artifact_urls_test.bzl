@@ -13,6 +13,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _engine_artifact_url_test_impl(ctx):
     env = unittest.begin(ctx)
     url = engine_artifact_url(

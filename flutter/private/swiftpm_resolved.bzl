@@ -7,6 +7,8 @@ first and fail naming the resolved label. Pin classification is pure, so
 Starlark unit tests drive every pinned/unpinned shape without fetching.
 """
 
+visibility(["//flutter/..."])
+
 def is_swiftpm_identity(text):
     """Whether `text` is a usable SwiftPM package identity.
 

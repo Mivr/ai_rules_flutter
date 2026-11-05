@@ -14,6 +14,8 @@ load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
 
+visibility(["//flutter/..."])
+
 # -- Transitions & Architecture Helpers ----------------------------------------
 
 def _xtool_ios_transition_impl(settings, _attr):

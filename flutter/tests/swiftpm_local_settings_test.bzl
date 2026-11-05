@@ -17,6 +17,8 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package")
 load("//flutter/private:swiftpm_settings.bzl", "swiftpm_target_setting_entries")
 
+visibility(["//flutter/tests/..."])
+
 _MANIFEST = """// swift-tools-version:5.9
 import PackageDescription
 let package = Package(

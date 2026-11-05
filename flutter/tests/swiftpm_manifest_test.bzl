@@ -4,6 +4,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package", "parse_swiftpm_plugin_package")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _BIGINT = """// swift-tools-version:6.0
 //
 //  Package.swift

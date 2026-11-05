@@ -11,6 +11,8 @@ load("//flutter/private:flutter_android_registrant.bzl", "flutter_android_regist
 load("//flutter/private:flutter_linux_application.bzl", "flutter_linux_bundle_rule")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # -- compute_desktop_bundle_copies tests --
 
 def _linux_debug_copies_test_impl(ctx):

@@ -29,6 +29,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # -- shared bound ---------------------------------------------------------------------
 
 def _shared_bound_covers_monorepos_test_impl(ctx):

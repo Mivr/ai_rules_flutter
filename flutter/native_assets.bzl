@@ -46,6 +46,8 @@ load(
     _flutter_native_assets_manifest = "flutter_native_assets_manifest",
 )
 
+visibility("public")
+
 flutter_native_asset = _flutter_native_asset
 flutter_data_asset = _flutter_data_asset
 flutter_native_assets_manifest = _flutter_native_assets_manifest

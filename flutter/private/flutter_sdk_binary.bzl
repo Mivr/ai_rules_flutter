@@ -6,11 +6,9 @@ Usage:
 """
 
 load("//flutter:providers.bzl", "resolve_exec_dart")
-
-# The shell-template launcher lives in //dart while the helper lives with
-# the other private modules, like the macOS rule's rules_apple loads.
-# buildifier: disable=bzl-visibility
 load("//flutter/private:run_home.bzl", "RUN_HOME_SH", "RUN_HOME_SUPPRESS_ANALYTICS")
+
+visibility(["//flutter/..."])
 
 _BASH_RUNFILES_INIT = """\
 # --- begin runfiles.bash initialization v3 ---

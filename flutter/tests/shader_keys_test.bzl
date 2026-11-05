@@ -16,6 +16,8 @@ load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 load(":action_content.bzl", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 _FIXTURE = "//flutter/tests/shader_keys_fixture"
 
 def _root_key_is_short_path_test_impl(ctx):

@@ -40,6 +40,8 @@ load(
 load("//flutter/private:ios_app.bzl", "flutter_ios_app")
 load("//flutter/private:ios_sim_debug.bzl", "ios_sim_debug_app")
 
+visibility(["//flutter/..."])
+
 def exposes_package(deps, names):
     """True if any dep transitively exposes one of `names`.
 

@@ -15,6 +15,8 @@ load(
     "flutter_apple_plugin_objc_settings",
 )
 
+visibility(["//flutter/tests/..."])
+
 _STRING_DEFINES = [
     'LIBRARY_NAME="my-plugin"',
     'ESCAPED_NAME=\\"from-podspec\\"',

@@ -1,5 +1,7 @@
 """Shared validation and sanitization helpers for Flutter rules."""
 
+visibility(["//flutter/..."])
+
 def is_valid_bundle_id(bundle_id):
     """Check if a bundle_id is a well-formed reverse-DNS identifier.
 

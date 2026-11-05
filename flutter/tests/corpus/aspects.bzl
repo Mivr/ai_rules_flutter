@@ -9,6 +9,8 @@ corpus' aspect fixtures are analysed like any other target.
 load("//flutter:dev_files.bzl", "flutter_dev_files")
 load("//flutter:native_hot_patch.bzl", "flutter_native_hot_patch_aspect")
 
+visibility(["//flutter/tests/..."])
+
 def _corpus_aspects_impl(ctx):
     """Returns the dep's files, the aspects having run on their edges."""
     return [DefaultInfo(files = ctx.attr.dep[DefaultInfo].files)]

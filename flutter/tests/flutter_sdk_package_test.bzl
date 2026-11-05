@@ -16,6 +16,8 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubsp
 load("//flutter/private:flutter_sdk_package.bzl", "make_flutter_sdk_build_content")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # Verbatim `packages/flutter/pubspec.yaml` from the pinned Flutter 3.47.7.
 # Kept whole rather than trimmed to a minimal case: the shapes that break a
 # line-based parser are all here — comments *inside* the dependency block, a

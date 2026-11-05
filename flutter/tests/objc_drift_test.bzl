@@ -21,6 +21,8 @@ load("@rules_dart//dart:defs.bzl", "dart_test")
 load("//flutter:ios.bzl", "flutter_ios_app", "flutter_ios_registrant_gen")
 load(":apple_bundling.bzl", "fake_application")
 
+visibility(["//flutter/tests/..."])
+
 # The fixture plugin set, sorted the way fake_application sorts it.
 _DRIFT_PLUGINS = {
     "path_provider_foundation": "PathProviderPlugin",

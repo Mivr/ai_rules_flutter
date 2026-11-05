@@ -15,6 +15,8 @@ values have no place in a manifest Bazel translates. Comments (line and
 nesting block comments, as Swift accepts them) never reach the parser.
 """
 
+visibility(["//flutter/..."])
+
 _SWIFTPM_LEX_BOUND_SLACK = 2
 
 def _swiftpm_is_word_start(c):

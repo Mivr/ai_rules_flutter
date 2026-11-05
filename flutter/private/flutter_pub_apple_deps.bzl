@@ -14,6 +14,8 @@ load(":swiftpm_manifest.bzl", "parse_swiftpm_plugin_package")
 load(":swiftpm_resolved.bzl", "swiftpm_spoke_name")
 load(":swiftpm_translate.bzl", "swiftpm_locate_package_dep")
 
+visibility(["//flutter/..."])
+
 def _apple_swiftpm_plugin_target(model, manifest_dir, srcs_dirs):
     """Find the manifest target the spoke builds from this manifest.
 

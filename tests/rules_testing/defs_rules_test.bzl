@@ -6,6 +6,8 @@ load("//flutter:defs.bzl", "flutter_native_library")
 load("//flutter:providers.bzl", "FlutterNativeLibraryInfo")
 load(":rule_coverage.bzl", "expect_default_outputs", "expect_no_actions")
 
+visibility(["//tests/..."])
+
 def _flutter_native_library_analysis_test_impl(env, target):
     env.expect.that_target(target).has_provider(FlutterNativeLibraryInfo)
     expect_default_outputs(env, target, ["libasset_fixture.so"])

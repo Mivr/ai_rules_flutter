@@ -7,6 +7,8 @@ analysis rather than produce it.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
+visibility("private")
+
 def _refused_impl(ctx):
     env = analysistest.begin(ctx)
     asserts.expect_failure(

@@ -10,6 +10,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # Federated umbrella — only default_package per platform, no plugin classes.
 _PATH_PROVIDER_PUBSPEC = """\
 name: path_provider

@@ -28,6 +28,8 @@ load(
 )
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "inputs_fixture"
 _MAIN = "lib/language_version_main.dart"
 _BOOTSTRAP_URI = "package:prebuilt_probe/main.dart"

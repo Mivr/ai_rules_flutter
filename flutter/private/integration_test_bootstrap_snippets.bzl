@@ -9,6 +9,8 @@ as substitutions. Each snippet stays well under the length that makes a
 literal a template (see `integration_test_bootstrap/*.dart.tpl` for those).
 """
 
+visibility(["//flutter/..."])
+
 # The binding the bootstrap uses when `deps` does not expose
 # `package:integration_test`: a `LiveTestWidgetsFlutterBinding` that keeps the
 # app's own HTTP client and text input registration and follows the surface

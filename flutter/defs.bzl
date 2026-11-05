@@ -58,6 +58,8 @@ load("//flutter/private:flutter_plugin.bzl", _flutter_plugin = "flutter_plugin")
 load("//flutter/private:flutter_prebuilt_test.bzl", _flutter_prebuilt_test = "flutter_prebuilt_test")
 load("//flutter/private:flutter_test.bzl", _flutter_test = "flutter_test")
 
+visibility("public")
+
 flutter_aot_target = _flutter_aot_target
 
 def flutter_application(name, package_name = "", **kwargs):

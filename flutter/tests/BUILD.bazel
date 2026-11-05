@@ -19,6 +19,7 @@ load(":cpp_client_wrapper_test.bzl", "cpp_client_wrapper_test_suite")
 load(":custom_kernel_defines_test.bzl", "custom_kernel_defines_test_suite")
 load(":define_flagfiles_test.bzl", "define_flagfiles_test_suite")
 load(":dev_incremental_serialization_test.bzl", "dev_incremental_serialization_test_suite")
+load(":facade_reexports_test.bzl", "facade_reexports_test_suite")
 load(":flutter_apple_xcframework_import_test.bzl", "flutter_apple_xcframework_import_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
@@ -479,6 +480,8 @@ shader_compile_test_suite(name = "shader_compile_test")
 shader_keys_test_suite(name = "shader_keys_test")
 
 toolchains_repo_test_suite(name = "toolchains_repo_test")
+
+facade_reexports_test_suite(name = "facade_reexports_test")
 
 flutter_application_test_suite(name = "flutter_application_test")
 

@@ -63,6 +63,8 @@ load("//flutter/private:flutter_linux_engine_rule.bzl", _flutter_linux_engine_ru
 load("//flutter/private:flutter_linux_plugin_library.bzl", _flutter_linux_plugin_library = "flutter_linux_plugin_library")
 load("//flutter/private:flutter_linux_registrant.bzl", _flutter_linux_registrant = "flutter_linux_registrant")
 
+visibility("public")
+
 flutter_integration_test = _flutter_integration_test
 
 # -- Composable rules (Tier 2) ------------------------------------------------

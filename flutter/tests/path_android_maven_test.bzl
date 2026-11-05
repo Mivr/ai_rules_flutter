@@ -12,6 +12,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter/private:flutter_pub_maven.bzl", "path_spoke_maven_inputs")
 load("//flutter/private:gradle_plugin.bzl", "resolve_plugin_maven_deps")
 
+visibility(["//flutter/tests/..."])
+
 def _path_maven_ctx(mapping, ignore):
     """Fake path-spoke context carrying the two Android Maven attributes.
 

@@ -21,6 +21,8 @@ Two explicit modes, both never-wrong:
       debuggable VM service.
 """
 
+visibility(["//flutter/..."])
+
 _TOOL = Label("//flutter/private/tools:merge_plists")
 
 def _flutter_plist_merge_impl(ctx):

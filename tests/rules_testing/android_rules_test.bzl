@@ -15,6 +15,8 @@ load(
 load("//flutter/tests:apple_bundling.bzl", "fake_application")
 load(":rule_coverage.bzl", "expect_action", "expect_default_outputs", "expect_no_actions")
 
+visibility(["//tests/..."])
+
 def _android_manifest_gen_test_impl(env, target):
     expect_default_outputs(env, target, ["AndroidManifest.xml"])
     expect_action(

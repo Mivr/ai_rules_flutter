@@ -43,6 +43,8 @@ load(
 load(":flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugin_bundle = "flutter_apple_plugin_bundle")
 load(":flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import")
 
+visibility(["//flutter/..."])
+
 FlutterApplePluginInfo = _FlutterApplePluginInfo
 flutter_xtool_apple_plugin_library = _flutter_xtool_apple_plugin_library
 objc_copts_xtool_refusal = _objc_copts_xtool_refusal

@@ -25,6 +25,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _LINUX_ONLY = ["@platforms//os:linux"]
 
 _DBG = {

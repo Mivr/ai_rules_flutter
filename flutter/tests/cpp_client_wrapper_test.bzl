@@ -10,6 +10,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _artifact_path_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(

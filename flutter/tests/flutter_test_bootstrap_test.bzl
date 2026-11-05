@@ -11,6 +11,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_test.bzl", "make_bootstrap_content")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _TEST_IMPORT = "../../pkg/test/widget_test.dart"
 _COMPARATOR_IMPORT = "my_test.golden_comparator.dart"
 

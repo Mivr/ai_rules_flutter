@@ -21,6 +21,8 @@ load(
     "translate_swiftpm_package",
 )
 
+visibility(["//flutter/..."])
+
 _SWIFTPM_DEFAULT_DIRS = ["Sources", "Source", "src", "srcs"]
 
 def _swiftpm_repo_fail(identity, detail):

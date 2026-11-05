@@ -8,6 +8,8 @@ exactly-one check are the whole contract.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
+visibility(["//flutter/tests/..."])
+
 def written_json(env, suffix):
     """Decode the content of the single `ctx.actions.write` output ending in `suffix`.
 

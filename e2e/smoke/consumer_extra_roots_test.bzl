@@ -10,7 +10,9 @@ already determine its root.)
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
-load("@rules_flutter//flutter/tests:action_content.bzl", "package_entry", "written_json")
+load(":action_content.bzl", "package_entry", "written_json")
+
+visibility("private")
 
 def _ghost_roots_test_impl(ctx):
     env = analysistest.begin(ctx)

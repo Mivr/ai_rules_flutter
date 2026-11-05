@@ -34,6 +34,8 @@ load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
 load("//flutter/private:validation.bzl", "validate_dart_defines")
 
+visibility(["//flutter/..."])
+
 COPY_TO_DIRECTORY_TOOLCHAINS = _COPY_TO_DIRECTORY_TOOLCHAINS
 resolve_exec_dart = _resolve_exec_dart
 resolve_exec_dart_vm = _resolve_exec_dart_vm
@@ -2048,9 +2050,7 @@ KERNEL_COMPILE_ATTRS = {
               "a kernel or an AOT artifact have no bundle for it to reach.",
         providers = [DartInfo],
     ),
-    "defines": attr.string_list(
-        doc = "Dart environment defines (-D flags).",
-    ),
+    "defines": attr.string_list(doc = "Dart environment defines (-D flags)."),
 } | EXTRA_DART_DEFINES_ATTR | BUILD_MODE_ATTR | INCREMENTAL_KERNEL_ATTRS
 
 def _aspect_target_platform(ctx, fixed_platform):

@@ -13,6 +13,8 @@ pool at `p = 6000` stays out of `//...` builds.
 
 load("//flutter:defs.bzl", "flutter_asset_bundle", "flutter_library")
 
+visibility(["//flutter/tests/..."])
+
 def _declare_weight(name, count):
     """Declares `count` generated files and returns the base's pub attrs.
 

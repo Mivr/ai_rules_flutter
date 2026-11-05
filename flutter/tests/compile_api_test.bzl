@@ -47,6 +47,8 @@ load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs
 load("//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools", "flutter_kernel_dills", "flutter_kernel_options", "flutter_kernel_outputs", "flutter_kernel_sources")
 load(":action_content.bzl", "package_entry", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 # `HOST_COMPATIBLE` without the `//flutter/private` load this file must not
 # have: these compiles run on a host OS only.
 _HOST_COMPATIBLE = select({

@@ -27,6 +27,8 @@ this one. `pub.pub()` (in non-Flutter modules) keeps using
 `pub_lock_hub`.
 """
 
+visibility(["//flutter/..."])
+
 def make_flutter_pub_hub_build_content(packages, spoke_prefix, scc_targets = {}):
     """Renders the root `BUILD.bazel` aliases for a `flutter_pub_lock_hub` repo.
 

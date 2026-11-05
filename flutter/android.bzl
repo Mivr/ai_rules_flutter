@@ -51,54 +51,36 @@ Two tiers of API:
 
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_android//android:rules.bzl", _android_binary = "android_binary", _android_library = "android_library")
+load("@rules_android//android:rules.bzl", _android_binary = "android_binary")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
 load("//flutter/private:constants.bzl", _ANDROID_ABI_FOR_ARCH = "ANDROID_ABI_FOR_ARCH", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
 load("//flutter/private:flutter_android_apk_overlay.bzl", _flutter_android_apk_overlay = "flutter_android_apk_overlay")
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_binary_proxy.bzl", _flutter_android_binary_proxy = "flutter_android_binary_proxy")
+load("//flutter/private:flutter_android_engine.bzl", _flutter_android_engine = "flutter_android_engine")
+load("//flutter/private:flutter_android_engine_jar.bzl", _flutter_android_engine_jar = "flutter_android_engine_jar")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
 load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_plugins_aggregator = "flutter_android_plugins_aggregator", _flutter_android_registrant = "flutter_android_registrant")
+
+visibility("public")
 
 # Re-export constants for user BUILD files.
 ANDROID_MIN_SDK_VERSION = _ANDROID_MIN_SDK_VERSION
 ANDROID_TARGET_SDK_VERSION = _ANDROID_TARGET_SDK_VERSION
 
-# AndroidX deps of flutter.jar, mirroring the dependency list of Flutter's
-# official io.flutter:flutter_embedding_* Maven POM (the deps every
-# Gradle-built Flutter app ships): lifecycle for FlutterActivity's
-# LifecycleRegistry, window/window-java for foldable display features, core
-# for ContextCompat/ViewCompat/input, tracing for the engine's TraceSection,
-# fragment for FlutterFragment(Activity), exifinterface for image decoding,
-# and relinker for engine .so loading. The POM's lifecycle-common-java8 and
-# lifecycle-process entries are omitted: at the lifecycle version pinned here
-# their classes live in lifecycle-common, and the embedding never references
-# lifecycle-process types.
-#
-# `flutter_android_engine` *exports* these: the POM declares them at compile
-# scope, so in Gradle builds everything that compiles against the embedding
-# AAR — runner sources, the plugin registrant, and every Flutter plugin —
-# sees them on its compile classpath transitively. Exporting reproduces
-# that contract. It adds nothing to the APK that the engine target wasn't
-# already carrying at runtime.
-_ANDROIDX_EMBEDDING_DEPS = [
-    "@rules_android_maven//:androidx_annotation_annotation",
-    "@rules_android_maven//:androidx_core_core",
-    "@rules_android_maven//:androidx_exifinterface_exifinterface",
-    "@rules_android_maven//:androidx_fragment_fragment",
-    "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
-    "@rules_android_maven//:androidx_lifecycle_lifecycle_runtime",
-    "@rules_android_maven//:androidx_tracing_tracing",
-    "@rules_android_maven//:androidx_window_window",
-    "@rules_android_maven//:androidx_window_window_java",
-    "@rules_android_maven//:com_getkeepsafe_relinker_relinker",
-]
-
 # -- Composable rules (Tier 2) ------------------------------------------------
 
 flutter_android_bundle = _flutter_android_bundle
+
+# Imports the Flutter engine (flutter.jar) as an android_library; see
+# `flutter/private/flutter_android_engine.bzl`.
+flutter_android_engine = _flutter_android_engine
+
+# The engine jar with its native libraries stripped. The generated engine
+# repositories' BUILD files load it from here.
+flutter_android_engine_jar = _flutter_android_engine_jar
 
 # Finishes a payload-free android_binary into a signed APK by injecting the
 # Flutter payload (native libraries and flutter_assets) after resource
@@ -228,81 +210,6 @@ def flutter_android_plugin_library(name, flutter_engine = None, tags = None, **k
 # flutter_application's transitive FlutterInfo. Wired automatically by
 # flutter_android_app; expose for Tier-2 control.
 flutter_android_registrant = _flutter_android_registrant
-
-# rule_test_coverage: no-actions
-def flutter_android_engine(name, android_abi = "arm64", neverlink = False, **kwargs):
-    """Imports the Flutter engine (flutter.jar) as a java_import target.
-
-    Auto-selects debug or release engine based on Bazel compilation mode:
-    - Debug (-c dbg): JIT engine for emulator/iterative development.
-    - Release (-c opt / default): AOT engine for production.
-
-    The engine's native libraries are stripped with the NDK's `llvm-strip
-    --strip-unneeded`, as a Gradle build strips them, so the Android NDK
-    C++ toolchain must be registered (see the README's Android section).
-
-    A plugin library compiles against the engine but must not package it:
-    the app's own engine, of the app's ABI, is the one that ships. Give a
-    plugin a `neverlink = True` engine, as Gradle gives a plugin the
-    embedding with `compileOnly`. A linked one puts a second engine in the
-    APK, which for an x64 app is an arm64 `libflutter.so` that makes Android
-    install the app as arm64 and crash at launch.
-
-    Args:
-        name: Target name. Add to android_binary deps.
-        android_abi: Engine ABI — "arm64" (default) or "x64".
-        neverlink: Compile against the engine without packaging it. For
-            `flutter_android_plugin_library(flutter_engine = ...)`; the
-            engine in the app's `android_binary` deps leaves it False.
-        **kwargs: Additional arguments (e.g. visibility, tags).
-    """
-    tags = kwargs.pop("tags", ["manual"])
-
-    # Map short ABI names to repo names.
-    abi_to_repo = {
-        "arm64": "flutter_android_engine_arm64",
-        "x64": "flutter_android_engine_x64",
-    }
-    repo = abi_to_repo.get(android_abi)
-    if not repo:
-        fail("Unsupported android_abi '%s'. Use arm64 or x64." % android_abi)
-
-    # `deps` (not just the wrapper's exports) matters here: flutter.jar's
-    # own desugar action takes its classpath from the java_import's
-    # direct deps, and desugaring io.flutter.* against an incomplete
-    # classpath fails the deploy jar's desugar-dependency check.
-    _java_import(
-        name = "_%s_jar" % name,
-        # The engine with its native libraries stripped, as Gradle packages
-        # it (flutter_android_engine_jar.bzl).
-        jars = select({
-            "@rules_flutter//flutter/private:dbg": [Label("@%s//:debug_stripped" % repo)],
-            # Named through rules_flutter's own repo mapping, so a consumer
-            # needs no use_repo entry for a repo only profile builds fetch.
-            "@rules_flutter//flutter/private:profile": [Label("@%s_profile//:stripped" % repo)],
-            "//conditions:default": [Label("@%s//:stripped" % repo)],
-        }),
-        tags = tags,
-        neverlink = neverlink,
-        deps = _ANDROIDX_EMBEDDING_DEPS,
-    )
-
-    # The android_library wrapper carries the embedding's R8 keep rules
-    # (the @androidx.annotation.Keep contract FlutterJNI relies on) to the
-    # consuming android_binary — the role the Maven embedding AAR's
-    # consumer proguard config plays in Gradle builds. java_import cannot
-    # declare proguard_specs, hence the wrapper. The androidx artifacts
-    # are additionally exported so consumers compile against the same
-    # classpath the embedding POM gives Gradle builds (see
-    # _ANDROIDX_EMBEDDING_DEPS).
-    _android_library(
-        name = name,
-        exports = ["_%s_jar" % name] + _ANDROIDX_EMBEDDING_DEPS,
-        proguard_specs = ["@rules_flutter//flutter/private/runners/android:flutter_engine_proguard.pro"],
-        neverlink = neverlink,
-        tags = tags,
-        **kwargs
-    )
 
 def flutter_android_manifest_gen(
         name,

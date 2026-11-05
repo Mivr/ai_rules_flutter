@@ -7,11 +7,11 @@ failure messages whose placeholders once rendered literally.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-
-# buildifier: disable=bzl-visibility
 load("//flutter/private:local_sdk.bzl", "copy_failed_message", "engine_cache_dir", "host_engine_cache_dir", "macos_framework_cache_path", "missing_local_file_message", "missing_local_source_message")
 load("//flutter/private:versions.bzl", "unknown_version_message")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
+
+visibility(["//flutter/tests/..."])
 
 def _engine_cache_dir_test_impl(ctx):
     env = unittest.begin(ctx)

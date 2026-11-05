@@ -12,6 +12,8 @@ load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "WINDOWS_CPP_CLIENT_WRAPPER_FILES", "cpp_client_wrapper_artifact_path", "cpp_client_wrapper_missing_error", "cpp_client_wrapper_sha_error", "engine_filegroup_for_os", "extract_macos_inner_framework")
 load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "macos_framework_cache_path", "resolve_local_sdk_root")
 
+visibility(["//flutter/..."])
+
 def _flutter_desktop_engine_repo_impl(repository_ctx):
     engine_revision = repository_ctx.attr.engine_revision
     target_os = repository_ctx.attr.target_os

@@ -16,6 +16,8 @@ without relying on any host `ar`, `xz`, or `unzip` binaries.
 load(":artifact_urls.bzl", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
 
+visibility(["//flutter/..."])
+
 CHROME_HEADLESS_SHELL_VERSION = "155.0.8059.84"
 
 CHROME_HEADLESS_SHELL_SHA256 = "a5d71b91aa996fef00517cd212b2dfb816b43055edefbe727e6fd562d4ae1f9c"

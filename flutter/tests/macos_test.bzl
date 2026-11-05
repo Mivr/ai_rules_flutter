@@ -32,6 +32,8 @@ load(
     "outputs_under_target_dir_test",
 )
 
+visibility(["//flutter/tests/..."])
+
 def _macos_arm64_transition_impl(_settings, _attr):
     return {
         "//command_line_option:platforms": str(Label("//flutter/platforms:macos_arm64")),

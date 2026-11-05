@@ -15,6 +15,8 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_cc//cc/common:objc_info.bzl", "ObjcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo", "swift_clang_module_aspect")
 
+visibility(["//flutter/..."])
+
 _OPTIONAL_PROVIDERS = [AppleDynamicFrameworkInfo, ObjcInfo, SwiftInfo, OutputGroupInfo]
 
 def _module_maps(dep):

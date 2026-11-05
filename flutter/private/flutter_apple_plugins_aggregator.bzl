@@ -9,6 +9,8 @@ load("@rules_cc//cc/common:objc_info.bzl", "ObjcInfo", "new_objc_provider")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo", "swift_clang_module_aspect")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo")
 
+visibility(["//flutter/..."])
+
 def _append_unique(acc, values):
     """Appends each value not already present, preserving first-seen order."""
     for value in values:

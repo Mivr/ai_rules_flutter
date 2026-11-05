@@ -57,6 +57,8 @@ load("//flutter/private:versions.bzl", "custom_engine_base_url", "custom_source_
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "resolve_darwin_sdk_from_modules")
 load(":repositories.bzl", "flutter_register_toolchains")
 
+visibility("public")
+
 _DEFAULT_NAME = "flutter"
 
 # Flutter SDK packages that exist as source under packages/ in the Flutter repo.

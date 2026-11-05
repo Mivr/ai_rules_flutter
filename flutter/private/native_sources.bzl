@@ -22,6 +22,8 @@ nothing about the others. Answering for all of them would withhold a reload over
 a library nobody touched, which is what a shared list did when it was tried.
 """
 
+visibility(["//flutter/..."])
+
 NativeSourcesInfo = provider(
     doc = "Source files a native library below this target is built from.",
     fields = {"sources": "depset[File]"},

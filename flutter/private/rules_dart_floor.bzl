@@ -14,6 +14,8 @@ so a floor bump touches one file.
 
 load("@rules_dart//dart/pub:yaml_parser.bzl", "pubspec_sdk_constraint_error")
 
+visibility(["//flutter/..."])
+
 RULES_DART_FLOOR = "0.24.0"
 
 # A pubspec-shaped stream the floor reader refuses and the previous release

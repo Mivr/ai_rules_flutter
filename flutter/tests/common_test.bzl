@@ -12,6 +12,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _wrapper_import_depth_4_test_impl(ctx):
     """Wrapper at bazel-out/k8-fastbuild/bin/my_app/ (depth=4) to my_app/lib/main.dart."""
     env = unittest.begin(ctx)

@@ -27,6 +27,8 @@ silently mis-merge a variant manifest it does not fully understand.
 load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
 load("//flutter/private:flutter_android_registrant.bzl", "FlutterAndroidPluginManifestsInfo")
 
+visibility(["//flutter/..."])
+
 _TOOL = Label("//flutter/private/tools:merge_android_manifests")
 
 def _exported_library_manifests(libraries):

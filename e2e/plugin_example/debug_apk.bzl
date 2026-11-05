@@ -10,6 +10,8 @@ default-configuration `dart_test` can inspect a real debug APK. The test target
 itself stays in the default configuration and never compiles under `-c dbg`.
 """
 
+visibility("private")
+
 def _force_dbg_impl(_settings, _attr):
     return {"//command_line_option:compilation_mode": "dbg"}
 

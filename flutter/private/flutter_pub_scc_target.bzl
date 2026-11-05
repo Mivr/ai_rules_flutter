@@ -12,6 +12,8 @@ load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_info")
 load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR")
 
+visibility(["//flutter/..."])
+
 def _flutter_pub_scc_member_target_impl(ctx):
     """Forwards merged Dart providers and combines SCC + outside FlutterInfo."""
     if not ctx.attr.package_name:

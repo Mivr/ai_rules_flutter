@@ -21,6 +21,8 @@ load("//flutter/private:flutter_info.bzl", "flutter_info", "flutter_pub_channels
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "inputs_fixture"
 _MAIN = "lib/language_version_main.dart"
 

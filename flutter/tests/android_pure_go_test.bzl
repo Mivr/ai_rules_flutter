@@ -11,6 +11,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_android_binary_proxy.bzl", "testing")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _enables_pure_by_default_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(

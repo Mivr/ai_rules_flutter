@@ -16,6 +16,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_pub_scan.bzl", "fetch_hosted_archive")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _SHA256 = "16801f5b6333b3140ba8905d1de811cc718eb6bd0f567fdcfbc4b0929efce2f3"
 
 _REFUSAL = "pub package \"evil\": hard-link \"lib/evil.dart\" points at \"../../outside.txt\""

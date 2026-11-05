@@ -13,6 +13,8 @@ load(
 load("//flutter/private:versions.bzl", "ARTIFACT_CHECKSUMS", "FLUTTER_VERSIONS", "custom_engine_base_url", "custom_source_url", "flutter_artifact_sha256", "flutter_source_sha256", "merge_custom_versions")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _latest_version_first_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.equals(env, "3.41.2", FLUTTER_VERSIONS.keys()[0])

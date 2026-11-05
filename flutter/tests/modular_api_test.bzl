@@ -46,6 +46,8 @@ load(
 )
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 
+visibility(["//flutter/tests/..."])
+
 _TEST_URI = "package:modular_api_b/b.dart"
 
 def _modular_api_test_caller_impl(ctx):

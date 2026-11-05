@@ -11,6 +11,8 @@
   configured).
 """
 
+visibility(["//flutter/..."])
+
 APPLE_BACKEND_VALUES = [
     "rules_apple",
     "xtool",

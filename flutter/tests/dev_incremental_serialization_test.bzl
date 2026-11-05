@@ -13,6 +13,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs")
 load("//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools", "flutter_kernel_dills", "flutter_kernel_options", "flutter_kernel_outputs", "flutter_kernel_sources")
 
+visibility(["//flutter/tests/..."])
+
 _MARKER = "--dev-incremental-serialization"
 _INCR = str(Label("//flutter:incremental_kernel"))
 _DEV = str(Label("//flutter:dev_incremental_serialization"))

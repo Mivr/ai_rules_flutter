@@ -16,6 +16,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _DIO_DEPS = ["async", "collection", "dio_web_adapter", "path"]
 _OTHER_DEPS = ["collection", "meta"]
 

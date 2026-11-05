@@ -38,6 +38,8 @@ load(":artifact_urls.bzl", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
 load(":xtool_sdk_render.bzl", _XTOOL_DARWIN_TARGETS = "XTOOL_DARWIN_TARGETS", _generate_xtool_darwin_sdk_build = "generate_xtool_darwin_sdk_build", _render_xtool_wrapper_scripts = "render_xtool_wrapper_scripts")
 
+visibility(["//flutter/..."])
+
 # Re-exported for the repository tests, which load them from this file.
 XTOOL_DARWIN_TARGETS = _XTOOL_DARWIN_TARGETS
 generate_xtool_darwin_sdk_build = _generate_xtool_darwin_sdk_build

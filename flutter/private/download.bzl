@@ -19,6 +19,8 @@ except the digest is mandatory and validated twice:
 fails the fetch. Do not special-case call sites; keep this file small.
 """
 
+visibility(["//flutter/..."])
+
 _HEX_DIGITS = "0123456789abcdef"
 
 def _describe_url(kwargs):

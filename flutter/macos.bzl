@@ -60,7 +60,13 @@ Two tiers of API:
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter/private:constants.bzl", _MACOS_MINIMUM_OS_VERSION = "MACOS_MINIMUM_OS_VERSION")
-load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library", _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library")
+load(
+    "//flutter/private:flutter_apple_plugin_library.bzl",
+    _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library",
+    _flutter_apple_plugin_objc_library = "flutter_apple_plugin_objc_library",
+    _flutter_apple_plugin_objc_settings = "flutter_apple_plugin_objc_settings",
+    _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library",
+)
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_apple_xcframework_import.bzl", _flutter_apple_xcframework_import = "flutter_apple_xcframework_import")
 load("//flutter/private:flutter_macos_application.bzl", _flutter_macos_framework_rule = "flutter_macos_framework", _flutter_macos_native_libs_rule = "flutter_macos_native_libs", _flutter_macos_privacy_manifests_rule = "flutter_macos_privacy_manifests")
@@ -68,6 +74,12 @@ load("//flutter/private:flutter_macos_registrant.bzl", _flutter_macos_registrant
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge")
 load("//flutter/private:flutter_xtool_bundle.bzl", _flutter_darwin_xcframework_import = "flutter_darwin_xcframework_import", _flutter_xtool_bundle_version = "flutter_xtool_bundle_version", _flutter_xtool_macos_bundle = "flutter_xtool_macos_bundle")
 load("//flutter/private:macos_app.bzl", _flutter_macos_app = "flutter_macos_app", _flutter_macos_engine = "flutter_macos_engine")
+
+visibility("public")
+
+# Re-exported for the generated local-plugin BUILD files and `e2e/ios_example`.
+flutter_apple_plugin_objc_library = _flutter_apple_plugin_objc_library
+flutter_apple_plugin_objc_settings = _flutter_apple_plugin_objc_settings
 
 # Re-export for user BUILD files.
 MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION

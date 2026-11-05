@@ -36,6 +36,8 @@ case-only difference can neither hide an escape nor loop the walk.
 load(":flutter_pub_assets.bzl", "is_asset_variant_dir")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "scoped_tree_bound_error")
 
+visibility(["//flutter/..."])
+
 # Top-level names a path-spoke link walk never descends into: build output,
 # pub's own tool state, the example app (whose `flutter pub get` leaves a
 # `.plugin_symlinks` cycle back to the package root next to its own `build/`

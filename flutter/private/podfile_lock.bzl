@@ -17,6 +17,8 @@ load(
     "unquote",
 )
 
+visibility(["//flutter/..."])
+
 _ALLOWED_TOP_LEVEL = {
     "CHECKOUT OPTIONS": True,
     "COCOAPODS": True,

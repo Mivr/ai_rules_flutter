@@ -5,6 +5,8 @@ pure, bounded line inspection: checking indentation tabs, detecting flow syntax
 and anchors, counting indentation, and parsing pod entry and dependency lines.
 """
 
+visibility(["//flutter/..."])
+
 _FLOW_OR_ANCHOR_CHARS = ("[", "]", "{", "}", "&", "*")
 
 def make_refusal(label, line_num, detail):

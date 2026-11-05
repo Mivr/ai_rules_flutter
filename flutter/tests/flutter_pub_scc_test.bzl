@@ -65,6 +65,8 @@ load(
 load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _hub_build_content_empty_scc_test_impl(ctx):
     """Hub BUILD and android/BUILD are byte-identical when scc_targets is empty."""
     env = unittest.begin(ctx)
@@ -361,6 +363,12 @@ def _merged_spoke_build_2cycle_test_impl(ctx):
     asserts.true(env, '"//cycle_a:cycle_a"' in root_build, root_build)
     asserts.true(env, '"//cycle_b:cycle_b"' in root_build, root_build)
     asserts.true(env, '"@hub__outside_dep//:outside_dep"' in root_build, root_build)
+    asserts.true(
+        env,
+        'load("@rules_flutter//flutter:utils.bzl", "flutter_pub_scc_member_target")' in root_build,
+        root_build,
+    )
+    asserts.true(env, "flutter/private" not in root_build, root_build)
     asserts.true(env, 'flutter_pub_scc_member_target(\n    name = "cycle_a",' in root_build, root_build)
     asserts.true(env, 'flutter_pub_scc_member_target(\n    name = "cycle_b",' in root_build, root_build)
     asserts.true(env, '"//cycle_a:_flutter_info"' in root_build, root_build)

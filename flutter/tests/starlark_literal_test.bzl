@@ -28,6 +28,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _literal_round_trip_test_impl(ctx):
     """Quotes, backslashes, newlines, `$` and non-ASCII survive the helper."""
     env = unittest.begin(ctx)

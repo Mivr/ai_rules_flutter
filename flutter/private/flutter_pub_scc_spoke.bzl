@@ -97,6 +97,8 @@ load(
     "parse_flutter_plugin_block",
 )
 
+visibility(["//flutter/..."])
+
 _DART_BUILD_HOOKS = ("hook/build.dart", "hook/link.dart")
 
 def _fetch_hosted_scc_member(ctx, member, name):

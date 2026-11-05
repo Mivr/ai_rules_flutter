@@ -15,6 +15,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _PLUGIN = "permission_handler_apple"
 
 def _lock_error_test_impl(ctx):

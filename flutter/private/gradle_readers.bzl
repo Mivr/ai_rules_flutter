@@ -35,6 +35,8 @@ load(
     _plugin_manifest_package = "parse_android_manifest_package",
 )
 
+visibility(["//flutter/..."])
+
 def _gradle_dollar_slashy_value(literal):
     """Plain value of a `$/.../$` span; `$` inside may interpolate."""
     if len(literal) < 4 or literal[len(literal) - 2:] != "/$":

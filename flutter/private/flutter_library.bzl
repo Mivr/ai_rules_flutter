@@ -8,6 +8,8 @@ load("//flutter/private:asset_uri.bzl", "normalize_asset_uri")
 load("//flutter/private:flutter_font_family.bzl", "FONTS_ATTR", "check_unclaimed_font_files", "font_family_contributions", "font_file_table", "font_json_contribution", _flutter_font_family = "flutter_font_family")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
 
+visibility(["//flutter/..."])
+
 def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None):
     """Whether a pub asset entry bundles on the target platform.
 

@@ -69,6 +69,8 @@ load("//flutter/private:flutter_pub_semver.bzl", "parse_pub_version")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _tree_lookup(tree, rel, fold):
     """The node at `rel` in a nested-dict tree, optionally folding case.
 

@@ -24,6 +24,8 @@ load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
 load("//flutter/private:flutter_native_assets.bzl", "collect_application_native_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
 
+visibility(["//flutter/..."])
+
 def _check_aot_supported(flutter_sdk_info, is_debug):
     """Guards: AOT cross-compilation between desktop OSes is not supported.
 

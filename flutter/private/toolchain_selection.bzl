@@ -1,5 +1,7 @@
 """Picks one Flutter SDK version per toolchain name from the versions modules request."""
 
+visibility(["//flutter/..."])
+
 def _parse_identifier_list(text, what, version):
     """Validates dot-separated prerelease/build identifiers."""
     identifiers = []

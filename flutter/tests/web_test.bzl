@@ -36,6 +36,8 @@ load(
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 load(":action_content.bzl", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 def _html_title_escaping_test_impl(ctx):
     """Test that HTML special characters in titles are properly escaped."""
     env = unittest.begin(ctx)

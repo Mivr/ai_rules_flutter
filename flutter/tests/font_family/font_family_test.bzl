@@ -11,6 +11,8 @@ given, and every asset maps to its own file.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter/tests:action_content.bzl", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 def _assert_copy(env, config, dest, suffix):
     """Assert the bundle copies `dest` from the file ending in `suffix`.
 

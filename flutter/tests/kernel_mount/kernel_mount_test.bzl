@@ -15,6 +15,8 @@ load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs")
 load("//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools", "flutter_kernel_dills", "flutter_kernel_options", "flutter_kernel_outputs", "flutter_kernel_sources")
 
+visibility(["//flutter/tests/..."])
+
 def _mount_closure(ctx, extra_mains):
     """The compile closure: own `srcs`, transitive `deps` sources, and `extra_mains`."""
     return list(ctx.files.srcs) + collect_transitive_srcs(ctx.attr.deps).to_list() + extra_mains

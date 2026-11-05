@@ -26,6 +26,8 @@ load(
 )
 load(":rule_coverage.bzl", "expect_action", "expect_default_outputs", "expect_no_actions")
 
+visibility(["//tests/..."])
+
 _IOS_CONFIG = {
     "//command_line_option:compilation_mode": "dbg",
     "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),

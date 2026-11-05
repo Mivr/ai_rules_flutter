@@ -33,6 +33,8 @@ load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "aot_flags_fixture"
 _MAIN = "lib/language_version_main.dart"
 

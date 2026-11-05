@@ -11,6 +11,8 @@ asserts the flag, the classification markers, and a shared table of cases
 agree, so update them together.
 """
 
+visibility(["//flutter/..."])
+
 RUN_HOME_SUPPRESS_ANALYTICS = "--suppress-analytics"
 
 RUN_HOME_SH = """\

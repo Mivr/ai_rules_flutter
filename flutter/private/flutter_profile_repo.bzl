@@ -13,6 +13,8 @@ load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "extract_macos_inner_framework")
 load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "link_local_file", "macos_framework_cache_path", "resolve_local_sdk_root")
 
+visibility(["//flutter/..."])
+
 def _link_profile_artifact(repository_ctx, sdk_root, artifact_path, output):
     """Links one profile artifact out of a local SDK's engine cache.
 

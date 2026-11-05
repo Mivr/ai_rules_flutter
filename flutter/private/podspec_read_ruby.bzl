@@ -6,6 +6,8 @@ backslash line continuations, multi-line strings, `%w[...]` word arrays, and
 `<<TAG` / `<<-TAG` / `<<~TAG` heredocs. No recursion and no unbounded loops.
 """
 
+visibility(["//flutter/..."])
+
 _PAIRED_CLOSERS = {
     "[": "]",
     "(": ")",

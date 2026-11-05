@@ -1,5 +1,17 @@
 """Providers for Flutter rules."""
 
+load(
+    "//flutter/private:flutter_desktop_plugin_info.bzl",
+    _FlutterLinuxPluginInfo = "FlutterLinuxPluginInfo",
+    _FlutterWindowsPluginInfo = "FlutterWindowsPluginInfo",
+)
+
+visibility("public")
+
+# Re-exported so tests and downstream rules read the desktop plugin providers publicly.
+FlutterLinuxPluginInfo = _FlutterLinuxPluginInfo
+FlutterWindowsPluginInfo = _FlutterWindowsPluginInfo
+
 FlutterSdkInfo = provider(
     doc = """Information about the Flutter engine provided by the toolchain.
 

@@ -19,6 +19,8 @@ e2e/hello_world after touching them (see the H18 commit).
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
+visibility("private")
+
 # Actions whose outputs must not change on a Dart edit. Each is checked when
 # present; PackageAndroidResources and ApkBuilder are additionally required so
 # the test is not vacuous. These are the mnemonics rules_android 0.8.0 actually

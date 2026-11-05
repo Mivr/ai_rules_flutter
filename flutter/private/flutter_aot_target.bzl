@@ -11,6 +11,8 @@ load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_AP
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
 load("//flutter/private:platform_constraints.bzl", "target_platform_from_constraints")
 
+visibility(["//flutter/..."])
+
 def _flutter_aot_target_impl(ctx):
     flutter_sdk_info = resolve_flutter_sdk_info(ctx)
 

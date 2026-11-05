@@ -42,6 +42,8 @@ load(
 load("//flutter/private:ios_sim_debug.bzl", "ios_sim_debug_transition_impl")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _TEST_IMPORT = "../../integration_test/app_test.dart"
 
 # The macro pins its Apple-toolchain targets to macOS; the analysis test over

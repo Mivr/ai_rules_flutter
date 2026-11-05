@@ -31,6 +31,8 @@ its pubspec.yaml and the entry.
 load(":asset_uri.bzl", "encode_asset_key", "spoke_asset_uri_error")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
 
+visibility(["//flutter/..."])
+
 # Bound for every asset directory walk. Starlark has no `while`, so every
 # walk is a bounded `for`; reaching the bound fails loudly (see
 # `walk_bound_error`) instead of silently dropping files. This is the

@@ -97,6 +97,8 @@ load(
 load(":starlark_literal.bzl", "check_spoke_file_name", "decode_starlark_escapes", "starlark_string_literal")
 load(":swiftpm_resolved.bzl", "pub_spoke_swiftpm_rule_attrs")
 
+visibility(["//flutter/..."])
+
 malformed_pub_version_refusal = _malformed_pub_version_refusal
 merge_pub_asset_conditions = _merge_pub_asset_conditions
 missing_pubspec_refusal = _missing_pubspec_refusal
@@ -1258,9 +1260,7 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
         pkg_asset_platforms = pkg_asset_platforms,
         pkg_asset_flavors = pkg_asset_flavors,
         pkg_shaders = pkg_shaders_dict,
-        has_contributions = (
-            bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
-        ),
+        has_contributions = bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders),
     )
 
 def _write_overlay_spoke(ctx, overlay_content, overlay_android_content):

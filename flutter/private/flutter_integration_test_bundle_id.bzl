@@ -10,6 +10,8 @@ identically (same target name in different packages, same `package_name` in
 two packages, or names that differ only by case and separators).
 """
 
+visibility(["//flutter/..."])
+
 # A bundle id holds ASCII letters, digits, `-` and `.` in non-empty segments
 # that never start with a digit; Apple reads at most 155 characters.
 _MAX_IOS_BUNDLE_ID_LENGTH = 155

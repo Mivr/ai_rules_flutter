@@ -5,6 +5,8 @@ load("//flutter:ios.bzl", "flutter_ios_app")
 load("//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework")
 load(":apple_bundling.bzl", "fake_application")
 
+visibility(["//flutter/tests/..."])
+
 def _assets_dirs(files):
     """The directory artifacts among `files`."""
     return [f for f in files if f.is_directory]

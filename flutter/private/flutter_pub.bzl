@@ -27,6 +27,8 @@ from the build graph instead, so that file has no consumer here.
 
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
 
+visibility(["//flutter/..."])
+
 def _flutter_pub_impl(ctx):
     flutter_sdk_info = ctx.toolchains["@rules_flutter//flutter:toolchain_type"].flutter_sdk_info
     flutter_dart = flutter_sdk_info.dart

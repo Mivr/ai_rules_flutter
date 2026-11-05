@@ -10,6 +10,8 @@ load(":artifact_urls.bzl", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "linux_multiarch_triple")
 
+visibility(["//flutter/..."])
+
 _SYSROOT_URL = "https://commondatastorage.googleapis.com/chrome-linux-sysroot/{sha256}"
 
 # Map from our architecture names to the Debian architecture names used in

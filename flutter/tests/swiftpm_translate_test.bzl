@@ -12,6 +12,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _BIGINT = """// swift-tools-version:6.0
 import PackageDescription
 let package = Package(

@@ -9,6 +9,8 @@ plus the runner machinery in flutter_linux_application.bzl /
 flutter_windows_application.bzl.
 """
 
+visibility(["//flutter/..."])
+
 FlutterLinuxPluginInfo = provider(
     doc = "Source bundle for a Flutter plugin's Linux C++ implementation.",
     fields = {

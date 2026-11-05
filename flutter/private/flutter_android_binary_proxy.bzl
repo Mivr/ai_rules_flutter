@@ -27,6 +27,8 @@ through the proxy; nothing should reference the private
 load("@rules_android//providers:providers.bzl", "AndroidFeatureFlagSet", "AndroidInstrumentationInfo", "ApkInfo", "StarlarkApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 
+visibility(["//flutter/..."])
+
 def _pure_go_transition_impl(settings, _attr):
     """Set rules_go pure mode for the Android binary subtree, unless opted out.
 

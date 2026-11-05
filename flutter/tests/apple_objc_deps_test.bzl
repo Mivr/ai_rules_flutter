@@ -16,6 +16,8 @@ load(
     "plugin_defines_xtool_refusal",
 )
 
+visibility(["//flutter/tests/..."])
+
 def _objc_target_surface_test_impl(ctx):
     """The ObjC target gets the plugin deps and `objc_copts`; Swift gets neither `objc_copts`."""
     env = unittest.begin(ctx)

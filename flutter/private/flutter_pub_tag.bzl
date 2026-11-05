@@ -4,6 +4,8 @@ Kept out of `flutter/extensions.bzl` so that file stays the extension's
 wiring. Later `flutter.pub` attributes are added here.
 """
 
+visibility(["//flutter/..."])
+
 def _is_product_deps_identity(text):
     """Whether `text` is a valid identity half of a product-dep key.
 

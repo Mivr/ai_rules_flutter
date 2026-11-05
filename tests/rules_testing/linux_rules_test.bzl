@@ -12,11 +12,11 @@ load(
     "flutter_linux_registrant_gen",
     "flutter_linux_runner_lib_gen",
 )
-
-# buildifier: disable=bzl-visibility
-load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo")
+load("//flutter:providers.bzl", "FlutterLinuxPluginInfo")
 load("//flutter/tests:apple_bundling.bzl", "fake_application")
 load(":rule_coverage.bzl", "expect_action", "expect_default_outputs", "expect_no_actions")
+
+visibility(["//tests/..."])
 
 def _linux_engine_test_impl(env, target):
     env.expect.that_target(target).has_provider(DefaultInfo)

@@ -13,6 +13,8 @@ load("//flutter/private:flutter_pub_scc_spoke.bzl", "flutter_pub_scc_package")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256")
 load("//flutter/private:swiftpm_resolved.bzl", "pub_spoke_swiftpm_attrs")
 
+visibility(["//flutter/..."])
+
 _INTERNAL_HUB_NAMES = {
     "dev_tool_deps": True,
     "gen_l10n_deps": True,

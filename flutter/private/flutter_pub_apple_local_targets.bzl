@@ -12,6 +12,8 @@ load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr", "swiftpm_target_setting_entries")
 load(":swiftpm_translate.bzl", "swiftpm_c99name")
 
+visibility(["//flutter/..."])
+
 def local_missing_dir_error(plugin, target_name, target_dir):
     """The refusal naming a target whose directory does not exist.
 

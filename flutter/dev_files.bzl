@@ -17,6 +17,8 @@ hand-listed subset, so the two cannot drift.
 
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 
+visibility("public")
+
 # The output group the dev tool requests. Named for what it is rather than for
 # who wants it: a release build has no use for these, but they are not "debug"
 # either — the release pipeline simply never asks.

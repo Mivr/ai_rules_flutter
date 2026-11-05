@@ -6,6 +6,8 @@ value-less `NAME` reaches a Swift compile. The composition uses `+` so a
 `select()` from `.when(platforms:)` stays concatenable.
 """
 
+visibility(["//flutter/..."])
+
 _VALUE_SPECIALS = " \"'\\$\t"
 
 def plugin_define_name(define):

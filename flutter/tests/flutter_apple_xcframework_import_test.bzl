@@ -14,6 +14,8 @@ load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:ios.bzl", "flutter_apple_xcframework_import")
 load("//flutter:providers.bzl", "FlutterDarwinFrameworkInfo")
 
+visibility(["//flutter/tests/..."])
+
 _XCFRAMEWORK = "//flutter/tests:TinyKit.xcframework"
 _FRAMEWORK = "//flutter/tests:TinyKit.framework"
 

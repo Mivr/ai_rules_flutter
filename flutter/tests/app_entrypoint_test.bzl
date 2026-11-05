@@ -20,6 +20,8 @@ load("//flutter/private:flutter_application.bzl", "flutter_application")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load(":action_content.bzl", "package_entry", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "ae_fixture"
 _OUTSIDE_LIB_URI = "org-dartlang-app:///flutter/tests/web_fixture_main.dart"
 

@@ -7,6 +7,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _LOCK_LABEL = "//app:pubspec.lock"
 
 # The real firebase_auth 7.0.1 manifest. The sibling-only variant below

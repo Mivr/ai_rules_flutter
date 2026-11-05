@@ -16,6 +16,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _fail_called(method):
     """Fails immediately if an unexpected module_ctx method is invoked."""
     fail(method + " called on mock module_ctx")

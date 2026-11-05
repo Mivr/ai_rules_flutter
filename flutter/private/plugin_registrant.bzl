@@ -5,6 +5,8 @@ at application startup, and native registrant source files for method channel
 plugins (pluginClass) on desktop platforms.
 """
 
+visibility(["//flutter/..."])
+
 def _dart_plugin_entry(plugin, info):
     """Builds the registrant entry for one plugin's Dart class info."""
     return struct(

@@ -111,7 +111,7 @@ Two extensions cover the rest. A root-registered custom release (an older stable
 
 #### Overriding `rules_dart`
 
-`rules_flutter` uses APIs from [`ai_rules_dart`](https://github.com/Mivr/ai_rules_dart) (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, and `dart_codegen(package_name = ...)`) that are not in upstream's `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.24.0, released on GitHub under that module name with `repo_name = "rules_dart"`, so a root module that overrides only `ai_rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The block above gives the latest released, CI-tested pair: `ai_rules_flutter` 0.20.0 with `ai_rules_dart` 0.18.0. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
+`rules_flutter` uses APIs from [`ai_rules_dart`](https://github.com/Mivr/ai_rules_dart) (`@rules_dart//dart:defs.bzl`, `@rules_dart//dart:utils.bzl`, and `dart_codegen(package_name = ...)`) that are not in upstream's `rules_dart` releases on the Bazel Central Registry. Its floor is `ai_rules_dart` 0.24.0, released on GitHub under that module name with `repo_name = "rules_dart"`, so a root module that overrides only `ai_rules_flutter` fails fast with a version error instead of a missing-symbol error at load. The block above gives the latest released, CI-tested pair: `ai_rules_flutter` 0.20.0 with `ai_rules_dart` 0.18.0. The `archive_override` pair in [MODULE.bazel](#modulebazel) above is the supported setup; every downloaded byte is verified against its `integrity` hash.
 
 To live at the heads instead of these releases (local development against a checkout of each repository's `main`), replace the two `archive_override` blocks with overrides onto your clones. Because Bzlmod ignores module overrides in non-root modules, the overrides go in your root `MODULE.bazel`:
 
@@ -120,7 +120,7 @@ bazel_dep(name = "ai_rules_dart", version = "0.24.0", repo_name = "rules_dart")
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "a52341d1a87c8443e32cf4d688bed7f32175848d",
+    commit = "ecdfbf092b9793c9ae65faba1fd98b96e5dfa27d",
     remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 ```
@@ -712,7 +712,7 @@ group, and add the files to the app root with an `apple_resource_group`:
 
 ```starlark
 load("@rules_apple//apple:resources.bzl", "apple_resource_group")
-load("@rules_flutter//flutter/private:flutter_ios_application.bzl", "flutter_ios_framework")
+load("@rules_flutter//flutter:ios.bzl", "flutter_ios_framework")
 
 flutter_ios_framework(
     name = "my_framework_split",

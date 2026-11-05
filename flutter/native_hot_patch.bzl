@@ -25,6 +25,8 @@ it by content — never by position in this list.
 
 load("//flutter:providers.bzl", "FlutterNativeLibraryInfo")
 
+visibility("public")
+
 HOT_PATCH_OUTPUT_GROUP = "flutter_native_hot_patch"
 
 _HotPatchFilesInfo = provider(

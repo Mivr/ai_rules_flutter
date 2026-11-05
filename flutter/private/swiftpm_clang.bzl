@@ -19,6 +19,8 @@ with its hub format). Every detail names the target.
 
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr")
 
+visibility(["//flutter/..."])
+
 def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_headers, explicit_map):
     """Compute one C-family target's module spec.
 

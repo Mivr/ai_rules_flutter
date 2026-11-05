@@ -19,6 +19,8 @@ a trailing unbalanced bracket emits an `unbalanced` event, reported
 unreadable downstream and never silently ignored.
 """
 
+visibility(["//flutter/..."])
+
 def gradle_language_of(path):
     """The Gradle dialect from a build-file path: `"kotlin"` or `"groovy"`.
 

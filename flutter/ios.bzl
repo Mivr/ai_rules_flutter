@@ -72,6 +72,11 @@ load("//flutter/private:flutter_xtool_bundle.bzl", _flutter_darwin_xcframework_i
 load("//flutter/private:ios_app.bzl", _IOS_DEFAULT_LAUNCH_STORYBOARD = "IOS_DEFAULT_LAUNCH_STORYBOARD", _IOS_DEFAULT_MAIN_STORYBOARD = "IOS_DEFAULT_MAIN_STORYBOARD", _flutter_ios_app = "flutter_ios_app", _flutter_ios_engine = "flutter_ios_engine")
 load("//flutter/private:ios_sim_debug.bzl", _ios_sim_debug_app = "ios_sim_debug_app")
 
+visibility("public")
+
+# The rule behind `flutter_ios_framework_gen`, for `split_debug_assets = True`.
+flutter_ios_framework = _flutter_ios_framework_rule
+
 # Re-export constants for user BUILD files.
 IOS_MINIMUM_OS_VERSION = _IOS_MINIMUM_OS_VERSION
 IOS_DEFAULT_LAUNCH_STORYBOARD = _IOS_DEFAULT_LAUNCH_STORYBOARD

@@ -93,6 +93,8 @@ load(
     "service_worker_load_args",
 )
 
+visibility(["//flutter/..."])
+
 # The index.html the rule falls back to when the target supplies none.
 #
 # Carries `$FLUTTER_BASE_HREF` rather than a formatted value so it reaches the

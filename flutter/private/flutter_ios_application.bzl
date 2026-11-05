@@ -26,6 +26,8 @@ load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFramewor
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
 
+visibility(["//flutter/..."])
+
 def _flutter_ios_application_impl(ctx):
     """Bundles Flutter compilation outputs for iOS packaging."""
     app_info = ctx.attr.application[FlutterApplicationInfo]

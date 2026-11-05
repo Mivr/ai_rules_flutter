@@ -4,6 +4,8 @@ Moved out of `flutter_integration_test.bzl` so iOS support can extend that
 file without growing it.
 """
 
+visibility(["//flutter/..."])
+
 INDEX_HTML_TEMPLATE = """<!DOCTYPE html>
 <html>
 <head>

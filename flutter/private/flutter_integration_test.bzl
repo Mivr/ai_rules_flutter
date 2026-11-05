@@ -61,14 +61,6 @@ load(
 )
 load("@rules_java//java:java_import.bzl", "java_import")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
-load(
-    "//flutter:android.bzl",
-    "ANDROID_MIN_SDK_VERSION",
-    "ANDROID_TARGET_SDK_VERSION",
-    "flutter_android_bundle",
-    "flutter_android_engine",
-    "flutter_android_manifest_merge",
-)
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
@@ -106,6 +98,10 @@ load(
     "resolve_exec_dart_vm",
     "resolve_flutter_sdk_info",
 )
+load("//flutter/private:constants.bzl", "ANDROID_MIN_SDK_VERSION", "ANDROID_TARGET_SDK_VERSION")
+load("//flutter/private:flutter_android_application.bzl", "flutter_android_bundle")
+load("//flutter/private:flutter_android_engine.bzl", "flutter_android_engine")
+load("//flutter/private:flutter_android_manifest_merge.bzl", "flutter_android_manifest_merge")
 load(
     "//flutter/private:flutter_android_registrant.bzl",
     "flutter_android_plugins_aggregator",
@@ -197,6 +193,8 @@ load(
     "validate_web_compiler_renderer",
     "web_renderer",
 )
+
+visibility(["//flutter/..."])
 
 def make_web_integration_bootstrap_content(test_import, has_integration_test = False):
     """Build the substitutions for the web integration test bootstrap template.

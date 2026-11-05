@@ -47,6 +47,8 @@ is a hard build error.
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "resolve_exec_dart_vm")
 
+visibility(["//flutter/..."])
+
 # Label of the rules_android Starlark flag holding the caller's `--android_platforms`.
 # The native `//command_line_option:android_platforms` is a redirect to this flag on
 # Bazel 9, and 9.0.0 emits the redirect target with a canonical-position apparent repo

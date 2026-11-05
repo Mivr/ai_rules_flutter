@@ -13,6 +13,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:rules_dart_floor.bzl", "RULES_DART_FLOOR", "check_rules_dart_floor", "rules_dart_floor_error")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _old_reader(_content):
     """Stand-in for a pre-floor reader: accepts the non-map environment."""
     return None

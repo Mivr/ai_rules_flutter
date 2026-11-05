@@ -13,6 +13,8 @@ A rule that registers no action of its own carries a
 load("@rules_testing//lib:truth.bzl", "matching")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
 
+visibility(["//tests/..."])
+
 def expect_action(env, target, mnemonic, args = [], inputs = [], output = None):
     """Asserts `target` registers a `mnemonic` action carrying `args` and `inputs`.
 

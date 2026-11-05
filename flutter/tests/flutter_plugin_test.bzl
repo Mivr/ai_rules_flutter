@@ -7,6 +7,8 @@ load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterInfo")
 load("//flutter/private:flutter_plugin.bzl", "build_plugin_struct", "flutter_plugin")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _dart_only_plugin_test_impl(ctx):
     env = unittest.begin(ctx)
     plugin = build_plugin_struct(

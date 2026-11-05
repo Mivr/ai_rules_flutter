@@ -1,5 +1,7 @@
 """Builds targets with `-c dbg`, whatever the command line asked for."""
 
+visibility(["//flutter/..."])
+
 _PROFILE_FLAG = str(Label("//flutter:profile"))
 
 def _dbg_transition_impl(_settings, _attr):

@@ -59,6 +59,8 @@ load("//flutter/private:flutter_windows_engine_rule.bzl", _flutter_windows_engin
 load("//flutter/private:flutter_windows_plugin_library.bzl", _flutter_windows_plugin_library = "flutter_windows_plugin_library")
 load("//flutter/private:flutter_windows_registrant.bzl", _flutter_windows_registrant = "flutter_windows_registrant")
 
+visibility("public")
+
 # -- Composable rules (Tier 2) ------------------------------------------------
 
 # rule_test_coverage: no-actions

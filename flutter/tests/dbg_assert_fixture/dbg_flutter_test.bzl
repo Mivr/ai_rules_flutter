@@ -1,5 +1,7 @@
 """Transition wrapper that builds and executes a `flutter_test` under `-c dbg`."""
 
+visibility(["//flutter/tests/..."])
+
 def _dbg_transition_impl(_settings, _attr):
     return {"//command_line_option:compilation_mode": "dbg"}
 

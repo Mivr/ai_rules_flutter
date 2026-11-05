@@ -15,6 +15,8 @@ load(
 )
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr", "swiftpm_target_setting_entries")
 
+visibility(["//flutter/..."])
+
 _SWIFTPM_C99_OK = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"
 
 def swiftpm_c99name(name):

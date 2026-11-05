@@ -25,6 +25,8 @@ with its hub format). Every detail names the target and the offending
 setting or condition.
 """
 
+visibility(["//flutter/..."])
+
 _SWIFTPM_SETTING_CATEGORIES = {
     "cSettings": "c",
     "cxxSettings": "cxx",

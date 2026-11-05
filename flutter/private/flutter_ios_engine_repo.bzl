@@ -14,6 +14,8 @@ load(":artifact_urls.bzl", "engine_artifact_url", "ios_engine_artifact_path", "r
 load(":download.bzl", "pinned_download_and_extract")
 load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
 
+visibility(["//flutter/..."])
+
 def _flutter_ios_engine_repo_impl(repository_ctx):
     engine_revision = repository_ctx.attr.engine_revision
 

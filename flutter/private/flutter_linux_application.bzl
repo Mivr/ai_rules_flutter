@@ -25,6 +25,8 @@ load("//flutter/private:cc_runner_compile.bzl", "compile_and_link_runner", "make
 load("//flutter/private:common.bzl", "compute_desktop_bundle_copies", "make_desktop_bundle_artifacts", "make_desktop_bundle_libs", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
 load("//flutter/private:engine_helpers.bzl", "find_engine_header_dir", "linux_multiarch_triple")
 
+visibility(["//flutter/..."])
+
 # GTK3 include subdirectories within the Chromium sysroot.
 _GTK3_INCLUDE_SUBDIRS = [
     "usr/include/gtk-3.0",

@@ -6,6 +6,8 @@ load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package")
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_files")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _DOCS = """// swift-tools-version:5.9
 import PackageDescription
 let package = Package(

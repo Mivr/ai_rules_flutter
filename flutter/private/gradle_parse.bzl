@@ -8,6 +8,8 @@ paths, escapes and interpolation. Ported verbatim so every refusal the
 test suite pins keeps its exact statement text.
 """
 
+visibility(["//flutter/..."])
+
 def gradle_leading_word(text):
     """Return the leading `[A-Za-z0-9_]` word of `text` ("" when none).
 

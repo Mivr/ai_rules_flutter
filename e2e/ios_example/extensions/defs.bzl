@@ -3,6 +3,8 @@
 load("@rules_apple//apple:ios.bzl", "ios_extension")
 load("@rules_flutter//flutter:ios.bzl", "IOS_MINIMUM_OS_VERSION")
 
+visibility("private")
+
 def example_ios_extension(name, **kwargs):
     """An `ios_extension` as `name` and its device twin as `name + "_device"`.
 

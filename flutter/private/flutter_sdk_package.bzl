@@ -16,6 +16,8 @@ load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "requi
 load("//flutter/private:download.bzl", "pinned_download_and_extract")
 load("//flutter/private:local_sdk.bzl", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
 
+visibility(["//flutter/..."])
+
 def make_flutter_sdk_build_content(name, deps, language_version):
     """Generate BUILD content for a Flutter SDK spoke.
 

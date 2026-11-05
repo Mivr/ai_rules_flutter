@@ -16,6 +16,8 @@ load(
 )
 load(":starlark_literal.bzl", "starlark_string_literal")
 
+visibility(["//flutter/..."])
+
 _CONT_OPS = (
     "=",
     "+=",

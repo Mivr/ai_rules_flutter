@@ -39,8 +39,10 @@ load(":swiftpm_manifest_lex.bzl", "lex_swiftpm_manifest", "swiftpm_first_content
 load(":swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_files")
 load(":swiftpm_translate.bzl", "swiftpm_c99name")
 
+visibility(["//flutter/..."])
+
 _LOCAL_OBJC_MACRO_LOAD = (
-    'load("@rules_flutter//flutter/private:flutter_apple_plugin_library.bzl", ' +
+    'load("@rules_flutter//flutter:macos.bzl", ' +
     '"flutter_apple_plugin_objc_library", "flutter_apple_plugin_objc_settings")'
 )
 

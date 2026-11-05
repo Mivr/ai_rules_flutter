@@ -25,6 +25,8 @@ load(":swiftpm_manifest.bzl", "parse_swiftpm_plugin_package")
 load(":swiftpm_resolved.bzl", "read_ios_native_deps", "read_swiftpm_checksums", "read_swiftpm_pins", "swiftpm_unpinned_errors")
 load(":swiftpm_translate.bzl", "swiftpm_locate_package_dep")
 
+visibility(["//flutter/..."])
+
 # Apple source extensions we sweep into the per-platform plugin library.
 _APPLE_SRC_EXTENSIONS = ("swift", "m", "mm", "h")
 

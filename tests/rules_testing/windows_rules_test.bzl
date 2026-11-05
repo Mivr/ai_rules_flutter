@@ -3,6 +3,7 @@
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
+load("//flutter:providers.bzl", "FlutterWindowsPluginInfo")
 load(
     "//flutter:windows.bzl",
     "flutter_windows_app",
@@ -12,11 +13,10 @@ load(
     "flutter_windows_registrant_gen",
     "flutter_windows_runner_lib_gen",
 )
-
-# buildifier: disable=bzl-visibility
-load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterWindowsPluginInfo")
 load("//flutter/tests:apple_bundling.bzl", "fake_application")
 load(":rule_coverage.bzl", "expect_action", "expect_default_outputs", "expect_no_actions")
+
+visibility(["//tests/..."])
 
 _WINDOWS_CONFIG = {
     "//command_line_option:compilation_mode": "dbg",
