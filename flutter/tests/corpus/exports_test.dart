@@ -5,6 +5,9 @@
 /// `non_instantiable.txt`. A constant or provider belongs in that file; a
 /// rule, macro or aspect does not — it has a fixture.
 ///
+/// It also checks the golden scope (`golden_scope.dart`): every fixture is in
+/// exactly one of `golden_targets.txt` and `uncovered_golden.txt`.
+///
 /// The workspace root is discovered from this test's own runfile (or
 /// `BUILD_WORKSPACE_DIRECTORY`), like the static guards in `flutter/tests`,
 /// so the test reads the sources a change actually wrote rather than a copy
@@ -14,6 +17,8 @@ library;
 import 'dart:io';
 
 import 'package:test/test.dart';
+
+import 'golden_scope.dart';
 
 const List<String> _entryPoints = <String>[
   'flutter/defs.bzl',
@@ -349,6 +354,20 @@ void main() {
       );
     }
 
+    expect(problems, isEmpty, reason: problems.join('\n'));
+  });
+
+  test('golden covers every buildable fixture and tracks the rest', () {
+    String read(String name) =>
+        File('$root/flutter/tests/corpus/$name').readAsStringSync();
+    final List<String> problems = validateGoldenScope(
+      CorpusScopeInput(
+        build: read('BUILD.bazel'),
+        goldenTargets: read('golden_targets.txt'),
+        uncovered: read('uncovered_golden.txt'),
+        goldenJson: read('actions.golden.json'),
+      ),
+    );
     expect(problems, isEmpty, reason: problems.join('\n'));
   });
 }
