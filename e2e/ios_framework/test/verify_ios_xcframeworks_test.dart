@@ -29,6 +29,10 @@ const _registrantDevicePath =
 const _pluginDevicePath =
     'app_xcframeworks/ios_framework_plugin.xcframework/'
     'ios-arm64/ios_framework_plugin.framework/ios_framework_plugin';
+const _pluginSimulatorPath =
+    'app_xcframeworks/ios_framework_plugin.xcframework/'
+    'ios-arm64_x86_64-simulator/ios_framework_plugin.framework/'
+    'ios_framework_plugin';
 const _pluginMarker = 'rules_flutter_ios_framework_plugin_marker';
 const _registrantMarker = 'IosFrameworkPlugin';
 const _snapshotText = '_kDartSnapshotText';
@@ -85,6 +89,11 @@ void main() {
     (f) => f.path.endsWith(_pluginDevicePath),
     _pluginDevicePath,
   );
+  final pluginSimulator = _take(
+    files,
+    (f) => f.path.endsWith(_pluginSimulatorPath),
+    _pluginSimulatorPath,
+  );
 
   final report = _Report();
   _checkAppInfoPlist(report, _read(appInfo));
@@ -102,6 +111,12 @@ void main() {
     plugin,
     _pluginMarker,
     'the plugin xcframework carries the plugin marker',
+  );
+  _checkContains(
+    report,
+    pluginSimulator,
+    _pluginMarker,
+    'the plugin simulator slice carries the plugin marker',
   );
 
   if (!report.passed) exit(1);
