@@ -312,6 +312,7 @@ bzl_library(
     deps = [
         ":flutter_apple_framework_modulemap",
         ":flutter_apple_plugin_defines",
+        ":flutter_apple_plugin_headers",
         ":flutter_apple_plugin_library_helpers",
         ":flutter_apple_plugins_aggregator",
         ":flutter_xtool_bundle",
@@ -876,6 +877,15 @@ bzl_library(
     name = "flutter_apple_plugin_defines",
     srcs = ["flutter_apple_plugin_defines.bzl"],
     visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "flutter_apple_plugin_headers",
+    srcs = ["flutter_apple_plugin_headers.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@rules_cc//cc/common",
+    ],
 )
 
 bzl_library(

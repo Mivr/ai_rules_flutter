@@ -33,6 +33,11 @@ load(
     "plugin_swift_copts",
 )
 load(
+    ":flutter_apple_plugin_headers.bzl",
+    "emit_plugin_private_header_dirs",
+    "plugin_header_layout",
+)
+load(
     ":flutter_apple_plugin_library_helpers.bzl",
     _emit_plugin_swift_header_include_target = "emit_plugin_swift_header_include_target",
     _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library",
@@ -149,7 +154,7 @@ def _emit_apple_framework_import(spec):
         visibility = ["//visibility:private"],
     )
 
-def _emit_plugin_objc_target(spec, objc_files, headers):
+def _emit_plugin_objc_target(spec, objc_files, layout):
     """Emit the inner `objc_library`; return `(objc_module_name, dep_label_or_None)`."""
     if not objc_files:
         return "", None
@@ -157,14 +162,15 @@ def _emit_plugin_objc_target(spec, objc_files, headers):
     objc_module_name = "%s_objc" % spec.module_name
     objc_library(
         name = objc_target,
-        srcs = objc_files,
-        hdrs = headers,
+        srcs = objc_files + layout.private,
+        hdrs = layout.public,
         includes = spec.includes,
         linkopts = _sdk_link_opts(spec.sdk_frameworks, spec.weak_sdk_frameworks, spec.sdk_dylibs),
         module_name = objc_module_name,
         enable_modules = True,
         copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
         deps = [":" + spec.framework_target] + list(spec.deps),
+        implementation_deps = emit_plugin_private_header_dirs(spec, layout.search),
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
         visibility = ["//visibility:private"],
@@ -192,7 +198,7 @@ def _emit_plugin_objc_module_target(spec, headers):
     )
     return ":" + target
 
-def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
+def _emit_plugin_mixed_objc_target(spec, objc_files, layout, swift_deps):
     """Emit the ObjC half of a mixed plugin; it depends on the Swift module.
 
     Depending on the Swift library makes `<module_name>-Swift.h` a declared
@@ -206,13 +212,14 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
     target = "_%s__objc" % spec.name
     objc_library(
         name = target,
-        srcs = objc_files,
-        hdrs = headers,
+        srcs = objc_files + layout.private,
+        hdrs = layout.public,
         includes = spec.includes,
         linkopts = _sdk_link_opts(spec.sdk_frameworks, spec.weak_sdk_frameworks, spec.sdk_dylibs),
         enable_modules = True,
         copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
         deps = [":" + spec.framework_target] + swift_deps,
+        implementation_deps = emit_plugin_private_header_dirs(spec, layout.search),
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
         visibility = ["//visibility:private"],
@@ -328,10 +335,10 @@ def _emit_plugin_bundle_target(spec, deps, swift_files, objc_files, headers):
         visibility = spec.visibility,
     )
 
-def _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs):
+def _emit_mixed_plugin(spec, swift_files, objc_files, layout, kwargs):
     """Emit the two-layer ObjC/Swift build for a plugin with both halves."""
-    objc_module = _emit_plugin_objc_module_target(spec, headers)
-    bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
+    objc_module = _emit_plugin_objc_module_target(spec, layout.public)
+    bridging_header, extra_copts = _plugin_bridging_copts(spec, layout.all)
 
     swift_target = "_%s__swift" % spec.name
     swift_deps = [":" + spec.framework_target, objc_module] + list(spec.deps)
@@ -350,10 +357,10 @@ def _emit_mixed_plugin(spec, swift_files, objc_files, headers, kwargs):
     objc_target = _emit_plugin_mixed_objc_target(
         spec,
         objc_files,
-        headers,
+        layout,
         [":" + swift_target, swift_include],
     )
-    _emit_plugin_bundle_target(spec, [":" + swift_target, objc_target], swift_files, objc_files, headers)
+    _emit_plugin_bundle_target(spec, [":" + swift_target, objc_target], swift_files, objc_files, layout.public)
 
 def flutter_apple_plugin_objc_settings(
         includes = [],
@@ -518,25 +525,26 @@ def _with_pure_swift_linkopts(spec, extra_attrs):
 def _emit_rules_apple_plugin(spec, extra_attrs):
     """Emit the `rules_apple` target graph for a plugin library."""
     swift_files, objc_files, headers = _split_srcs(spec.srcs)
+    layout = plugin_header_layout(headers, objc_files, spec.includes)
     _emit_apple_framework_import(spec)
 
     if swift_files and objc_files:
-        _emit_mixed_plugin(spec, swift_files, objc_files, headers, extra_attrs)
+        _emit_mixed_plugin(spec, swift_files, objc_files, layout, extra_attrs)
         return
 
     swift_deps = [":" + spec.framework_target] + spec.deps
 
-    objc_module_name, objc_dep = _emit_plugin_objc_target(spec, objc_files, headers)
+    objc_module_name, objc_dep = _emit_plugin_objc_target(spec, objc_files, layout)
     if objc_dep:
         if type(swift_deps) == "list":
             swift_deps.append(objc_dep)
         else:
             swift_deps = swift_deps + [objc_dep]
 
-    bridging_header, extra_copts = _plugin_bridging_copts(spec, headers)
+    bridging_header, extra_copts = _plugin_bridging_copts(spec, layout.all)
 
     # A header-less ObjC target gets no clang module, so there is nothing to re-export.
-    swift_files = _plugin_swift_srcs(spec, swift_files, objc_module_name if headers else "")
+    swift_files = _plugin_swift_srcs(spec, swift_files, objc_module_name if layout.public else "")
 
     swift_attrs = _with_pure_swift_linkopts(spec, extra_attrs) if not objc_files else extra_attrs
 
