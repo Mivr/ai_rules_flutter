@@ -6,7 +6,7 @@ Tests the pure helper functions used by linux, android, and windows bundle rules
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "compute_desktop_bundle_copies", "make_desktop_bundle_artifacts", "make_desktop_bundle_libs")
-load("//flutter/private:flutter_android_application.bzl", "flutter_android_bundle")
+load("//flutter/private:flutter_android_application.bzl", "ANDROID_PLATFORMS_FLAG", "flutter_android_bundle")
 load("//flutter/private:flutter_android_registrant.bzl", "flutter_android_registrant")
 load("//flutter/private:flutter_linux_application.bzl", "flutter_linux_bundle_rule")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
@@ -299,7 +299,7 @@ _android_registrant_direct_arm64_default_test = analysistest.make(
 _android_registrant_direct_android_platforms_x64_test = analysistest.make(
     _android_registrant_transition_test_impl,
     config_settings = {
-        "//command_line_option:android_platforms": [str(Label("//flutter/platforms:android_x64"))],
+        str(Label("@rules_android//flags:android_platforms")): [str(Label("//flutter/platforms:android_x64"))],
         "//command_line_option:dynamic_mode": "fully",
     },
 )
@@ -438,6 +438,12 @@ def _android_bundle_release_actions_test_impl(ctx):
 
 _android_bundle_release_actions_test = analysistest.make(_android_bundle_release_actions_test_impl)
 
+def _android_platforms_flag_label_test_impl(ctx):
+    """The transition reads the rules_android flag, not the native option."""
+    env = unittest.begin(ctx)
+    asserts.equals(env, "@rules_android//flags:android_platforms", ANDROID_PLATFORMS_FLAG)
+    return unittest.end(env)
+
 _t0_test = unittest.make(_linux_debug_copies_test_impl)
 _t1_test = unittest.make(_linux_release_copies_test_impl)
 _t2_test = unittest.make(_windows_release_copies_test_impl)
@@ -450,6 +456,7 @@ _t8_test = unittest.make(_android_abi_platform_test_impl)
 _t9_test = unittest.make(_android_abi_elf_machine_test_impl)
 _t10_test = unittest.make(_android_abi_table_complete_test_impl)
 _t11_test = unittest.make(_android_jni_path_scoped_per_target_test_impl)
+_t12_test = unittest.make(_android_platforms_flag_label_test_impl)
 
 def platform_bundle_test_suite(name):
     """Test suite for platform bundle rules and Android registrant transitions.
@@ -680,6 +687,7 @@ def platform_bundle_test_suite(name):
         _t9_test,
         _t10_test,
         _t11_test,
+        _t12_test,
     )
 
     native.test_suite(
