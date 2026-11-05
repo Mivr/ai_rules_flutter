@@ -25,7 +25,7 @@ local_path_override(
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "a52341d1a87c8443e32cf4d688bed7f32175848d",
+    commit = "ecdfbf092b9793c9ae65faba1fd98b96e5dfa27d",
     remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 

@@ -113,7 +113,7 @@ bazel_dep(name = "rules_java", version = "9.0.0")
 bazel_dep(name = "rules_jvm_external", version = "6.8")
 
 # Minimum rules_dart with the APIs rules_flutter loads
-# (`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`,
+# (`@rules_dart//dart:defs.bzl`, `@rules_dart//dart:utils.bzl`,
 # `@rules_dart//dart/pub:pub_scc.bzl`, `dart_analysis_config(baseline = ...)`,
 # `dart_codegen(package_name = ...)`): the `Mivr/ai_rules_dart` release,
 # published on GitHub as `ai_rules_dart` with
@@ -178,7 +178,7 @@ use_repo(
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "db7ec60d2515e0f1dc0eeb6632e0f88b27abd21e",
+    commit = "ecdfbf092b9793c9ae65faba1fd98b96e5dfa27d",
     remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 

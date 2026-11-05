@@ -35,6 +35,8 @@ load("//flutter/private:gradle.bzl", "gradle_android_namespaces", "gradle_build_
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # Verbatim shape of record_android 1.5.1's android/build.gradle (trimmed):
 # Groovy DSL, namespace assignment, no dependencies block at all.
 _RECORD_ANDROID_GRADLE = """\
