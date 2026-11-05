@@ -2,5 +2,5 @@
   "image_picker_ios": "ok",
   "webview_flutter_wkwebview": "ok",
   "url_launcher_ios": "ok",
-  "permission_handler_apple": "file not found"
+  "permission_handler_apple": "ok"
 }

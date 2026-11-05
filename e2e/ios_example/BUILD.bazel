@@ -421,6 +421,36 @@ test_suite(
     tests = [":plugin_objc_dep_headers_build_test"],
 )
 
+# Plugin private headers (a same-basename umbrella and internal header, and
+# `strategies/` and `util/` subdirectories) compile for iOS device and a
+# downstream Swift consumer imports the plugin module. macOS-only, as above.
+plugin_ios_build(
+    name = "plugin_private_headers_ios_build",
+    target = "//plugin_private_headers:plugin",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+plugin_ios_build(
+    name = "plugin_private_headers_consumer_ios_build",
+    target = "//plugin_private_headers:consumer",
+    target_compatible_with = ["@platforms//os:macos"],
+)
+
+build_test(
+    name = "plugin_private_headers_build_test",
+    size = "small",
+    target_compatible_with = ["@platforms//os:macos"],
+    targets = [
+        ":plugin_private_headers_consumer_ios_build",
+        ":plugin_private_headers_ios_build",
+    ],
+)
+
+test_suite(
+    name = "plugin_private_headers_test",
+    tests = [":plugin_private_headers_build_test"],
+)
+
 # `@import Flutter;` and `@import TinyPluginKit;` in sandboxed `.m` compiles.
 # Each plugin is built for iOS from the macOS host, as above.
 plugin_ios_build(
