@@ -19,8 +19,14 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test")
 load("@rules_testing//lib:truth.bzl", "matching")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
+
+# buildifier: disable=bzl-visibility
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
+
+# buildifier: disable=bzl-visibility
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_gen_snapshot_flags")
+
+# buildifier: disable=bzl-visibility
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 
 _PACKAGE = "aot_flags_fixture"
