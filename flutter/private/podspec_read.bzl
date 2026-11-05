@@ -570,7 +570,10 @@ def splice_apple_podspec_link_settings(content, plugin, apple):
             block, vis_sep, vis_tail = tail.partition("\n    visibility = ")
             if not vis_sep:
                 continue
-            block = splice_podspec_defines(block, defines)
+            if not suffix:
+                # The xtool backend compiles in one swiftc call with no define flags, so a
+                # podspec's defines reach the rules_apple target only.
+                block = splice_podspec_defines(block, defines)
             content = head + sep + block + "\n" + insert_text + "    visibility = " + vis_tail
     return content
 
