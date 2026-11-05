@@ -32,13 +32,16 @@ load(
 )
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 
-def scc_flutter_test_package_bzl_content():
+def scc_flutter_test_package_bzl_content(ctx = None):
     """Returns the `flutter_test_package.bzl` content for a `test` SCC member.
 
+    Args:
+        ctx: The repository or module context, forwarded to pick the runner providers' `.bzl`.
+
     Returns:
-        The `flutter_test_package.bzl` source text that forwards Flutter providers.
+        The Starlark source string.
     """
-    return make_flutter_test_package_bzl_content(forward_flutter_providers = True)
+    return make_flutter_test_package_bzl_content(forward_flutter_providers = True, ctx = ctx)
 
 def _dedupe_labels(labels):
     """Deduplicates a label list while preserving order."""

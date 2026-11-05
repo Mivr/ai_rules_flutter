@@ -467,8 +467,16 @@ def _merged_spoke_build_3cycle_test_impl(ctx):
         test_member_build,
     )
     asserts.true(env, "flutter_test_package" in scc_flutter_test_package_bzl_content())
+    public = scc_flutter_test_package_bzl_content(_providers_ctx("DartTestRunnerSnapshotInfo"))
+    asserts.true(env, '"@rules_dart//dart:providers.bzl",\n    "DartTestRunnerInfo"' in public, public)
+    older = scc_flutter_test_package_bzl_content(_providers_ctx("DartInfo"))
+    asserts.true(env, '"@rules_dart//dart/private:dart_test_runner.bzl"' in older, older)
 
     return unittest.end(env)
+
+def _providers_ctx(providers_text):
+    """A repository-context stand-in whose `rules_dart` `providers.bzl` reads `providers_text`."""
+    return struct(path = lambda label: label, read = lambda _path: providers_text)
 
 def root_content_snippet(content):
     """Helper to return content stripped of leading/trailing space for sub-checks."""

@@ -1372,7 +1372,7 @@ def _build_dart_spoke_content(ctx, pubspec, dep_labels, unreplaced_hook):
         version = ctx.attr.version,
     )
     if ctx.attr.package_name == "test":
-        ctx.file("flutter_test_package.bzl", _make_flutter_test_package_bzl_content())
+        ctx.file("flutter_test_package.bzl", _make_flutter_test_package_bzl_content(ctx = ctx))
         build_content = build_content.replace(
             '    "dart_test_package",\n',
             "",
