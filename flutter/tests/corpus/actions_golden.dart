@@ -1,7 +1,7 @@
 /// Normalises and checks the corpus action graph.
 ///
-/// Input is the text of `bazel aquery --output=jsonproto
-/// //flutter/tests/corpus:all`, either a positional file path or stdin. The
+/// Input is the text of `bazel aquery --output=jsonproto` over the labels in
+/// `golden_targets.txt`, either a positional file path or stdin. The
 /// checked-in `actions.golden.json` stores one canonical action per line,
 /// sorted by `(target, aspect, mnemonic, primary_output)`, with every
 /// configuration-specific `bazel-out/<cfg>[/bin|/genfiles|/testlogs]` path
@@ -11,6 +11,20 @@
 /// found through `BUILD_WORKSPACE_DIRECTORY`). `--check` compares against the
 /// checked-in file (through its runfiles `data`), prints the first differing
 /// lines, never writes, and exits 1 on a difference.
+///
+/// The golden is Linux-x64 specific: its paths name the `flutter_linux-x64` and
+/// `llvm-toolchain-minimal-linux-amd64` repositories, so regenerate it on such
+/// a host. From the repo root, list the buildable fixtures with
+/// `bazel cquery --keep_going --skip_incompatible_explicit_targets
+/// --output=label 'kind(rule, //flutter/tests/corpus:all) except
+/// kind("dart_binary|dart_test|test_suite|cc_.*", //flutter/tests/corpus:all)'`
+/// (dropping labels whose `providers(target)` hold
+/// `IncompatiblePlatformProvider`) into `golden_targets.txt`, then run
+/// `bazel aquery --skip_incompatible_explicit_targets --output=jsonproto
+/// "set($(grep -vE '^\s*(#|$)' flutter/tests/corpus/golden_targets.txt))" >
+/// /tmp/flutter_corpus_aquery.json` and
+/// `bazel run //flutter/tests/corpus:actions_golden --
+/// /tmp/flutter_corpus_aquery.json`.
 library;
 
 import 'dart:convert';

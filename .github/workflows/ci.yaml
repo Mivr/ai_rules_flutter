@@ -327,7 +327,7 @@ jobs:
       # is the same whether this check or the Dart corpus tests run first.
       - name: Corpus action graph matches the checked-in golden
         run: |
-          bazel aquery --output=jsonproto //flutter/tests/corpus:all > /tmp/flutter_corpus_aquery.json
+          bazel aquery --skip_incompatible_explicit_targets --output=jsonproto "set($(grep -vE '^\s*(#|$)' flutter/tests/corpus/golden_targets.txt))" > /tmp/flutter_corpus_aquery.json
           bazel run //flutter/tests/corpus:actions_golden -- --check /tmp/flutter_corpus_aquery.json
       - name: bazel test //flutter/tests/corpus:...
         run: bazel test //flutter/tests/corpus:... --test_output=errors
