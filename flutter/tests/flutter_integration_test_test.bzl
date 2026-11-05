@@ -24,6 +24,7 @@ load(
 )
 load(
     "//flutter/private:flutter_integration_test.bzl",
+    "ANDROID_TEST_EXECUTION_REQUIREMENTS",
     "make_android_integration_bootstrap_content",
     "make_linux_integration_bootstrap_content",
     "make_web_integration_bootstrap_content",
@@ -181,6 +182,11 @@ def _android_bootstrap_without_integration_test_pkg_test_impl(ctx):
     asserts.false(env, "{harness_url_prologue}" in substitutions)
     return unittest.end(env)
 
+def _android_default_keeps_no_sandbox_test_impl(ctx):
+    env = unittest.begin(ctx)
+    asserts.equals(env, {"no-sandbox": ""}, ANDROID_TEST_EXECUTION_REQUIREMENTS)
+    return unittest.end(env)
+
 _t0_test = unittest.make(_chrome_headless_shell_pins_test_impl)
 _t1_test = unittest.make(_bootstrap_with_integration_test_pkg_test_impl)
 _t2_test = unittest.make(_bootstrap_without_integration_test_pkg_test_impl)
@@ -190,6 +196,7 @@ _t5_test = unittest.make(_linux_bootstrap_without_integration_test_pkg_test_impl
 _t6_test = unittest.make(_android_headless_runtime_pins_test_impl)
 _t7_test = unittest.make(_android_bootstrap_with_integration_test_pkg_test_impl)
 _t8_test = unittest.make(_android_bootstrap_without_integration_test_pkg_test_impl)
+_t9_test = unittest.make(_android_default_keeps_no_sandbox_test_impl)
 
 def flutter_integration_test_test_suite(name):
     small_unittest_suite(
@@ -203,4 +210,5 @@ def flutter_integration_test_test_suite(name):
         _t6_test,
         _t7_test,
         _t8_test,
+        _t9_test,
     )

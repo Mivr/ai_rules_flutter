@@ -1531,14 +1531,17 @@ def _android_integration_test_setup(ctx):
         package_name = ctx.attr.package_name or ctx.label.name,
     )
 
+# Execution requirements of the Android test action (see the comment at the
+# return of the impl below): `no-sandbox` stays until the cause is fixed.
+ANDROID_TEST_EXECUTION_REQUIREMENTS = {"no-sandbox": ""}
+
 def _flutter_android_integration_test_impl(ctx):
     setup = _android_integration_test_setup(ctx)
     executable = _integration_test_runner_executable(ctx)
     workspace_name = ctx.workspace_name
-    apk_file = setup.apk_file
     env = {
         "FLUTTER_INTEGRATION_TEST_PLATFORM": "android",
-        "FLUTTER_INTEGRATION_TEST_ANDROID_APK": runfiles_path(apk_file, workspace_name),
+        "FLUTTER_INTEGRATION_TEST_ANDROID_APK": runfiles_path(setup.apk_file, workspace_name),
         "FLUTTER_INTEGRATION_TEST_ANDROID_PACKAGE": ctx.attr.android_package,
         "FLUTTER_INTEGRATION_TEST_ANDROID_EMULATOR": runfiles_path(ctx.file._android_emulator, workspace_name),
         "FLUTTER_INTEGRATION_TEST_ANDROID_ADB": runfiles_path(ctx.file._android_adb, workspace_name),
@@ -1558,7 +1561,7 @@ def _flutter_android_integration_test_impl(ctx):
             env = env,
             executable = executable,
             runtime_files = [
-                apk_file,
+                setup.apk_file,
                 ctx.file._android_emulator,
                 ctx.file._android_adb,
                 library_tags,
@@ -1572,7 +1575,7 @@ def _flutter_android_integration_test_impl(ctx):
     # 'emulator-N' not found"), and `requires-network` alone does not fix that.
     # `no-sandbox` runs just this test unsandboxed, as it effectively was under
     # `processwrapper-sandbox`; every other action stays on `linux-sandbox`.
-    return providers + [testing.ExecutionInfo({"no-sandbox": ""})]
+    return providers + [testing.ExecutionInfo(ANDROID_TEST_EXECUTION_REQUIREMENTS)]
 
 _WEB_RELEVANT_KEYS = (
     "assets",

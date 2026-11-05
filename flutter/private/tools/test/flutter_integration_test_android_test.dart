@@ -6,7 +6,6 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
-import '../android_discovery_diagnostics.dart' as diag;
 import '../flutter_integration_test_android.dart' as android;
 
 void main() {
@@ -112,46 +111,38 @@ void main() {
   });
   group('discovery diagnostics', () {
     const tmp = '/host/work/tmp';
-    const ports = diag.DiscoveryPorts(
-      consolePort: 5554,
-      adbPort: 5555,
-      adbServerPort: 41999,
-      logLines: [
-        '[emu-out] control console listening on port 5554, ADB on 5555',
-      ],
+    const android.DiscoveryPorts ports = (
+      console: 5554,
+      adb: 5555,
+      server: 41999,
+      log: ['[emu-out] control console listening on port 5554, ADB on 5555'],
     );
-    const alive = diag.ProcessDiagnostics(
-      alive: diag.DiagValue(text: 'yes'),
-      pidNs: diag.DiagValue(text: 'pid:[4026531836]'),
-      netNs: diag.DiagValue(text: 'net:[4026531992]'),
+    const android.ProcFacts alive = (
+      alive: 'yes',
+      pidNs: 'pid:[4026531836]',
+      netNs: 'net:[4026531992]',
     );
-    const none = diag.DiagValue(reason: 'process id unknown');
-    const unknownProc = diag.ProcessDiagnostics(
-      alive: none,
-      pidNs: none,
-      netNs: none,
+    const unknown = 'unavailable: process id unknown';
+    const android.ProcFacts unknownProc = (
+      alive: unknown,
+      pidNs: unknown,
+      netNs: unknown,
     );
 
     String build({
-      diag.DiagValue devices = const diag.DiagValue(
-        text: 'List of devices attached',
-      ),
-      diag.DiagValue dir = const diag.DiagValue(
-        text: '$tmp/s/xdg-runtime/avd:\n  running 0B 755',
-      ),
-      diag.DiscoveryPorts p = ports,
-      diag.ProcessDiagnostics adb = alive,
-      diag.ProcessDiagnostics emulator = alive,
-    }) => diag.buildAndroidDiscoveryDiagnostics(
-      diag.DiscoveryDiagnostics(
-        testTmpDir: tmp,
-        ports: p,
-        adbDevices: devices,
-        discoveryDir: dir,
-        adb: adb,
-        emulator: emulator,
-      ),
-    );
+      String devices = 'List of devices attached',
+      String dir = '$tmp/s/xdg-runtime/avd:\n  running 0B 755',
+      android.DiscoveryPorts p = ports,
+      android.ProcFacts adb = alive,
+      android.ProcFacts emulator = alive,
+    }) => android.buildDiscoveryDiagnostics((
+      tmp: tmp,
+      ports: p,
+      devices: devices,
+      dir: dir,
+      adb: adb,
+      emulator: emulator,
+    ));
 
     test('prints every labelled item from full data', () {
       final String block = build();
@@ -170,38 +161,27 @@ void main() {
     });
 
     test('prints unavailable with a reason for every missing field', () {
-      const gone = diag.DiagValue(reason: 'adb not runnable');
       final String block = build(
-        devices: gone,
-        dir: const diag.DiagValue(reason: 'permission denied'),
-        p: const diag.DiscoveryPorts(
-          consolePort: 5554,
-          adbPort: 5555,
-          adbServerPort: 41999,
-          logLines: [],
-        ),
+        devices: 'unavailable: adb not runnable',
+        dir: 'unavailable: permission denied',
+        p: (console: 5554, adb: 5555, server: 41999, log: const []),
         adb: unknownProc,
         emulator: unknownProc,
       );
       expect(block, contains('unavailable: adb not runnable'));
       expect(block, contains('unavailable: permission denied'));
       expect(block, contains('(none)'));
-      expect(
-        RegExp('unavailable: process id unknown').allMatches(block),
-        hasLength(6),
-      );
+      expect(RegExp(unknown).allMatches(block), hasLength(6));
     });
 
     test('redacts host paths, users and tokens but keeps TEST_TMPDIR', () {
       final String block = build(
-        devices: const diag.DiagValue(
-          text: 'error at /home/alice/.android/adbkey auth_token=abc123',
-        ),
-        p: const diag.DiscoveryPorts(
-          consolePort: 5554,
-          adbPort: 5555,
-          adbServerPort: 41999,
-          logLines: ['port file /home/alice/runfiles/emulator and $tmp/x/y'],
+        devices: 'error at /home/alice/.android/adbkey auth_token=abc123',
+        p: (
+          console: 5554,
+          adb: 5555,
+          server: 41999,
+          log: ['port file /home/alice/runfiles/emulator and $tmp/x/y'],
         ),
       );
       expect(block, isNot(contains('alice')));
@@ -213,7 +193,11 @@ void main() {
 
     test('a timeout error message keeps the original and adds the block', () {
       final String block = build();
-      final TimeoutException error = _timeoutWith(block);
+      final Object out = android.decorateDiscoveryFailure(
+        TimeoutException('Timed out after 120s', const Duration(seconds: 120)),
+        block,
+      );
+      final error = out as TimeoutException;
       expect(error.message, startsWith('Timed out after 120s'));
       expect(error.message, contains(block));
       expect(error.duration, const Duration(seconds: 120));
@@ -221,13 +205,13 @@ void main() {
 
     test('device not found after start is a discovery failure', () {
       final notFound = StateError("adb: device 'emulator-5554' not found");
-      expect(diag.isDiscoveryFailure(notFound, 'emulator-5554'), isTrue);
-      expect(diag.isDiscoveryFailure(notFound, 'emulator-5556'), isFalse);
+      expect(android.isDiscoveryFailure(notFound, 'emulator-5554'), isTrue);
+      expect(android.isDiscoveryFailure(notFound, 'emulator-5556'), isFalse);
       expect(
-        diag.isDiscoveryFailure(StateError('other'), 'emulator-5554'),
+        android.isDiscoveryFailure(StateError('other'), 'emulator-5554'),
         isFalse,
       );
-      final Object out = diag.decorateDiscoveryFailure(notFound, 'BLOCK');
+      final Object out = android.decorateDiscoveryFailure(notFound, 'BLOCK');
       expect(out, isA<StateError>());
       expect((out as StateError).message, contains('BLOCK'));
     });
@@ -237,16 +221,13 @@ void main() {
         'diag_collect_',
       );
       try {
-        final String block = await diag.collectAndroidDiscoveryDiagnostics(
-          diag.DiscoveryProbe(
-            adbBinary: '${scratch.path}/no_such_adb',
-            runtimeEnv: const <String, String>{},
-            scratchDir: scratch.path,
-            testTmpDir: scratch.path,
-            ports: ports,
-            emulator: (pid: 2147483646, alive: false),
-          ),
-        );
+        final String block = await android.collectDiscoveryDiagnostics((
+          adb: '${scratch.path}/no_such_adb',
+          env: {'HOME': scratch.path},
+          tmp: scratch.path,
+          ports: ports,
+          emuPid: 2147483646,
+        ));
         expect(block, contains('adb devices -l'));
         expect(block, contains('unavailable'));
         expect(block, contains('directory does not exist'));
@@ -258,12 +239,3 @@ void main() {
     });
   });
 }
-
-TimeoutException _timeoutWith(String block) => TimeoutException(
-  diag.withDiscoveryDiagnostics(
-    'Timed out after 120s waiting for Android emulator (emulator-5554) to '
-    'finish booting:\n[emu-out] booting',
-    block,
-  ),
-  const Duration(seconds: 120),
-);
