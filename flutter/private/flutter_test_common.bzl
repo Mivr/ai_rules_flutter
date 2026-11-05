@@ -253,7 +253,12 @@ def make_test_artifacts(dill, base_dill = None, assets_dir = None, library_tags 
         library_tags = library_tags,
     )
 
-def make_test_selection(test_path = "", enable_impeller = False, include_tags = [], exclude_tags = [], coverage_libraries = []):
+def make_test_selection(
+        test_path = "",
+        enable_impeller = False,
+        include_tags = [],
+        exclude_tags = [],
+        coverage_libraries = []):
     """How one `flutter_tester` run selects and displays its suite.
 
     Args:
