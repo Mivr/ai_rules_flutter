@@ -28,7 +28,7 @@ const int _lcBuildVersion = 0x32;
 /// The parts of one Mach-O slice the e2e test asserts on.
 class MachOSliceInfo {
   /// Creates one slice record.
-  const MachOSliceInfo({
+  const new({
     required this.cpuType,
     required this.platform,
     required this.is64Bit,
@@ -54,7 +54,7 @@ List<MachOSliceInfo> readMachOSlices(Uint8List bytes, String path) {
     throw FormatException('$path is shorter than a Mach-O header');
   }
   final data = ByteData.sublistView(bytes);
-  final magic = data.getUint32(0, Endian.big);
+  final int magic = data.getUint32(0);
   if (magic == _fatMagic || magic == _fatMagic64) {
     return _readFat(data, path, wide: magic == _fatMagic64);
   }
@@ -67,24 +67,24 @@ List<MachOSliceInfo> _readFat(
   String path, {
   required bool wide,
 }) {
-  final count = data.getUint32(4, Endian.big);
+  final int count = data.getUint32(4);
   if (count == 0 || count > 32) {
     throw FormatException('$path has an invalid fat slice count $count');
   }
   final entrySize = wide ? 32 : 20;
-  final tableEnd = 8 + count * entrySize;
+  final int tableEnd = 8 + count * entrySize;
   if (tableEnd > data.lengthInBytes) {
     throw FormatException('$path has a truncated fat architecture table');
   }
   final slices = <MachOSliceInfo>[];
   for (var i = 0; i < count; i++) {
-    final entry = 8 + i * entrySize;
-    final offset = wide
-        ? data.getUint64(entry + 8, Endian.big)
-        : data.getUint32(entry + 8, Endian.big);
-    final size = wide
-        ? data.getUint64(entry + 16, Endian.big)
-        : data.getUint32(entry + 12, Endian.big);
+    final int entry = 8 + i * entrySize;
+    final int offset = wide
+        ? data.getUint64(entry + 8)
+        : data.getUint32(entry + 8);
+    final int size = wide
+        ? data.getUint64(entry + 16)
+        : data.getUint32(entry + 12);
     if (offset + size > data.lengthInBytes) {
       throw FormatException(
         '$path fat slice $i runs past the file '
@@ -101,23 +101,23 @@ MachOSliceInfo _readThin(ByteData data, int start, int size, String path) {
   if (size < 32) {
     throw FormatException('$path has a truncated Mach-O at $start');
   }
-  final magic = data.getUint32(start, Endian.little);
+  final int magic = data.getUint32(start, Endian.little);
   if (magic != _magic64) {
     throw FormatException(
       '$path at $start is not a 64-bit Mach-O '
       '(magic 0x${magic.toRadixString(16)})',
     );
   }
-  final cpuType = data.getUint32(start + 4, Endian.little);
-  final commandCount = data.getUint32(start + 16, Endian.little);
-  var offset = start + 32;
+  final int cpuType = data.getUint32(start + 4, Endian.little);
+  final int commandCount = data.getUint32(start + 16, Endian.little);
+  int offset = start + 32;
   int? platform;
   for (var i = 0; i < commandCount; i++) {
     if (offset + 8 > start + size) {
       throw FormatException('$path load command $i runs past the slice');
     }
-    final command = data.getUint32(offset, Endian.little);
-    final commandSize = data.getUint32(offset + 4, Endian.little);
+    final int command = data.getUint32(offset, Endian.little);
+    final int commandSize = data.getUint32(offset + 4, Endian.little);
     if (commandSize < 8 || offset + commandSize > start + size) {
       throw FormatException(
         '$path load command $i has invalid cmdsize $commandSize at $offset',
