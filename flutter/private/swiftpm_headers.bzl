@@ -41,4 +41,11 @@ def swiftpm_split_headers(public_root, rel_dir, headers, files):
     elif public_map in files:
         explicit_map = public_map
         map_in_include = True
-    return struct(ok = True, error = "", public_hdrs = public_hdrs, private_hdrs = private_hdrs, explicit_map = explicit_map, map_in_include = map_in_include)
+    return struct(
+        ok = True,
+        error = "",
+        public_hdrs = public_hdrs,
+        private_hdrs = private_hdrs,
+        explicit_map = explicit_map,
+        map_in_include = map_in_include,
+    )
