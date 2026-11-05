@@ -35,6 +35,11 @@ on:
         required: false
         default: false
         type: boolean
+      android_linux_sandbox:
+        description: "Dev-only: also run e2e/integration_android under linux-sandbox (its no-sandbox requirement dropped) to collect the discovery diagnostics; never gates"
+        required: false
+        default: false
+        type: boolean
   schedule:
     # Nightly at 06:00 UTC.
     - cron: "0 6 * * *"
@@ -443,6 +448,36 @@ jobs:
           path: ${{ runner.temp }}/dev-tool-ios-logs
           retention-days: 3
           if-no-files-found: warn
+  # Dev-only, OFF by default (the `android_linux_sandbox` dispatch input) and
+  # not part of the merge or nightly gate: `conclusion` does not list it, and
+  # `continue-on-error` keeps a failure here from turning anything red. It runs
+  # the Android integration test with Bazel's `--modify_execution_info` dropping
+  # `no-sandbox` from the test action (the rule itself is unchanged), forced onto
+  # `linux-sandbox`, so the launcher's discovery diagnostic block lands in the
+  # full test log (`--test_output=all`).
+  e2e-android-linux-sandbox:
+    name: E2E Android under linux-sandbox (dev-only, ubuntu-latest)
+    if: github.event_name == 'workflow_dispatch' && inputs.android_linux_sandbox
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/free-disk
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: bazel test //:app_test without no-sandbox (e2e/integration_android)
+        working-directory: e2e/integration_android
+        run: bazel test //:app_test --modify_execution_info=TestRunner=-no-sandbox --strategy=TestRunner=linux-sandbox --nocache_test_results --test_output=all
   conclusion:
     name: Conclusion
     needs: [e2e-macos, e2e-linux-nightly, dev-tool-ios]
