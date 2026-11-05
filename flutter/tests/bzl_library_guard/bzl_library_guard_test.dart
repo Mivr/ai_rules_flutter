@@ -52,6 +52,7 @@ const Map<String, List<String>> _externalRuleTargets = <String, List<String>>{
   '@rules_cc//cc:find_cc_toolchain.bzl': [
     '@rules_cc//cc:find_cc_toolchain_bzl',
   ],
+  '@rules_cc//cc:cc_binary.bzl': ['@rules_cc//cc:core_rules'],
   '@rules_cc//cc:objc_library.bzl': ['@rules_cc//cc:core_rules'],
   '@rules_cc//cc/common:cc_common.bzl': ['@rules_cc//cc/common:common'],
   '@rules_cc//cc/common:cc_info.bzl': ['@rules_cc//cc/common:common'],

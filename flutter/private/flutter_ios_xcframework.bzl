@@ -22,7 +22,8 @@ The public macro lives in `flutter/ios.bzl`; usage is documented there and in
 """
 
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("@rules_swift//swift:swift.bzl", "swift_binary")
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_swift//swift:swift.bzl", "swift_library")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "resolve_exec_dart_vm")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load(
@@ -523,14 +524,19 @@ def flutter_ios_xcframeworks(name, application = None, minimum_os_version = IOS_
         platform = "ios",
         tags = internal_tags,
     )
-    swift_binary(
-        name = "__%s_registrant_binary" % name,
+    swift_library(
+        name = "__%s_registrant_lib" % name,
         srcs = [":__%s_registrant" % name],
         module_name = "GeneratedPluginRegistrant",
         deps = [
             ":__%s_engine" % name,
             ":__%s_plugins" % name,
         ],
+        tags = internal_tags,
+    )
+    cc_binary(
+        name = "__%s_registrant_binary" % name,
+        deps = [":__%s_registrant_lib" % name],
         linkshared = True,
         tags = internal_tags,
     )
