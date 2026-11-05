@@ -11,6 +11,8 @@ sibling target to drop.
 load(":swiftpm_manifest.bzl", "parse_swiftpm_plugin_package")
 load(":swiftpm_manifest_lex.bzl", "lex_swiftpm_manifest")
 
+visibility(["//flutter/..."])
+
 _TARGET_CALLS = ["target", "binaryTarget", "systemLibrary", "executableTarget", "plugin", "macro"]
 
 def _count_target_calls(tokens):

@@ -94,7 +94,9 @@ load(
     "//flutter/private:app_entrypoint.bzl",
     _compile_package_config = "compile_package_config",
 )
+load("//flutter/private:common.bzl", _HOST_COMPATIBLE = "HOST_COMPATIBLE")
 load("//flutter/private:download.bzl", _pinned_download = "pinned_download", _pinned_download_and_extract = "pinned_download_and_extract")
+load("//flutter/private:flutter_aot_compile.bzl", _flutter_aot_gen_snapshot_flags = "flutter_aot_gen_snapshot_flags")
 load(
     "//flutter/private:flutter_compile.bzl",
     _FLUTTER_KERNEL_COMPILE_ATTRS = "FLUTTER_KERNEL_COMPILE_ATTRS",
@@ -126,6 +128,8 @@ visibility("public")
 # Re-exported for generated repositories and for repository rules in other modules.
 flutter_pub_scc_member_target = _flutter_pub_scc_member_target
 pinned_download = _pinned_download
+HOST_COMPATIBLE = _HOST_COMPATIBLE
+flutter_aot_gen_snapshot_flags = _flutter_aot_gen_snapshot_flags
 pinned_download_and_extract = _pinned_download_and_extract
 
 # The whole-program kernel compile behind every Flutter target: runs

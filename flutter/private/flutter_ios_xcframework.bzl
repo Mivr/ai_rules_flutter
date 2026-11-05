@@ -48,6 +48,8 @@ load(
 load("//flutter/private:ios_app.bzl", _flutter_ios_engine = "flutter_ios_engine")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 
+visibility(["//flutter/..."])
+
 _DART_EXEC_TOOLCHAIN_TYPE = Label("@rules_dart//dart:exec_tools_toolchain_type")
 
 _RESERVED_FRAMEWORKS = ["App", "Flutter", "FlutterPluginRegistrant"]

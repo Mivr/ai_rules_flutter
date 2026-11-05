@@ -5,6 +5,8 @@ load("//flutter/private:flutter_pub_apple_local.bzl", "detect_apple_local_target
 load("//flutter/private:flutter_pub_apple_local_refusal.bzl", "local_manifest_decision")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _HEAD = """// swift-tools-version: 5.9
 import PackageDescription
 let package = Package(

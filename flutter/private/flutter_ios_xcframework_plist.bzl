@@ -6,6 +6,8 @@ framework `Info.plist` and the xcframework-level `Info.plist` whose
 `AvailableLibraries` lists exactly the device slice and the simulator slice.
 """
 
+visibility(["//flutter/..."])
+
 IOS_DEVICE = "ios-arm64"
 IOS_SIMULATOR = "ios-arm64_x86_64-simulator"
 _DEVICE_ARCHITECTURES = ["arm64"]

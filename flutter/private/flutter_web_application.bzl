@@ -56,11 +56,7 @@ load(
     "shader_sources",
 )
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
-load(
-    "//flutter/private:flutter_kernel_module.bzl",
-    "MODULAR_KERNEL_ATTRS",
-    "flutter_kernel_module_aspect",
-)
+load("//flutter/private:flutter_kernel_module.bzl", "MODULAR_KERNEL_ATTRS", "flutter_kernel_module_aspect")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "resolve_font_subset_tools")
 load(
     "//flutter/private:flutter_web_compile.bzl",

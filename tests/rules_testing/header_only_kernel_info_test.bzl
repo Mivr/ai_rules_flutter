@@ -12,6 +12,8 @@ load("@rules_testing//lib:analysis_test.bzl", "analysis_test")
 load("@rules_testing//lib:test_suite.bzl", "test_suite")
 load("//flutter:utils.bzl", "FlutterKernelModuleInfo", "flutter_kernel_module_aspect")
 
+visibility(["//tests/..."])
+
 def _owned_paths(info):
     """The `short_path` of every owned entry of a `DartKernelInfo`."""
     return [path for (_label, path) in info.owned.to_list()]

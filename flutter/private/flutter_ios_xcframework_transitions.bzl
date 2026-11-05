@@ -5,6 +5,8 @@ mode, so the device arm64 and the simulator arm64 and x86_64 slices are built
 in their own configurations.
 """
 
+visibility(["//flutter/..."])
+
 def _xcframework_transition_impl(platform_label):
     """Builds a transition to one iOS platform in release mode.
 

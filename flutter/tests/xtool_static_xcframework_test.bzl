@@ -15,6 +15,8 @@ load("//flutter:ios.bzl", "flutter_apple_plugin_library", "flutter_apple_xcframe
 load("//flutter:macos.bzl", "flutter_macos_app")
 load(":apple_bundling.bzl", "fake_application", "fake_xcframework", "macho_verify_probe")
 
+visibility(["//flutter/tests/..."])
+
 _STATIC_NAMES = ["StaticKit", "PluginStaticKit"]
 _DYNAMIC_NAME = "DynamicKit"
 

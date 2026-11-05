@@ -71,7 +71,8 @@ def _providers_facade_test_impl(ctx):
 def _generated_test_package_loads_test_impl(ctx):
     env = unittest.begin(ctx)
     for forward in (False, True):
-        content = make_flutter_test_package_bzl_content(forward_flutter_providers = forward)
+        providers_ctx = struct(path = lambda label: label, read = lambda _path: "DartTestRunnerSnapshotInfo")
+        content = make_flutter_test_package_bzl_content(forward_flutter_providers = forward, ctx = providers_ctx)
         asserts.true(env, "@rules_dart//dart:providers.bzl" in content, content)
         asserts.true(env, "DartTestRunnerSnapshotInfo" in content, content)
         asserts.true(env, "dart/private" not in content, content)

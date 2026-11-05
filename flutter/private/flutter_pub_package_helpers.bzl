@@ -16,6 +16,8 @@ load(
 )
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 
+visibility(["//flutter/..."])
+
 def _sorted_flavor_set(flavors):
     """The deduplicated, sorted flavor names, for order-insensitive comparison."""
     seen = {}
