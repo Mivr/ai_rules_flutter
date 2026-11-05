@@ -204,6 +204,10 @@ def web_debug_result(ctx, flutter_sdk_info, debug, bundle, output_dir, output_gr
         output_dir: The bundled web directory.
         output_groups: The bundler's output groups.
         analyzable_info: The Dart analysis closure.
+
+    Returns:
+        The list of providers: `DefaultInfo`, the output groups and the
+        analysis closure.
     """
     ddc_files, staged_agent = _web_stage_ddc_files(ctx, debug.dev_bootstrap_js)
 
