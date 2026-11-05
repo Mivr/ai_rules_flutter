@@ -373,6 +373,7 @@ bzl_library(
         ":common",
         ":flutter_asset_bundle_action",
         ":flutter_library",
+        "@rules_dart//dart:providers",
     ],
 )
 

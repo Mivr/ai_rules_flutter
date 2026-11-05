@@ -7,6 +7,7 @@ Produces a `flutter_assets/` tree artifact containing:
 - Copied asset files (images, etc.)
 """
 
+load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("//flutter/private:asset_keys.bzl", "bundle_asset_entries")
 load(
     "//flutter/private:common.bzl",
@@ -92,6 +93,7 @@ flutter_asset_bundle = rule(
                   "Shaders owned by these deps are compiled for " +
                   "`flutter_tester` and bundled, so list the same deps a " +
                   "`flutter_test` over this tree would.",
+            providers = [DartInfo],
             aspects = [flutter_tester_shader_aspect],
         ),
         "shaders": attr.label_list(

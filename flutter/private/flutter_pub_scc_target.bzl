@@ -51,6 +51,7 @@ flutter_pub_scc_member_target = rule(
         "deps": attr.label_list(
             default = [],
             doc = "Dependencies leaving the SCC.",
+            providers = [DartInfo],
         ),
         "srcs_dir": attr.string(
             default = ".",
