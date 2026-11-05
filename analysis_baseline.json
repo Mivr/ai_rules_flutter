@@ -88,10 +88,6 @@
     "dangling_library_doc_comments": 1,
     "unintended_html_in_doc_comment": 2
   },
-  "flutter/private/tools/incr_fkc_guard_cache.dart": {
-    "avoid_redundant_argument_values": 1,
-    "unnecessary_type_name_in_constructor": 1
-  },
   "flutter/private/tools/incr_fkc_scratch.dart": {
     "avoid_redundant_argument_values": 2
   },

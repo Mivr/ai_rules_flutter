@@ -32,7 +32,7 @@ class GuardCache {
     List<String> subset,
     List<String> declared,
     List<String> roots,
-  ) => scanFlutterDirectivesAgainst(subset, declared, roots, tool: 'flutter');
+  ) => scanFlutterDirectivesAgainst(subset, declared, roots);
 
   /// The guard errors for [dartSources] under [roots] given the current
   /// content [hashes] (null marks a missing file), in a full scan's order.
