@@ -1149,9 +1149,7 @@ def _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets):
         progress_message = "Bundling Flutter web app %s" % ctx.label,
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
-    output_groups = OutputGroupInfo(
-        dump_info = depset([dump_info_file] if dump_info_file else []),
-    )
+    output_groups = OutputGroupInfo(dump_info = depset([dump_info_file] if dump_info_file else []))
     return output_dir, dump_info_file, output_groups
 
 def _web_analyzable_info(ctx, lib_root):
