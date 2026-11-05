@@ -6,6 +6,8 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
+import 'doc_extract_exemptions.dart';
+
 /// Public `@rules_dart` `.bzl` loads that provide a public `bzl_library` at
 /// the pinned `ai_rules_dart` revision.
 const Map<String, String> _rulesDartTargets = <String, String>{
@@ -69,35 +71,43 @@ const Map<String, List<String>> _externalRuleTargets = <String, List<String>>{
   '@rules_swift//swift:swift.bzl': ['@rules_swift//swift:swift'],
 };
 
-/// Expected public `.bzl` entry stems under `//flutter`.
-const List<String> _publicEntryStems = <String>[
-  'android',
-  'defs',
-  'dev_files',
-  'extensions',
-  'ios',
-  'linux',
-  'macos',
-  'native_assets',
-  'native_hot_patch',
-  'providers',
-  'repositories',
-  'toolchain',
-  'utils',
-  'web',
-  'windows',
+/// Public entries with no `starlark_doc_extract` in `//docs`; the reasons match
+/// the comment at the top of `docs/BUILD.bazel`. A public entry that is neither
+/// extracted nor listed here fails the guard.
+const String _androidReason =
+    'its load closure loads @rules_android//android:rules.bzl and '
+    '@rules_kotlin//kotlin:android.bzl, which have no bzl_library';
+const String _integrationTestReason =
+    'flutter_integration_test (flutter/private/flutter_integration_test.bzl) '
+    'brings in $_androidReason';
+const List<DocExemption> _docExtractExemptions = <DocExemption>[
+  DocExemption(
+    stem: 'android',
+    reason: _androidReason,
+    needsAndroidClosure: true,
+  ),
+  DocExemption(
+    stem: 'defs',
+    reason: _integrationTestReason,
+    needsAndroidClosure: true,
+  ),
+  DocExemption(
+    stem: 'extensions',
+    reason:
+        'its closure loads rules_dart pub_scan.bzl, pub_archive_scan.bzl and '
+        'pub_scanner_sdk.bzl, which have no bzl_library',
+  ),
+  DocExemption(
+    stem: 'linux',
+    reason: _integrationTestReason,
+    needsAndroidClosure: true,
+  ),
+  DocExemption(
+    stem: 'web',
+    reason: _integrationTestReason,
+    needsAndroidClosure: true,
+  ),
 ];
-
-/// Public entry stems with no `starlark_doc_extract` target in `//docs`: their
-/// load closures reach a Starlark module with no `bzl_library` at the pinned
-/// dependency versions (see `docs/BUILD.bazel`).
-const Set<String> _docExtractExemptStems = <String>{
-  'android',
-  'defs',
-  'extensions',
-  'linux',
-  'web',
-};
 
 enum _TokKind { ident, string, punct }
 
@@ -413,11 +423,12 @@ String _resolveWorkspaceRoot() {
   }
   final String cursor = File('$srcDir/$anchor').resolveSymbolicLinksSync();
   Directory dir = File(cursor).parent;
-  for (var step = 0; step < 10; step++) {
+  while (true) {
     if (Directory('${dir.path}/flutter').existsSync() &&
         File('${dir.path}/MODULE.bazel').existsSync()) {
       return dir.path;
     }
+    if (dir.parent.path == dir.path) break;
     dir = dir.parent;
   }
   throw StateError('Unable to locate rules_flutter root above $anchor');
@@ -826,7 +837,7 @@ void _verifyPublicExports(_WorkspaceGraph graph) {
         problems.add('flutter/BUILD.bazel exports $exp more than once');
       }
     }
-    for (final String stem in _publicEntryStems) {
+    for (final String stem in publicEntryStems(graph.repoRoot)) {
       if (!seenExports.contains('$stem.bzl')) {
         problems.add('flutter/BUILD.bazel does not publicly export $stem.bzl');
       }
@@ -876,7 +887,9 @@ void _checkAllDocExtractsFilegroup(
     ];
     if (srcs.length != expectedSrcs.length ||
         !srcs.toSet().containsAll(expectedSrcs)) {
-      problems.add('//docs:all_doc_extracts srcs must list the 10 extracts');
+      problems.add(
+        '//docs:all_doc_extracts srcs must list the ${expectedStems.length} extracts',
+      );
     }
   }
 }
@@ -898,20 +911,24 @@ void _verifyDocsExtracts(_WorkspaceGraph graph) {
       allFilegroup = call;
     }
   }
-  final List<String> expectedStems = _publicEntryStems
-      .where((stem) => !_docExtractExemptStems.contains(stem))
-      .toList();
-  for (final String stem in _docExtractExemptStems) {
-    if (docExtracts.containsKey('$stem.doc_extract')) {
-      problems.add('//docs:$stem.doc_extract must not be declared');
-    }
-  }
-  if (docExtracts.length != expectedStems.length) {
-    final int count = docExtracts.length;
-    problems.add(
-      'Expected 10 starlark_doc_extract targets in //docs, got $count',
-    );
-  }
+  final Set<String> exempt = {for (final e in _docExtractExemptions) e.stem};
+  final List<String> expectedStems = [
+    for (final stem in publicEntryStems(graph.repoRoot))
+      if (!exempt.contains(stem)) stem,
+  ];
+  final DocExtractVerdict verdict = checkDocExtracts(
+    DocExtractInputs(
+      repoRoot: graph.repoRoot,
+      exemptions: _docExtractExemptions,
+      extractStems: {
+        for (final String name in docExtracts.keys)
+          if (name.endsWith('.doc_extract'))
+            name.substring(0, name.length - '.doc_extract'.length),
+      },
+    ),
+  );
+  problems.addAll(verdict.problems);
+  verdict.notes.forEach(stderr.writeln);
   for (final stem in expectedStems) {
     _validateSingleDocExtract(stem, docExtracts, problems);
   }
@@ -946,12 +963,12 @@ void main() {
     _verifyLoadObligations(graph);
   });
 
-  test('flutter publicly exports all 15 entry bzl files', () {
+  test('flutter publicly exports every public entry bzl file', () {
     _verifyPublicExports(graph);
   });
 
   test(
-    'docs declares 10 starlark_doc_extract targets and all_doc_extracts',
+    'docs declares an extract for every non-exempt entry and all_doc_extracts',
     () {
       _verifyDocsExtracts(graph);
     },
