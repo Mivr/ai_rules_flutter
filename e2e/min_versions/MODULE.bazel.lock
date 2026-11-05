@@ -11328,7 +11328,7 @@
     },
     "@@ai_rules_flutter+//flutter:extensions.bzl%flutter": {
       "general": {
-        "bzlTransitiveDigest": "GxUoj6l4HFyuyY+QcYvi4XteRqAKRx0rUL+NOic9/6E=",
+        "bzlTransitiveDigest": "IZJRFxFsdJNNyKWd+F3IYKcMHlqPVLHwvAVi39up+MM=",
         "usagesDigest": "FoliHGgXenErGmYib/QFfCBOdQ4be7y3UhSoY9X8Lgs=",
         "recordedInputs": [
           "REPO_MAPPING:ai_rules_dart+,dart_pub_scanner ai_rules_dart++dart+dart_pub_scanner",
@@ -12331,7 +12331,7 @@
               "sha256s": {
                 "android-arm64-profile/artifacts.zip": "91201fc9ad5a4bfbecd9873b22bd29ad65d34e6e09627b3802e6f658346145e2"
               },
-              "build_file_content": "load(\"@rules_flutter//flutter/private:flutter_android_engine_jar.bzl\", \"flutter_android_engine_jar\")\n\nexports_files([\"flutter.jar\"], visibility = [\"//visibility:public\"])\n\nflutter_android_engine_jar(\n    name = \"stripped\",\n    jar = \"flutter.jar\",\n    android_abi = \"arm64-v8a\",\n    visibility = [\"//visibility:public\"],\n)\n"
+              "build_file_content": "load(\"@rules_flutter//flutter:android.bzl\", \"flutter_android_engine_jar\")\n\nexports_files([\"flutter.jar\"], visibility = [\"//visibility:public\"])\n\nflutter_android_engine_jar(\n    name = \"stripped\",\n    jar = \"flutter.jar\",\n    android_abi = \"arm64-v8a\",\n    visibility = [\"//visibility:public\"],\n)\n"
             }
           },
           "flutter_android_engine_x64": {
@@ -12355,7 +12355,7 @@
               "sha256s": {
                 "android-x64-profile/artifacts.zip": "0ab59ef4fd2222015865cc2f122ce1d67d024894a9799dace461b7534bb623a9"
               },
-              "build_file_content": "load(\"@rules_flutter//flutter/private:flutter_android_engine_jar.bzl\", \"flutter_android_engine_jar\")\n\nexports_files([\"flutter.jar\"], visibility = [\"//visibility:public\"])\n\nflutter_android_engine_jar(\n    name = \"stripped\",\n    jar = \"flutter.jar\",\n    android_abi = \"x86_64\",\n    visibility = [\"//visibility:public\"],\n)\n"
+              "build_file_content": "load(\"@rules_flutter//flutter:android.bzl\", \"flutter_android_engine_jar\")\n\nexports_files([\"flutter.jar\"], visibility = [\"//visibility:public\"])\n\nflutter_android_engine_jar(\n    name = \"stripped\",\n    jar = \"flutter.jar\",\n    android_abi = \"x86_64\",\n    visibility = [\"//visibility:public\"],\n)\n"
             }
           },
           "flutter_ios_engine": {
