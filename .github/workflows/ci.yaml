@@ -1310,6 +1310,24 @@ jobs:
           cache-save: false
       - name: bazel test --lockfile_mode=off //... --test_output=errors
         run: bazel test --lockfile_mode=off //... --test_output=errors
+  # Burn-in for the incompatible flags Bazel has yet to flip: runs the root
+  # tests under `--config=strict` (tools/strict.bazelrc). Non-blocking, so the
+  # job carries `continue-on-error` and is absent from `conclusion.needs`. It
+  # becomes blocking when the burn-in ends on 2026-11-14; it is added to
+  # `conclusion.needs` then.
+  strict:
+    name: Bazel strict flags (burn-in)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached }}
+      - name: bazel test --config=strict //... --test_output=errors
+        run: bazel test --config=strict //... --test_output=errors
   conclusion:
     name: Conclusion
     needs: [e2e-macos-apple, e2e-macos-toolchain, unit-tests, e2e-linux-app, e2e-linux-small, e2e-linux-examples, e2e-linux-pub-scc, e2e-linux-integration, e2e-windows, e2e-coverage, dart-tool-tests, pre-commit, web-smoke, reproducibility, mod-tidy]

@@ -1,6 +1,7 @@
 ########################
 # Import bazelrc presets
 import %workspace%/tools/preset.bazelrc
+import %workspace%/tools/strict.bazelrc
 
 # Never retry failed tests: a retry hides a flake.
 test --flaky_test_attempts=1
@@ -23,8 +24,11 @@ common --@rules_dart//dart:analysis_config=//:analysis_config
 # Bazel settings that apply to this repository.
 # Take care to document any settings that you expect users to apply.
 #
-# There is no CI-only bazelrc. Flags that CI adds and a developer does not are
-# written inline on the `bazel` invocations in .github/workflows/ci.yaml.
+# There is no CI-only bazelrc. `tools/strict.bazelrc` is a developer-visible
+# config imported above: `--config=strict` turns on the incompatible flags Bazel
+# has yet to flip, and CI's `strict` job and a developer run the same set. Other
+# flags that CI adds and a developer does not are written inline on the `bazel`
+# invocations in .github/workflows/ci.yaml.
 
 # Ensure that the MODULE.bazel.lock file is complete and committed.
 # This is an important security measure: it ensures that developers on the
