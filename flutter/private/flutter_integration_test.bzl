@@ -1547,7 +1547,7 @@ def _flutter_android_integration_test_impl(ctx):
         "FLUTTER_INTEGRATION_TEST_DECLARED_ENV": json.encode(ctx.attr.env),
     }
     library_tags = _integration_test_env(ctx, env, setup.main_file)
-    return _integration_test_providers(
+    providers = _integration_test_providers(
         ctx,
         struct(
             extra_srcs = setup.extra_srcs,
@@ -1566,6 +1566,14 @@ def _flutter_android_integration_test_impl(ctx):
             ] + ctx.attr._android_runtime_all_files.files.to_list(),
         ),
     )
+
+    # The emulator needs the host: /dev/kvm and loopback ports shared with its
+    # adb server. Under `linux-sandbox` (CI enables user namespaces) the
+    # emulator boots (KVM works) but adb never sees it ("device
+    # 'emulator-N' not found"), and `requires-network` alone does not fix that.
+    # `no-sandbox` runs just this test unsandboxed, as it effectively was under
+    # `processwrapper-sandbox`; every other action stays on `linux-sandbox`.
+    return providers + [testing.ExecutionInfo({"no-sandbox": ""})]
 
 _WEB_RELEVANT_KEYS = (
     "assets",
