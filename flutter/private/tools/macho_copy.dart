@@ -7,6 +7,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'macho_cli.dart';
+import 'macho_constants.dart' show mhMagic64;
 import 'macho_framework.dart' show createFrameworkZipBytes;
 import 'macho_fat.dart'
     show FatSlice, buildFatMachO, isFatMachO, isMachO32, isMachO64;
@@ -506,22 +507,71 @@ void runFat(List<String> args) {
     usageError('fat requires --output and at least one input slice path');
   }
 
-  final slices = <FatSlice>[];
-  for (final p in slicePaths) {
-    final bytes = File(p).readAsBytesSync();
-    if (!isMachO64(bytes) && !isMachO32(bytes)) {
-      throw FormatException('Input slice "$p" is not a thin Mach-O binary.');
-    }
-    final bd = ByteData.sublistView(bytes);
-    final cputype = bd.getUint32(4, Endian.little);
-    final cpusubtype = bd.getUint32(8, Endian.little);
-    slices.add(
-      FatSlice(cputype: cputype, cpusubtype: cpusubtype, bytes: bytes),
-    );
-  }
+  final slices = <FatSlice>[
+    for (final p in slicePaths) _fatSliceFromFile(p),
+  ];
 
   final out = buildFatMachO(slices);
   final outFile = File(outputPath);
   outFile.parent.createSync(recursive: true);
   outFile.writeAsBytesSync(out);
+}
+
+/// The `ar` archive magic that starts a static library.
+const _arMagic = '!<arch>\n';
+
+/// Reads [path] as a thin Mach-O or a static `ar` archive and returns its slice.
+///
+/// An archive takes its CPU type from the first Mach-O object it holds, which
+/// is how `lipo` builds a universal static library.
+FatSlice _fatSliceFromFile(String path) {
+  final Uint8List bytes = File(path).readAsBytesSync();
+  if (isMachO64(bytes) || isMachO32(bytes)) {
+    return _cpuSlice(bytes, 0);
+  }
+  final int? object = _firstArchiveObject(bytes);
+  if (object == null) {
+    throw FormatException(
+      'Input slice "$path" is neither a thin Mach-O binary nor a static '
+      'archive of Mach-O objects.',
+    );
+  }
+  return _cpuSlice(bytes, object);
+}
+
+/// Builds a slice holding all of [bytes], typed by the Mach-O header at [offset].
+FatSlice _cpuSlice(Uint8List bytes, int offset) {
+  final bd = ByteData.sublistView(bytes);
+  return FatSlice(
+    cputype: bd.getUint32(offset + 4, Endian.little),
+    cpusubtype: bd.getUint32(offset + 8, Endian.little),
+    bytes: bytes,
+  );
+}
+
+/// Returns the file offset of the first Mach-O object in an `ar` archive.
+int? _firstArchiveObject(Uint8List bytes) {
+  if (bytes.length < _arMagic.length ||
+      String.fromCharCodes(bytes, 0, _arMagic.length) != _arMagic) {
+    return null;
+  }
+  int pos = _arMagic.length;
+  while (pos + 60 <= bytes.length) {
+    final String name = String.fromCharCodes(bytes, pos, pos + 16).trim();
+    final int? size = int.tryParse(
+      String.fromCharCodes(bytes, pos + 48, pos + 58),
+    );
+    if (size == null) return null;
+    int data = pos + 60;
+    if (name.startsWith('#1/')) {
+      data += int.tryParse(name.substring(3)) ?? 0;
+    }
+    if (data + 12 <= bytes.length &&
+        ByteData.sublistView(bytes).getUint32(data, Endian.little) ==
+            mhMagic64) {
+      return data;
+    }
+    pos += 60 + size + (size.isOdd ? 1 : 0);
+  }
+  return null;
 }
