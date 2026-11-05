@@ -1049,6 +1049,7 @@ PATH="" "$REPO_ROOT/bin/ld64.lld_macos_arm64" -arch arm64 -platform_version maco
             work_dir = work_dir.path,
             out = out.path,
         ),
+        toolchain = None,
     )
     return [DefaultInfo(files = depset([out]))]
 

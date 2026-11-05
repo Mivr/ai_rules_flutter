@@ -177,7 +177,7 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
 
     extra_pub_assets = []
     for target, asset_path in pkg_assets_dict.items():
-        files = target.files.to_list()
+        files = target[DefaultInfo].files.to_list()
         if len(files) != 1:
             fail("pkg_assets entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
         norm = _normalize_attr_value(context.package_name, "pkg_assets", asset_path)
@@ -192,7 +192,7 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
 
     extra_pub_shaders = []
     for target, shader_path in pkg_shaders_dict.items():
-        files = target.files.to_list()
+        files = target[DefaultInfo].files.to_list()
         if len(files) != 1:
             fail("pkg_shaders entry %s must resolve to exactly one File; got %d" % (target.label, len(files)))
         extra_pub_shaders.append(struct(

@@ -74,6 +74,7 @@ def _flutter_android_manifest_merge_impl(ctx):
         outputs = [output],
         mnemonic = "FlutterManifestMerge",
         progress_message = "Merging Android variant manifest %s" % ctx.label,
+        toolchain = None,
     )
 
     return [DefaultInfo(files = depset([output]))]

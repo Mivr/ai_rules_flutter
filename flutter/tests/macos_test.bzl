@@ -236,6 +236,7 @@ def _aotless_application_impl(ctx):
         outputs = [assets],
         command = "mkdir -p \"$1\"",
         arguments = [assets.path],
+        toolchain = None,
     )
     dummy = ctx.actions.declare_file(ctx.label.name + "/dummy")
     ctx.actions.write(dummy, "aotless")

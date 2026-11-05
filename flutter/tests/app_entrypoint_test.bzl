@@ -292,6 +292,7 @@ def _stale_bin_dir_seed_impl(ctx):
         ),
         outputs = [stale_out, seed_out],
         mnemonic = "StaleBinDirSeed",
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return [
         DefaultInfo(files = depset([seed_out])),

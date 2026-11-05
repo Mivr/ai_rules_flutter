@@ -142,6 +142,7 @@ def _patch_ios_app_binary(ctx, dart_exe, dart_vm_files, dylib, framework_binary,
         outputs = [framework_binary],
         mnemonic = "FlutterIOSRetagDylib",
         progress_message = "Retagging App dylib for %s (min %s)" % (vtool_platform, minimum_os_version),
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
 def _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, framework_assets):
@@ -163,6 +164,7 @@ def _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, fra
         outputs = [framework_assets],
         mnemonic = "FlutterIOSCopyAssets",
         progress_message = "Copying flutter_assets into App.framework",
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
 def _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_arch, vtool_platform, minimum_os_version):
@@ -195,6 +197,7 @@ def _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_ar
         outputs = [framework_binary],
         mnemonic = "FlutterIOSStubDylib",
         progress_message = "Creating stub App.framework binary for debug mode",
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
 def _assemble_ios_debug_assets(ctx, dart_exe, dart_vm_files, flutter_sdk_info, flutter_assets, kernel_dill, framework_assets):
@@ -236,6 +239,7 @@ def _assemble_ios_debug_assets(ctx, dart_exe, dart_vm_files, flutter_sdk_info, f
         outputs = [framework_assets],
         mnemonic = "FlutterIOSDebugAssets",
         progress_message = "Assembling debug App.framework with kernel and VM snapshots",
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
 def _ios_framework_result(ctx, framework_files, framework_binary, split_assets):
@@ -505,6 +509,7 @@ def _flutter_ios_native_frameworks_impl(ctx):
             outputs = [binary],
             mnemonic = "FlutterIOSNativeAssetFramework",
             progress_message = "Wrapping %s into %s.framework" % (dylib.basename, name),
+            toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
         )
 
         ctx.actions.write(plist, _NATIVE_ASSET_FRAMEWORK_INFO_PLIST.format(

@@ -213,6 +213,7 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
         outputs = [jar],
         mnemonic = "FlutterNativeLibsJar",
         progress_message = "Packaging Flutter native libs into jar %s" % ctx.label,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return jar
 
@@ -254,6 +255,7 @@ def _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, flutter_sdk_info)
         outputs = [out],
         mnemonic = "FlutterAndroidDebugAssets",
         progress_message = "Assembling debug flutter_assets with kernel and VM snapshots %s" % ctx.label,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return out
 
@@ -306,6 +308,7 @@ def _flutter_android_bundle_impl(ctx):
             outputs = [native_libs_jar],
             mnemonic = "FlutterEmptyNativeLibsJar",
             progress_message = "Creating empty native libs jar (debug mode) %s" % ctx.label,
+            toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
         )
 
     outputs = [flutter_assets, native_libs_jar] + all_native_libs

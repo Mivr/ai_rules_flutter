@@ -101,6 +101,7 @@ def _flutter_sdk_kernel_binary_impl(ctx):
         mnemonic = "FlutterToolKernel",
         progress_message = "Compiling Flutter tool kernel %s" % ctx.label,
         env = _writable_home_env(flutter_sdk_info.dart, output),
+        toolchain = None,
     )
 
     return [

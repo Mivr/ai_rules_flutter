@@ -295,6 +295,7 @@ def _run_kernel_action(ctx, run):
         mnemonic = "FlutterKernelCompile",
         progress_message = "Compiling Flutter kernel %s" % ctx.label,
         env = run.env,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     if run.resource_set != None:
         run_kwargs["resource_set"] = run.resource_set

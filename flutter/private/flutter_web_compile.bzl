@@ -234,7 +234,7 @@ def web_sdk_files_for_dart2js(web_sdk):
     Returns:
         The list of `File`s `_web_libraries_spec` picks from.
     """
-    files = web_sdk.files.to_list() if web_sdk else []
+    files = web_sdk[DefaultInfo].files.to_list() if web_sdk else []
     return [
         f
         for f in files
@@ -518,6 +518,7 @@ def _web_guarded_run(ctx, args, req, run):
         mnemonic = run.mnemonic,
         progress_message = run.progress_message,
         env = _sandbox_env(req.dart, run.env_dir),
+        toolchain = None,
     )
 
 def _dart2wasm_compiler_args(args, req):
