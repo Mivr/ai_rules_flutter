@@ -47,6 +47,12 @@ is a hard build error.
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "resolve_exec_dart_vm")
 
+# Label of the rules_android Starlark flag holding the caller's `--android_platforms`.
+# The native `//command_line_option:android_platforms` is a redirect to this flag on
+# Bazel 9, and 9.0.0 emits the redirect target with a canonical-position apparent repo
+# name that no repository has, so the transition reads the flag by its apparent label.
+ANDROID_PLATFORMS_FLAG = "@rules_android//flags:android_platforms"
+
 def _android_platform_transition_platforms(settings, attr):
     abi = getattr(attr, "android_abi", "")
     if abi:
@@ -69,7 +75,7 @@ def _android_platform_transition_platforms(settings, attr):
                 "//command_line_option:platforms": [android_platform_for_abi("arm64-v8a")],
             }
 
-    android_platforms = settings["//command_line_option:android_platforms"]
+    android_platforms = settings[ANDROID_PLATFORMS_FLAG]
     if android_platforms:
         return {
             "//command_line_option:platforms": list(android_platforms),
@@ -109,7 +115,7 @@ _android_platform_transition = transition(
     implementation = _android_platform_transition_impl,
     inputs = [
         "//command_line_option:platforms",
-        "//command_line_option:android_platforms",
+        ANDROID_PLATFORMS_FLAG,
         "//command_line_option:cpu",
         "//command_line_option:dynamic_mode",
     ],
