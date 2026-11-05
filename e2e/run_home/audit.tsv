@@ -43,6 +43,7 @@
 @rules_flutter//flutter/private/tools:bundle_app_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:chmod_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:compile_shader_test	Dart unit test; no CLI spawn
+@rules_flutter//flutter/private/tools:copy_local_file_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:extract_library_tags_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_integration_test_android_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_integration_test_ios_test	Dart unit test; no CLI spawn
