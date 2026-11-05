@@ -11,12 +11,12 @@ SwiftPM product links a plugin's `Package.swift` declares. Split out of
 `flutter_pub_package.bzl` loads the pieces its pipeline still needs.
 """
 
+load(":flutter_pub_apple_byname.bzl", "apple_swiftpm_declares_package", "apple_swiftpm_resolve_byname")
 load(
     ":flutter_pub_apple_deps.bzl",
     _apple_swiftpm_synthetic_manifest = "apple_swiftpm_synthetic_manifest",
     _select_apple_swiftpm_deps = "select_apple_swiftpm_deps",
 )
-load(":flutter_pub_apple_byname.bzl", "apple_swiftpm_declares_package", "apple_swiftpm_resolve_byname")
 load(":flutter_pub_apple_pods.bzl", "detect_apple_cocoapods_deps")
 load(":flutter_pub_plugin_deps.bzl", "mapped_apple_plugin_deps")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_under_walk")
@@ -689,12 +689,27 @@ def apple_swiftpm_manifest_products(plugin_name, manifest_text, manifest_dir, sr
     if target == None:
         return struct(ok = True, error = "", products = [], pkg_deps = parsed.model.pkg_deps, target = None)
     local = [other.name.lower() for other in parsed.model.targets if other.name]
+    pkgs = parsed.model.pkg_deps
     products = [
         dep
         for dep in target.deps
-        if (dep.kind == "product" or (getattr(dep, "by_name", False) and dep.name.lower() not in local)) and _apple_swiftpm_keeps_dep(dep, parsed.model.pkg_deps, platform)
+        if _apple_swiftpm_names_product(dep, local) and _apple_swiftpm_keeps_dep(dep, pkgs, platform)
     ]
     return struct(ok = True, error = "", products = products, pkg_deps = parsed.model.pkg_deps, target = target)
+
+def _apple_swiftpm_names_product(dep, local):
+    """Whether a target dependency names a product rather than a local target.
+
+    Args:
+        dep: One dependency reference of the manifest target.
+        local: Lowercased names of the targets of the plugin's own manifest.
+
+    Returns:
+        True for `.product(...)` and for by-name references to no local target.
+    """
+    if dep.kind == "product":
+        return True
+    return getattr(dep, "by_name", False) and dep.name.lower() not in local
 
 def _apple_swiftpm_linked_dep(plugin_name, dep, pkg_deps, product_deps):
     """The product dependency one kept target dependency links.
@@ -716,7 +731,8 @@ def _apple_swiftpm_linked_dep(plugin_name, dep, pkg_deps, product_deps):
 
     def is_mapped(package, product):
         """Whether the hub maps this product of this package."""
-        return _apple_swiftpm_dep_mapped_label(plugin_name, struct(package = package, name = product), pkg_deps, product_deps) != None
+        probe = struct(package = package, name = product)
+        return _apple_swiftpm_dep_mapped_label(plugin_name, probe, pkg_deps, product_deps) != None
 
     return apple_swiftpm_resolve_byname(plugin_name, dep, pkg_deps, is_mapped)
 

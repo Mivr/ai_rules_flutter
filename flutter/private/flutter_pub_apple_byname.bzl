@@ -35,7 +35,8 @@ def apple_swiftpm_declares_package(text):
     for tok in lexed.tokens:
         if tok.kind == "nl":
             continue
-        if previous != None and previous.kind == "punct" and previous.text == "." and tok.kind == "word" and tok.text == "package":
+        after_dot = previous != None and previous.kind == "punct" and previous.text == "."
+        if after_dot and tok.kind == "word" and tok.text == "package":
             return True
         previous = tok
     return False
@@ -121,6 +122,8 @@ def apple_swiftpm_resolve_byname(plugin_name, dep, pkg_deps, is_mapped):
         detail = "names neither a target of its Package.swift nor a product of a declared `.package(...)`."
         return struct(ok = False, error = _byname_error(plugin_name, dep, detail), dep = None)
     if len(owners) > 1:
-        detail = "could be a product of any of the declared packages " + ", ".join([json.encode(ref) for ref in owners]) + "."
+        names = ", ".join([json.encode(ref) for ref in owners])
+        detail = "could be a product of any of the declared packages " + names + "."
         return struct(ok = False, error = _byname_error(plugin_name, dep, detail), dep = None)
-    return struct(ok = True, error = "", dep = struct(kind = "product", name = dep.name, package = owners[0], condition = dep.condition))
+    linked = struct(kind = "product", name = dep.name, package = owners[0], condition = dep.condition)
+    return struct(ok = True, error = "", dep = linked)
