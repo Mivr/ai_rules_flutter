@@ -580,7 +580,12 @@ def _swiftpm_package_impl(ctx):
     identity = ctx.attr.identity
     if ctx.attr.unpinned_error:
         fail(ctx.attr.unpinned_error)
-    pinned_download_and_extract(ctx, url = ctx.attr.archive_url, sha256 = ctx.attr.sha256, output = _SWIFTPM_EXTRACT_DIR)
+    pinned_download_and_extract(
+        ctx,
+        url = ctx.attr.archive_url,
+        sha256 = ctx.attr.sha256,
+        output = _SWIFTPM_EXTRACT_DIR,
+    )
     hoist_error = swiftpm_hoist_package_root(ctx, identity)
     if hoist_error:
         fail(hoist_error)
