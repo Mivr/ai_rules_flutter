@@ -369,25 +369,28 @@ commands:
 }
 
 void _registerScratchDeletionTests() {
-  test('deleteScratchTree removes a tree with read-only directories', () {
-    if (Platform.isWindows) {
-      return;
-    }
-    final Directory root = Directory.systemTemp.createTempSync('scratch_del_');
-    final outputBase = Directory(
-      p.join(root.path, 'ob', 'external', 'repo'),
-    )..createSync(recursive: true);
-    File(p.join(outputBase.path, 'file.txt')).writeAsStringSync('x');
-    Process.runSync('chmod', <String>['-R', 'a-w', p.join(root.path, 'ob')]);
-    addTearDown(() {
-      if (root.existsSync()) {
-        Process.runSync('chmod', <String>['-R', 'u+rwx', root.path]);
-        root.deleteSync(recursive: true);
-      }
-    });
-    deleteScratchTree(root);
-    expect(root.existsSync(), isFalse);
-  });
+  test(
+    'deleteScratchTree removes a tree with read-only directories',
+    () {
+      final Directory root = Directory.systemTemp.createTempSync(
+        'scratch_del_',
+      );
+      final outputBase = Directory(
+        p.join(root.path, 'ob', 'external', 'repo'),
+      )..createSync(recursive: true);
+      File(p.join(outputBase.path, 'file.txt')).writeAsStringSync('x');
+      Process.runSync('chmod', <String>['-R', 'a-w', p.join(root.path, 'ob')]);
+      addTearDown(() {
+        if (root.existsSync()) {
+          Process.runSync('chmod', <String>['-R', 'u+rwx', root.path]);
+          root.deleteSync(recursive: true);
+        }
+      });
+      deleteScratchTree(root);
+      expect(root.existsSync(), isFalse);
+    },
+    skip: Platform.isWindows ? 'POSIX chmod builds the read-only tree' : false,
+  );
 }
 
 Future<void> _runDemo(
