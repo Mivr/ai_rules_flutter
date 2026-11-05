@@ -20,6 +20,7 @@
 @rules_flutter//flutter/private/tools:incr_fkc_worker	exec build tool (AOT persistent worker); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:kernel_filter	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:macho_edit	exec build tool (AOT); outputs only, no CLI spawn
+@rules_flutter//flutter/private/tools:macho_fat_archive_test	unit test of the fat-archive writer; runs on the host, spawns no CLI
 @rules_flutter//flutter/private/tools:merge_android_manifests	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:merge_plists	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:pub_runner	exec runner for //flutter:pub; covered via the //flutter:pub registry row
