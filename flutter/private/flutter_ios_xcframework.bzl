@@ -31,13 +31,16 @@ load(
 )
 load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_framework_rule = "flutter_ios_framework")
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
+load(
+    "//flutter/private:flutter_ios_xcframework_plist.bzl",
+    "IOS_DEVICE",
+    "IOS_SIMULATOR",
+    "framework_info_plist",
+    "xcframework_info_plist",
+)
 load("//flutter/private:ios_app.bzl", _flutter_ios_engine = "flutter_ios_engine")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 
-_IOS_DEVICE = "ios-arm64"
-_IOS_SIMULATOR = "ios-arm64_x86_64-simulator"
-_DEVICE_ARCHITECTURES = ["arm64"]
-_SIMULATOR_ARCHITECTURES = ["arm64", "x86_64"]
 _RESERVED_FRAMEWORKS = ["App", "Flutter", "FlutterPluginRegistrant"]
 
 def _xcframework_transition_impl(platform_label):
@@ -229,103 +232,6 @@ def _single_binary(target):
         ) + "dynamic library; expected the registrant's linked binary.",
     )
 
-def _framework_info_plist(name, minimum_os_version, bundle_id):
-    """Renders the `Info.plist` every framework slice carries."""
-    return "\n".join([
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
-        '<plist version="1.0">',
-        "<dict>",
-        "    <key>CFBundleDevelopmentRegion</key>",
-        "    <string>en</string>",
-        "    <key>CFBundleExecutable</key>",
-        "    <string>%s</string>" % name,
-        "    <key>CFBundleIdentifier</key>",
-        "    <string>%s</string>" % bundle_id,
-        "    <key>CFBundleInfoDictionaryVersion</key>",
-        "    <string>6.0</string>",
-        "    <key>CFBundleName</key>",
-        "    <string>%s</string>" % name,
-        "    <key>CFBundlePackageType</key>",
-        "    <string>FMWK</string>",
-        "    <key>CFBundleShortVersionString</key>",
-        "    <string>1.0</string>",
-        "    <key>CFBundleVersion</key>",
-        "    <string>1.0</string>",
-        "    <key>MinimumOSVersion</key>",
-        "    <string>%s</string>" % minimum_os_version,
-        "</dict>",
-        "</plist>",
-        "",
-    ])
-
-def _library_entry(path, identifier, architectures, variant):
-    """Builds one `AvailableLibraries` entry."""
-    lines = [
-        "        <dict>",
-        "            <key>LibraryIdentifier</key>",
-        "            <string>%s</string>" % identifier,
-        "            <key>LibraryPath</key>",
-        "            <string>%s</string>" % path,
-        "            <key>SupportedArchitectures</key>",
-        "            <array>",
-    ]
-    for arch in architectures:
-        lines.extend(["                <string>%s</string>" % arch])
-    lines.extend([
-        "            </array>",
-        "            <key>SupportedPlatform</key>",
-        "            <string>ios</string>",
-    ])
-    if variant:
-        lines.extend([
-            "            <key>SupportedPlatformVariant</key>",
-            "            <string>%s</string>" % variant,
-        ])
-    lines.append("        </dict>")
-    return lines
-
-def _xcframework_info_plist(entries):
-    """Renders the xcframework-level `Info.plist` from its library entries."""
-    lines = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
-        '<plist version="1.0">',
-        "<dict>",
-        "    <key>AvailableLibraries</key>",
-        "    <array>",
-    ]
-    for entry in entries:
-        lines.extend(entry)
-    lines.extend([
-        "    </array>",
-        "    <key>CFBundlePackageType</key>",
-        "    <string>XFWK</string>",
-        "    <key>XCFrameworkFormatVersion</key>",
-        "    <string>1.0</string>",
-        "</dict>",
-        "</plist>",
-        "",
-    ])
-    return "\n".join(lines)
-
-def _device_and_simulator_entries(framework_name):
-    """The two library entries every add-to-app xcframework carries."""
-    return [
-        _library_entry(
-            "%s/%s.framework" % (_IOS_DEVICE, framework_name),
-            _IOS_DEVICE,
-            _DEVICE_ARCHITECTURES,
-            "",
-        ),
-        _library_entry(
-            "%s/%s.framework" % (_IOS_SIMULATOR, framework_name),
-            _IOS_SIMULATOR,
-            _SIMULATOR_ARCHITECTURES,
-            "simulator",
-        ),
-    ]
-
 def _app_xcframework(ctx):
     """Declares App.xcframework and returns its outputs and runfiles."""
     device = _framework_members(ctx.attr.device_app_framework, "App")
@@ -336,13 +242,13 @@ def _app_xcframework(ctx):
     root = ctx.label.name + "/App.xcframework"
     outputs = []
 
-    device_dir = root + "/%s/App.framework" % _IOS_DEVICE
+    device_dir = root + "/%s/App.framework" % IOS_DEVICE
     device_binary = _declare_symlink(ctx, device_dir + "/App", device["App"])
     outputs.append(device_binary)
     outputs.append(_declare_symlink(ctx, device_dir + "/Info.plist", device["Info.plist"]))
     outputs.append(_copy_tree(ctx, dart_exe, dart_vm_files, device["flutter_assets"], device_dir + "/flutter_assets"))
 
-    sim_dir = root + "/%s/App.framework" % _IOS_SIMULATOR
+    sim_dir = root + "/%s/App.framework" % IOS_SIMULATOR
     sim_binary = ctx.actions.declare_file(sim_dir + "/App")
     _fat_binary(ctx, dart_exe, dart_vm_files, sim_arm64["App"], sim_x64["App"], sim_binary)
     outputs.append(sim_binary)
@@ -350,7 +256,7 @@ def _app_xcframework(ctx):
     outputs.append(_copy_tree(ctx, dart_exe, dart_vm_files, sim_arm64["flutter_assets"], sim_dir + "/flutter_assets"))
 
     info_plist = ctx.actions.declare_file(root + "/Info.plist")
-    ctx.actions.write(info_plist, _xcframework_info_plist(_device_and_simulator_entries("App")))
+    ctx.actions.write(info_plist, xcframework_info_plist("App"))
     outputs.append(info_plist)
     return outputs
 
@@ -412,25 +318,25 @@ def _registrant_xcframework(ctx):
     )
 
     outputs = []
-    device_dir = root + "/%s/FlutterPluginRegistrant.framework" % _IOS_DEVICE
+    device_dir = root + "/%s/FlutterPluginRegistrant.framework" % IOS_DEVICE
     outputs.append(_declare_symlink(ctx, device_dir + "/FlutterPluginRegistrant", device_patched))
     outputs.append(_write_framework_plist(ctx, device_dir, "FlutterPluginRegistrant", ctx.attr.minimum_os_version))
 
-    sim_dir = root + "/%s/FlutterPluginRegistrant.framework" % _IOS_SIMULATOR
+    sim_dir = root + "/%s/FlutterPluginRegistrant.framework" % IOS_SIMULATOR
     sim_binary = ctx.actions.declare_file(sim_dir + "/FlutterPluginRegistrant")
     _fat_binary(ctx, dart_exe, dart_vm_files, arm64_patched, x64_patched, sim_binary)
     outputs.append(sim_binary)
     outputs.append(_write_framework_plist(ctx, sim_dir, "FlutterPluginRegistrant", ctx.attr.minimum_os_version))
 
     info_plist = ctx.actions.declare_file(root + "/Info.plist")
-    ctx.actions.write(info_plist, _xcframework_info_plist(_device_and_simulator_entries("FlutterPluginRegistrant")))
+    ctx.actions.write(info_plist, xcframework_info_plist("FlutterPluginRegistrant"))
     outputs.append(info_plist)
     return outputs
 
 def _write_framework_plist(ctx, directory, name, minimum_os_version):
     """Writes the framework `Info.plist` inside one slice and returns it."""
     out = ctx.actions.declare_file(directory + "/Info.plist")
-    ctx.actions.write(out, _framework_info_plist(
+    ctx.actions.write(out, framework_info_plist(
         name,
         minimum_os_version,
         "io.flutter.flutter.plugin.%s" % name.lower().replace("_", "-"),
@@ -456,31 +362,53 @@ def _plugin_binary(entry):
         "expected an ios_libs/flutter_apple_plugin_library target with sources.",
     )
 
-def _plugin_xcframeworks(ctx):
-    """Declares one xcframework per native iOS plugin in the application graph."""
-    entries = ctx.attr.application[FlutterApplicationInfo].apple_plugin_libraries.to_list()
-    seen = {}
-    outputs = []
-    for entry in entries:
+def _plugin_binaries(application):
+    """Maps each native iOS plugin framework name to its compiled archive."""
+    binaries = {}
+    for entry in application[FlutterApplicationInfo].apple_plugin_libraries.to_list():
         if entry.platform != "ios":
             continue
         name = _plugin_name(entry)
-        if name in seen:
-            continue
         if name in _RESERVED_FRAMEWORKS:
             fail(
                 "flutter_ios_xcframeworks: plugin framework name %r collides " % name +
                 "with the add-to-app framework of the same name; rename the plugin package.",
             )
-        seen[name] = True
-        binary = _plugin_binary(entry)
+        if name not in binaries:
+            binaries[name] = _plugin_binary(entry)
+    return binaries
+
+def _plugin_xcframeworks(ctx):
+    """Declares one xcframework per native iOS plugin in the application graph.
+
+    The device slice holds the archive built for iOS devices. The simulator
+    slice holds a universal archive fused from the arm64 and x86_64 simulator
+    builds of the same plugin, so every slice carries code for its own platform.
+    """
+    device = _plugin_binaries(ctx.attr.application)
+    sim_arm64 = _plugin_binaries(ctx.attr.sim_arm64_application)
+    sim_x64 = _plugin_binaries(ctx.attr.sim_x64_application)
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+    outputs = []
+    for name, binary in device.items():
+        if name not in sim_arm64 or name not in sim_x64:
+            fail(
+                "flutter_ios_xcframeworks: plugin %s is built for devices but not for " % name +
+                "the simulator; give its ios_libs the same platform conditions for both.",
+            )
         root = "%s/%s.xcframework" % (ctx.label.name, name)
-        for identifier in (_IOS_DEVICE, _IOS_SIMULATOR):
-            directory = "%s/%s/%s.framework" % (root, identifier, name)
-            outputs.append(_declare_symlink(ctx, directory + "/" + name, binary))
-            outputs.append(_write_framework_plist(ctx, directory, name, ctx.attr.minimum_os_version))
+        device_dir = "%s/%s/%s.framework" % (root, IOS_DEVICE, name)
+        outputs.append(_declare_symlink(ctx, device_dir + "/" + name, binary))
+        outputs.append(_write_framework_plist(ctx, device_dir, name, ctx.attr.minimum_os_version))
+
+        sim_dir = "%s/%s/%s.framework" % (root, IOS_SIMULATOR, name)
+        sim_binary = ctx.actions.declare_file(sim_dir + "/" + name)
+        _fat_binary(ctx, dart_exe, dart_vm_files, sim_arm64[name], sim_x64[name], sim_binary)
+        outputs.append(sim_binary)
+        outputs.append(_write_framework_plist(ctx, sim_dir, name, ctx.attr.minimum_os_version))
+
         info_plist = ctx.actions.declare_file(root + "/Info.plist")
-        ctx.actions.write(info_plist, _xcframework_info_plist(_device_and_simulator_entries(name)))
+        ctx.actions.write(info_plist, xcframework_info_plist(name))
         outputs.append(info_plist)
     return outputs
 
@@ -503,8 +431,9 @@ def _flutter_ios_xcframework_impl(ctx):
             ctx.attr.engine,
         ]
     ]
-    for entry in ctx.attr.application[FlutterApplicationInfo].apple_plugin_libraries.to_list():
-        transitive.append(entry.files)
+    for application in [ctx.attr.application, ctx.attr.sim_arm64_application, ctx.attr.sim_x64_application]:
+        for entry in application[FlutterApplicationInfo].apple_plugin_libraries.to_list():
+            transitive.append(entry.files)
     return [DefaultInfo(
         files = depset(outputs),
         runfiles = ctx.runfiles(transitive_files = depset(transitive = transitive)),
@@ -514,10 +443,22 @@ flutter_ios_xcframework = rule(
     implementation = _flutter_ios_xcframework_impl,
     attrs = dicts.add({
         "application": attr.label(
-            doc = "A flutter_application target whose plugins become xcframeworks, read in the device configuration so its iOS plugin libraries are selected.",
+            doc = "A flutter_application target whose plugins become xcframeworks, read in the device configuration so its iOS device plugin libraries are selected.",
             mandatory = True,
             providers = [FlutterApplicationInfo],
             cfg = _ios_device_transition,
+        ),
+        "sim_arm64_application": attr.label(
+            doc = "The same flutter_application target, read in the simulator arm64 configuration so its simulator plugin archives are selected.",
+            mandatory = True,
+            providers = [FlutterApplicationInfo],
+            cfg = _ios_sim_arm64_transition,
+        ),
+        "sim_x64_application": attr.label(
+            doc = "The same flutter_application target, read in the simulator x86_64 configuration so its simulator plugin archives are selected.",
+            mandatory = True,
+            providers = [FlutterApplicationInfo],
+            cfg = _ios_sim_x64_transition,
         ),
         "device_app_framework": attr.label(
             doc = "The device arm64 App.framework target, built through the device transition.",
@@ -641,6 +582,8 @@ def flutter_ios_xcframeworks(name, application = None, minimum_os_version = IOS_
     flutter_ios_xcframework(
         name = name,
         application = application,
+        sim_arm64_application = application,
+        sim_x64_application = application,
         device_app_framework = ":__%s_device_app_framework" % name,
         sim_arm64_app_framework = ":__%s_sim_arm64_app_framework" % name,
         sim_x64_app_framework = ":__%s_sim_x64_app_framework" % name,
