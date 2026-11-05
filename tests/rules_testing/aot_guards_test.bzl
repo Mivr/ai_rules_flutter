@@ -29,7 +29,7 @@ _MAIN = "lib/guards_main.dart"
 def _flags(options, obfuscate = False, split_debug_info = False, strip = True):
     """Runs `flutter_aot_gen_snapshot_flags` against a fake rule context."""
     ctx = struct(
-        label = Label("//flutter/tests/rules_testing:aot_guards_fake"),
+        label = Label("//tests/rules_testing:aot_guards_fake"),
         attr = struct(
             extra_gen_snapshot_options = options,
             obfuscate = obfuscate,
