@@ -535,6 +535,27 @@ def resolve_podspec_privacy_path(podspec_dir, rel_path, plugin, podspec_path):
     prefix = [s for s in podspec_dir.split("/") if s and s != "."]
     return "/".join(prefix + segs)
 
+def _splice_apple_target(content, marker, insert_text, defines):
+    """Splice link-setting lines and defines into the target block that follows `marker`.
+
+    Args:
+        content: Spoke BUILD content string.
+        marker: The `    name = "...",` line that opens the target.
+        insert_text: Link-setting attribute lines to insert before `visibility`.
+        defines: Podspec defines to splice as `plugin_defines`; empty for none.
+
+    Returns:
+        Patched BUILD content string, unchanged when the target is absent.
+    """
+    head, sep, tail = content.partition(marker)
+    if not sep:
+        return content
+    block, vis_sep, vis_tail = tail.partition("\n    visibility = ")
+    if not vis_sep:
+        return content
+    block = splice_podspec_defines(block, defines)
+    return head + sep + block + "\n" + insert_text + "    visibility = " + vis_tail
+
 def splice_apple_podspec_link_settings(content, plugin, apple):
     """Splice non-empty SDK link attributes into a rendered spoke BUILD file.
 
@@ -563,18 +584,14 @@ def splice_apple_podspec_link_settings(content, plugin, apple):
             continue
         insert_text = "\n".join(lines) + "\n" if lines else ""
         for suffix in ("", "_xtool"):
-            marker = '    name = "%s_apple_%s%s",\n' % (plugin, platform, suffix)
-            head, sep, tail = content.partition(marker)
-            if not sep:
-                continue
-            block, vis_sep, vis_tail = tail.partition("\n    visibility = ")
-            if not vis_sep:
-                continue
-            if not suffix:
-                # The xtool backend compiles in one swiftc call with no define flags, so a
-                # podspec's defines reach the rules_apple target only.
-                block = splice_podspec_defines(block, defines)
-            content = head + sep + block + "\n" + insert_text + "    visibility = " + vis_tail
+            # The xtool backend compiles in one swiftc call with no define flags, so a
+            # podspec's defines reach the rules_apple target only.
+            content = _splice_apple_target(
+                content,
+                '    name = "%s_apple_%s%s",\n' % (plugin, platform, suffix),
+                insert_text,
+                [] if suffix else defines,
+            )
     return content
 
 def _has_darwin_srcs(srcs):
