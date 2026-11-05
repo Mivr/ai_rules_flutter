@@ -141,6 +141,25 @@ dart_test(
     ],
 )
 
+# Exec-toolchain guard: every `ctx.actions.run` / `run_shell` call under
+# flutter/ declares `toolchain =`, so auto exec groups can match the action to
+# the toolchain that supplies its executable. Same discovery mechanism as above.
+dart_test(
+    name = "exec_toolchain_guard_test",
+    size = "small",
+    data = ["exec_toolchain_guard_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :exec_toolchain_guard_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "exec_toolchain_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 # Release-archive guard: every e2e workspace except e2e/smoke must be
 # export-ignored in .gitattributes. Same discovery mechanism as above.
 dart_test(

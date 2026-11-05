@@ -48,6 +48,8 @@ load(
 load("//flutter/private:ios_app.bzl", _flutter_ios_engine = "flutter_ios_engine")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 
+_DART_EXEC_TOOLCHAIN_TYPE = Label("@rules_dart//dart:exec_tools_toolchain_type")
+
 _RESERVED_FRAMEWORKS = ["App", "Flutter", "FlutterPluginRegistrant"]
 
 def validate_xcframework_application(application):
@@ -118,6 +120,7 @@ def _copy_tree(ctx, dart_exe, dart_vm_files, source, path):
         outputs = [out],
         mnemonic = "FlutterIOSXcframeworkAssets",
         progress_message = "Copying App.framework assets into %s" % ctx.label,
+        toolchain = _DART_EXEC_TOOLCHAIN_TYPE,
     )
     return out
 
@@ -140,6 +143,7 @@ def _fat_binary(ctx, dart_exe, dart_vm_files, arm64, x86_64, output):
         outputs = [output],
         mnemonic = "FlutterIOSXcframeworkFat",
         progress_message = "Building universal simulator binary for %s" % ctx.label,
+        toolchain = _DART_EXEC_TOOLCHAIN_TYPE,
     )
 
 def _patch_binary(ctx, dart_exe, dart_vm_files, source, output, platform, minimum_os_version, install_name):
@@ -169,6 +173,7 @@ def _patch_binary(ctx, dart_exe, dart_vm_files, source, output, platform, minimu
         outputs = [output],
         mnemonic = "FlutterIOSXcframeworkPatch",
         progress_message = "Retagging %s for %s" % (source.basename, platform),
+        toolchain = _DART_EXEC_TOOLCHAIN_TYPE,
     )
 
 def _single_binary(target):
