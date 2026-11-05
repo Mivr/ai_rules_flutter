@@ -9,6 +9,7 @@ load(":aot_flags_test.bzl", "aot_flags_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_objc_deps_test.bzl", "apple_objc_deps_test_suite")
 load(":apple_private_headers_test.bzl", "apple_private_headers_test_suite")
+load(":architecture_fixtures.bzl", "architecture_fixtures")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":asset_keys_test.bzl", "asset_keys_test_suite")
@@ -593,10 +594,12 @@ dart_test(
     ],
 )
 
+architecture_fixtures(name = "arch_inv")
+
 test_suite(
     name = "architecture_invariants_test",
     tests = [
         ":architecture_source_scan_test",
-        "//flutter/tests/architecture:analysis_cases",
+        "//tests/rules_testing:architecture_analysis_cases",
     ],
 )
