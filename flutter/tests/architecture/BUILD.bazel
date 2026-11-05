@@ -1,0 +1,10 @@
+load(":cases.bzl", "architecture_invariants_analysis_tests")
+
+# The FF6 provider analysis cases. They sit in their own package because
+# `rules_testing` is a dev dependency, so `//flutter/tests` itself must load
+# without it; `//flutter/tests:architecture_invariants_test` runs these.
+test_suite(
+    name = "analysis_cases",
+    tests = architecture_invariants_analysis_tests(name = "arch_inv"),
+    visibility = ["//flutter/tests:__pkg__"],
+)

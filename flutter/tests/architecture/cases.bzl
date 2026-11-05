@@ -1,5 +1,8 @@
 """FF6 provider invariants of the Flutter rules, as `rules_testing` analysis tests.
 
+This lives in its own package because `rules_testing` is a dev dependency: a
+consumer that loads `//flutter/tests` must not need to resolve it.
+
 Gate 13 section D (FF6) says every Dart-library `deps` attribute requires
 `DartInfo`, and that each rule repository holds that invariant as an analysis
 test. `//flutter/tests:architecture_invariants_test` is the one command that
@@ -23,7 +26,7 @@ load("//flutter/private:flutter_library.bzl", "flutter_library")
 load("//flutter/private:flutter_plugin.bzl", "flutter_plugin")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
 
-_SRC = "compile_api_main.dart"
+_SRC = "fixture_main.dart"
 _TEST_API = "//flutter/tests/flutter_test_analyze_fixture/fake_test_api"
 
 def _has(env, target, provider, name, expected):
