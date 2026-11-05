@@ -9,6 +9,7 @@ load(":aot_flags_test.bzl", "aot_flags_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_objc_deps_test.bzl", "apple_objc_deps_test_suite")
 load(":apple_private_headers_test.bzl", "apple_private_headers_test_suite")
+load(":architecture_invariants_test.bzl", "architecture_invariants_analysis_tests")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
 load(":asset_keys_test.bzl", "asset_keys_test_suite")
@@ -572,3 +573,30 @@ aot_flags_test_suite(name = "aot_flags_test")
 flutter_pub_scc_test_suite(name = "flutter_pub_scc_test")
 
 flutter_pub_internal_hubs_test_suite(name = "flutter_pub_internal_hubs_test")
+
+# FF6 architecture invariants (Gate 13 section D): the provider analysis cases
+# and the production-.bzl source scan, behind one command. The scan walks the
+# live tree like the download guard above, so it needs no file list.
+dart_test(
+    name = "architecture_source_scan_test",
+    size = "small",
+    data = ["architecture_source_scan_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :architecture_source_scan_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "architecture_source_scan_test.dart",
+    tags = [
+        "external",
+        "local",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
+test_suite(
+    name = "architecture_invariants_test",
+    tests = architecture_invariants_analysis_tests(name = "arch_inv") + [
+        ":architecture_source_scan_test",
+    ],
+)
