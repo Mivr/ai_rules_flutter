@@ -16,406 +16,9 @@ import '../incr_fkc_server.dart';
 import '../incr_fkc_worker.dart';
 import '../kernel_filter.dart';
 import '../sha256.dart';
-
-class FakeSession implements CompilerSession {
-  FakeSession({
-    required this.fullDill,
-    required this.dillBytes,
-    List<CompileResult> script = const [],
-    Queue<CompileResult>? shared,
-  }) : _script = shared ?? Queue.of(script);
-
-  final String fullDill;
-  final List<int> dillBytes;
-  final Queue<CompileResult> _script;
-  final List<String> commands = [];
-  bool closed = false;
-  bool dead = false;
-
-  CompileResult _next(String command) {
-    commands.add(command);
-    File(fullDill).parent.createSync(recursive: true);
-    File(fullDill).writeAsBytesSync(dillBytes);
-    if (_script.isNotEmpty) return _script.removeFirst();
-    return (errors: 0, diagnostics: const [], depLines: const []);
-  }
-
-  @override
-  Future<CompileResult> compile(String entry) async => _next('compile $entry');
-
-  @override
-  Future<CompileResult> recompile(
-    String entry,
-    List<String> uris, {
-    bool resetFirst = false,
-  }) async => _next(
-    '${resetFirst ? 'reset+' : ''}recompile $entry [${uris.join(',')}]',
-  );
-
-  @override
-  Future<void> accept() async {
-    commands.add('accept');
-  }
-
-  @override
-  Future<void> reject() async {
-    commands.add('reject');
-  }
-
-  @override
-  Future<void> close() async {
-    closed = true;
-  }
-
-  @override
-  bool get alive => !dead && !closed;
-}
-
-/// A workspace with a manifest, sources, staged copies, and the files the
-/// compiler may read, all under a fresh temp dir used as the worker's cwd.
-class Harness {
-  Harness(this.dir);
-
-  final Directory dir;
-  String get cwd => dir.path;
-
-  void write(String rel, String content) {
-    File('${dir.path}/$rel')
-      ..createSync(recursive: true)
-      ..writeAsStringSync(content);
-  }
-
-  void writeManifest() {
-    write(
-      'manifest.txt',
-      [
-        'lib/main.dart',
-        'lib/a.dart',
-        '# staged',
-        'stage/lib/main.dart',
-        'stage/lib/a.dart',
-        '# allowed-reads',
-        'pkg_config.json',
-        'platform.dill',
-        '# filesystem-roots',
-        'stage',
-        '# output',
-        'out/app.dill',
-      ].join('\n'),
-    );
-  }
-
-  void writeCleanSources() {
-    write('lib/main.dart', "import 'a.dart';\nvoid main() {}\n");
-    write('lib/a.dart', 'int get answer => 42;\n');
-    write('stage/lib/main.dart', "import 'a.dart';\nvoid main() {}\n");
-    write('stage/lib/a.dart', 'int get answer => 42;\n');
-    write('pkg_config.json', '{}\n');
-    write('platform.dill', 'platform\n');
-  }
-
-  List<String> get argv => [
-    '--declared-inputs',
-    'manifest.txt',
-    '--',
-    'fake-vm',
-    '--output-dill',
-    'out/app.dill',
-    '--filesystem-root',
-    'stage',
-    '--packages',
-    'pkg_config.json',
-    'package:app/main.dart',
-  ];
-
-  /// A copy of [argv] with the `--filesystem-root` value replaced by [root].
-  List<String> argvWithRoot(String root) {
-    final args = argv;
-    args[args.indexOf('--filesystem-root') + 1] = root;
-    return args;
-  }
-
-  List<String> get inputs => [
-    'manifest.txt',
-    'lib/main.dart',
-    'lib/a.dart',
-    'stage/lib/main.dart',
-    'stage/lib/a.dart',
-    'pkg_config.json',
-    'platform.dill',
-  ];
-
-  List<String> depLines() => [
-    '+file://$cwd/lib/main.dart',
-    '+file://$cwd/lib/a.dart',
-    '+file://$cwd/stage/lib/main.dart',
-    '+file://$cwd/stage/lib/a.dart',
-    '+file://$cwd/pkg_config.json',
-    '+file://$cwd/platform.dill',
-  ];
-
-  CompileResult ok() =>
-      (errors: 0, diagnostics: const [], depLines: depLines());
-}
-
-/// Whether [parent] holds a surviving `incr_fkc_*` worker temp directory.
-bool hasWorkerTemp(Directory parent) =>
-    parent.listSync().whereType<Directory>().any(
-      (d) => d.path.split(Platform.pathSeparator).last.startsWith('incr_fkc_'),
-    );
+import 'incr_fkc_test_support.dart';
 
 void main() {
-  group('sha256Hex', () {
-    test('matches the standard vectors', () {
-      expect(
-        sha256Hex(const []),
-        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      );
-      expect(
-        sha256Hex(utf8.encode('abc')),
-        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
-      );
-    });
-  });
-
-  group('expandWorkerFlagfiles', () {
-    test('expands @ files in order and skips empty lines', () {
-      final dir = Directory.systemTemp.createTempSync('incr_flagfile_');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      File('${dir.path}/args').writeAsStringSync('--a\n\n--b=1\n');
-      expect(
-        expandWorkerFlagfiles(['--x', '@${dir.path}/args', '--y']),
-        ['--x', '--a', '--b=1', '--y'],
-      );
-    });
-
-    test('unwraps single-quoted lines and leaves the rest literal', () {
-      final dir = Directory.systemTemp.createTempSync('incr_flagfile_q_');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      File(
-        '${dir.path}/args',
-      ).writeAsStringSync("'-Dname=a b'\n--c\n'a'b\n");
-      expect(
-        expandWorkerFlagfiles(['@${dir.path}/args']),
-        ['-Dname=a b', '--c', "'a'b"],
-      );
-    });
-
-    test('expands a define flagfile named by the parameter file', () {
-      final dir = Directory.systemTemp.createTempSync('incr_nested_');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final inner = File('${dir.path}/inner.defines')
-        ..writeAsStringSync('-DSECOND=two\n');
-      final nested = File('${dir.path}/nested.defines')
-        ..writeAsStringSync('-DFIRST=one\n@${inner.path}\n');
-      File(
-        '${dir.path}/args',
-      ).writeAsStringSync('--sentinel\n@${nested.path}\n');
-      expect(
-        expandWorkerFlagfiles(['@${dir.path}/args']),
-        ['--sentinel', '-DFIRST=one', '-DSECOND=two'],
-      );
-    });
-
-    test('refuses a nested line that is not a define, with its number', () {
-      final dir = Directory.systemTemp.createTempSync('incr_badline_');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final bad = File('${dir.path}/bad.defines')
-        ..writeAsStringSync('\n-DOK=1\nNOT_A_DEFINE\n');
-      File('${dir.path}/args').writeAsStringSync('@${bad.path}\n');
-      expect(
-        () => expandWorkerFlagfiles(['@${dir.path}/args']),
-        throwsA(
-          predicate(
-            (Object? error) =>
-                error is FormatException &&
-                error.message.contains(bad.path) &&
-                error.message.contains('line 3'),
-            'names the flagfile and the 1-based line',
-          ),
-        ),
-      );
-    });
-
-    test('refuses a missing nested flagfile with the chain', () {
-      final dir = Directory.systemTemp.createTempSync('incr_missing_');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final missing = File('${dir.path}/missing.defines');
-      final outer = File('${dir.path}/args')
-        ..writeAsStringSync('@${missing.path}\n');
-      expect(
-        () => expandWorkerFlagfiles(['@${outer.path}']),
-        throwsA(
-          predicate(
-            (Object? error) =>
-                error is FormatException &&
-                error.message.contains(outer.path) &&
-                error.message.contains(missing.path),
-            'names the chain of files',
-          ),
-        ),
-      );
-    });
-
-    test('refuses an unreadable nested flagfile with the chain', () {
-      final dir = Directory.systemTemp.createTempSync('incr_unreadable_');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final outer = '${dir.path}/args';
-      final secret = '${dir.path}/secret.defines';
-      expect(
-        () => expandWorkerFlagfiles(
-          ['@$outer'],
-          readFile: (path) {
-            if (path == secret) {
-              throw FileSystemException('denied', path);
-            }
-            return ['@$secret'];
-          },
-        ),
-        throwsA(
-          predicate(
-            (Object? error) =>
-                error is FormatException &&
-                error.message.contains(outer) &&
-                error.message.contains(secret) &&
-                error.message.contains('denied'),
-            'names the chain of files',
-          ),
-        ),
-      );
-    });
-
-    test('refuses a nested cycle with the chain', () {
-      final dir = Directory.systemTemp.createTempSync('incr_cycle_');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final first = File('${dir.path}/first.defines')
-        ..writeAsStringSync('@${dir.path}/second.defines\n');
-      final second = File('${dir.path}/second.defines')
-        ..writeAsStringSync('@${dir.path}/first.defines\n');
-      File('${dir.path}/args').writeAsStringSync('@${first.path}\n');
-      expect(
-        () => expandWorkerFlagfiles(['@${dir.path}/args']),
-        throwsA(
-          predicate(
-            (Object? error) =>
-                error is FormatException &&
-                error.message.contains('cycle') &&
-                error.message.contains(first.path) &&
-                error.message.contains(second.path),
-            'names the cycle chain',
-          ),
-        ),
-      );
-    });
-  });
-
-  group('splitWorkerArgv', () {
-    test('drops a leading tool path, keeps flags and flagfiles', () {
-      expect(stripWorkerArgv0(['--declared-inputs', 'm']), [
-        '--declared-inputs',
-        'm',
-      ]);
-      expect(stripWorkerArgv0(['@args']), ['@args']);
-      expect(stripWorkerArgv0(['/tool/worker', '--declared-inputs', 'm']), [
-        '--declared-inputs',
-        'm',
-      ]);
-      expect(stripWorkerArgv0([]), isEmpty);
-    });
-    test('splits the manifest from the compiler command', () {
-      final split = splitWorkerArgv([
-        '--declared-inputs',
-        'm.txt',
-        '--',
-        'vm',
-        'snap.snapshot',
-        'entry.dart',
-      ]);
-      expect(split.manifestPath, 'm.txt');
-      expect(split.command, ['vm', 'snap.snapshot', 'entry.dart']);
-    });
-
-    test('rejects a missing manifest flag and stray args', () {
-      expect(() => splitWorkerArgv(['--', 'vm']), throwsFormatException);
-      expect(
-        () => splitWorkerArgv(['--bogus', 'x', '--', 'vm']),
-        throwsFormatException,
-      );
-      expect(
-        () => splitWorkerArgv(['--declared-inputs', 'm']),
-        throwsFormatException,
-      );
-    });
-  });
-
-  group('dev incremental serialization', () {
-    const flags = [
-      'vm',
-      'fe.snapshot',
-      '--output-dill',
-      'full.dill',
-      'package:app/main.dart',
-    ];
-
-    test('the default spawn argv pins --no-incremental-serialization', () {
-      expect(frontendServerSpawnArgs(flags.sublist(0, 4), 'inc.dill'), [
-        'fe.snapshot',
-        '--incremental',
-        '--no-incremental-serialization',
-        '--output-incremental-dill',
-        'inc.dill',
-        '--output-dill',
-        'full.dill',
-        '--print-incremental-dependencies',
-      ]);
-    });
-
-    test('the marker drops the flag and never reaches frontend_server', () {
-      final List<String> args = frontendServerSpawnArgs(
-        flags.sublist(0, 4),
-        'inc.dill',
-        devIncremental: true,
-      );
-      expect(args, isNot(contains('--no-incremental-serialization')));
-      expect(args, isNot(contains(devIncrementalSerializationMarker)));
-      expect(args, contains('--incremental'));
-    });
-
-    test('splitWorkerArgv consumes and strips the marker', () {
-      final ({String manifestPath, List<String> command, bool devIncremental})
-      split = splitWorkerArgv([
-        devIncrementalSerializationMarker,
-        '--declared-inputs',
-        'm',
-        '--',
-        'vm',
-        'entry.dart',
-      ]);
-      expect(split.devIncremental, isTrue);
-      expect(split.command, ['vm', 'entry.dart']);
-      expect(
-        splitWorkerArgv(['--declared-inputs', 'm', '--', 'vm']).devIncremental,
-        isFalse,
-      );
-    });
-
-    test('the configuration key ignores the marker', () {
-      final ({String manifestPath, List<String> command, bool devIncremental})
-      marked = splitWorkerArgv([
-        devIncrementalSerializationMarker,
-        '--declared-inputs',
-        'm',
-        '--',
-        ...flags,
-        devIncrementalSerializationMarker,
-      ]);
-      expect(
-        configurationKey(marked.command, sha256Hex),
-        configurationKey(flags, sha256Hex),
-      );
-    });
-  });
-
   group('configurationKey', () {
     List<String> fs(String out) => [
       'vm',
@@ -450,117 +53,6 @@ void main() {
     });
   });
 
-  group('uriOfStaged and classifyChanged', () {
-    test('maps staged paths under a root to the app scheme', () {
-      expect(
-        uriOfStaged('stage/lib/a.dart', ['stage']),
-        'org-dartlang-app:///lib/a.dart',
-      );
-      expect(uriOfStaged('lib/a.dart', ['stage']), isNull);
-      // The mount world reads sources in place: under an exec-root mount an
-      // in-place path carries its own URI, so no staged twin is needed.
-      expect(
-        uriOfStaged('stage/lib/a.dart', ['.', '']),
-        'org-dartlang-app:///stage/lib/a.dart',
-      );
-    });
-
-    test('staged dart files become URIs, their source twins are skipped', () {
-      final classified = classifyChanged(
-        ['lib/a.dart', 'stage/lib/a.dart'],
-        ['stage'],
-        {'lib/main.dart', 'lib/a.dart'},
-      );
-      expect(classified.restartReason, isNull);
-      expect(classified.uris, ['org-dartlang-app:///lib/a.dart']);
-    });
-
-    test('a changed package config restarts cold', () {
-      final classified = classifyChanged(
-        ['pkg_config.json'],
-        ['stage'],
-        {'lib/main.dart'},
-      );
-      expect(classified.restartReason, 'pkg_config.json');
-    });
-
-    test('an unstaged dart file outside the manifest restarts cold', () {
-      final classified = classifyChanged(
-        ['tool/gen.dart'],
-        ['stage'],
-        {'lib/main.dart'},
-      );
-      expect(classified.restartReason, 'tool/gen.dart');
-    });
-
-    test('a deleted staged dart file still invalidates by URI', () {
-      final classified = classifyChanged(
-        ['stage/lib/gone.dart'],
-        ['stage'],
-        {'lib/main.dart'},
-      );
-      expect(classified.restartReason, isNull);
-      expect(classified.uris, ['org-dartlang-app:///lib/gone.dart']);
-    });
-
-    test('in-place sources map under an exec-root mount', () {
-      expect(
-        uriOfStaged('lib/a.dart', ['gen.stage', '.']),
-        'org-dartlang-app:///lib/a.dart',
-      );
-      expect(mountsExecRoot(['gen.stage', '.']), isTrue);
-      expect(mountsExecRoot(['gen.stage']), isFalse);
-      expect(isInPlacePath('lib/a.dart'), isTrue);
-      expect(isInPlacePath('../escape.dart'), isFalse);
-      expect(isInPlacePath('/abs/a.dart'), isFalse);
-    });
-
-    test('a generated file keys the same URI in place and staged', () {
-      // The in-place `bazel-out/<config>/bin/` path strips to the
-      // workspace-relative path it is staged at ...
-      expect(
-        inPlaceSourceKey('bazel-out/k8-fastbuild/bin/gen/foo.dart'),
-        'gen/foo.dart',
-      );
-      expect(inPlaceSourceKey('lib/a.dart'), 'lib/a.dart');
-      expect(
-        uriOfStaged('bazel-out/k8-fastbuild/bin/gen/foo.dart', [
-          'gen.stage',
-          '.',
-        ]),
-        'org-dartlang-app:///gen/foo.dart',
-      );
-      // ... so the pair dedupes to one delta URI.
-      final classified = classifyChanged(
-        ['bazel-out/k8-fastbuild/bin/gen/foo.dart', 'gen.stage/gen/foo.dart'],
-        ['gen.stage', '.'],
-        {'bazel-out/k8-fastbuild/bin/gen/foo.dart'},
-      );
-      expect(classified.restartReason, isNull);
-      expect(classified.uris, ['org-dartlang-app:///gen/foo.dart']);
-    });
-
-    test('a source beside its staged twin recompiles once', () {
-      final classified = classifyChanged(
-        ['lib/a.dart', 'gen.stage/lib/a.dart'],
-        ['gen.stage', '.'],
-        {'lib/a.dart'},
-      );
-      expect(classified.restartReason, isNull);
-      expect(classified.uris, ['org-dartlang-app:///lib/a.dart']);
-    });
-
-    test('an unmappable dart file still restarts cold', () {
-      expect(uriOfStaged('../escape.dart', ['.']), isNull);
-      final classified = classifyChanged(
-        ['../escape.dart'],
-        ['.'],
-        {'lib/main.dart'},
-      );
-      expect(classified.restartReason, '../escape.dart');
-    });
-  });
-
   group('kernelMountContract', () {
     // Goal G pins the mount order (the stage, then the exec root, then the
     // filesystem_roots): a path under the stage maps through the stage even
@@ -578,6 +70,7 @@ void main() {
     test('additions join and removals leave the cumulative set', () {
       final current = <String>{};
       foldDepLines(current, ['+file:///a.dart', '+file:///b.dart']);
+      expect(current, {'file:///a.dart', 'file:///b.dart'});
       foldDepLines(current, ['-file:///a.dart', '+file:///c.dart']);
       expect(current, {'file:///b.dart', 'file:///c.dart'});
     });
@@ -685,7 +178,9 @@ void main() {
     test('changed roots rescan every source', () {
       final GuardCache cache = newCache();
       run(cache);
+      expect(scans, hasLength(1));
       run(cache, ['other']);
+      expect(scans, hasLength(2));
       expect(scans.last.toSet(), {'a', 'b', 'c'});
     });
 
@@ -697,6 +192,7 @@ void main() {
       run(cache);
       text['b'] = 'ok2';
       run(cache);
+      expect(scans, hasLength(3));
       text['b'] = 'ok';
       expect(run(cache), isEmpty);
       text.remove('b');
@@ -994,6 +490,7 @@ void main() {
           digests: digests,
         );
         expect(result.exitCode, 0, reason: result.output);
+        expect(deltas(), 0);
       }
 
       Future<void> warmWith(Map<String, String> digests) async {
@@ -1011,6 +508,10 @@ void main() {
         edit();
         await warmWith(digests);
         expect(deltas(), 0);
+        expect(
+          sessions.single.commands.where((c) => c.startsWith('recompile')),
+          ['recompile package:app/main.dart []'],
+        );
       });
 
       test('a changed digest is a change without reading contents', () async {
@@ -1023,6 +524,10 @@ void main() {
           'stage/lib/a.dart': fake,
         });
         expect(deltas(), 1);
+        expect(
+          sessions.single.commands.where((c) => c.startsWith('recompile')),
+          hasLength(1),
+        );
       });
 
       test('a base64 digest is normalised to the stored spelling', () async {
