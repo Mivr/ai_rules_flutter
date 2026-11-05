@@ -48,10 +48,14 @@
 @rules_flutter//flutter/private/tools:flutter_integration_test_runner_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_test_runner_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:generate_asset_manifest_test	Dart unit test; no CLI spawn
+@rules_flutter//flutter/private/tools:incr_fkc_define_flagfiles_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:incr_fkc_scratch_test	lifecycle test driving the worker binary over pipes; TMPDIR only
+@rules_flutter//flutter/private/tools:incr_fkc_staging_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:incr_fkc_worker_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:ios_simulator_boot_test	Dart unit test; no CLI spawn
+@rules_flutter//flutter/private/tools:kernel_define_flagfiles_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:kernel_filter_test	Dart unit test; no CLI spawn
+@rules_flutter//flutter/private/tools:kernel_read_set_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:macho_edit_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:macho_payload_floor_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:macho_section_type_test	Dart unit test; no CLI spawn
@@ -60,6 +64,7 @@
 @rules_flutter//flutter/private/tools:run_home_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:sha256_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:strip_native_libs_test	Dart unit test; no CLI spawn
+@rules_flutter//flutter/private/tools:tool_test_library_sloc_guard_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:web_guard_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:web_template_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:xtool_pack_test	Dart unit test; no CLI spawn
