@@ -4,15 +4,25 @@ load("@rules_dart//dart:defs.bzl", "dart_test")
 # `starlark_doc_extract` refuses a load closure that reaches a Starlark module
 # with no `bzl_library` target.
 #
-# - `android.bzl`, `defs.bzl`, `linux.bzl` and `web.bzl`: their closures load
-#   `@rules_android//android:rules.bzl` and `@rules_kotlin//kotlin:android.bzl`.
+# - `android.bzl`: its closure loads `@rules_android//android:rules.bzl` and
+#   `@rules_kotlin//kotlin:android.bzl`.
+# - `defs.bzl`, `linux.bzl` and `web.bzl`: `flutter_integration_test`
+#   (`flutter/private/flutter_integration_test.bzl`) brings those same two
+#   modules into each closure; its `platform = "android"` macro body declares
+#   `android_binary` and `kt_android_library`, and Bazel 9.3.0 has no
+#   `native.android_binary`.
 #   rules_android 0.8.0's `android/BUILD` declares no targets, and
 #   rules_kotlin 2.4.20's release `kotlin/BUILD` leaves `android.bzl` out of
 #   every target, so no `bzl_library` can cover them.
 # - `extensions.bzl`: its closure loads `@rules_dart//dart/pub:pub_scan.bzl`,
-#   `@rules_dart//dart/pub/private:version.bzl` and
-#   `@rules_dart//dart/pub/private:pub_scc_verify.bzl`, which have no
-#   `bzl_library` at the pinned rules_dart.
+#   `@rules_dart//dart/pub:pub_archive_scan.bzl` and
+#   `@rules_dart//dart/pub:pub_scanner_sdk.bzl`, which have no `bzl_library`
+#   at the pinned rules_dart v0.24.0. (`version.bzl` and `pub_scc_verify.bzl`
+#   have targets, with restricted visibility.)
+#
+# `flutter/tests/bzl_library_guard` derives the expected extracts from the
+# `flutter/*.bzl` files minus this exemption list and checks the Android
+# reasons against the load closures.
 #
 # Each of the five keeps its `bzl_library` and its `exports_files` entry in
 # `flutter/BUILD.bazel`; only the doc extract is omitted here.
@@ -95,18 +105,6 @@ starlark_doc_extract(
     deps = [
         "//flutter:windows",
     ],
-)
-
-_DOC_EXTRACT_TARGETS = sorted([
-    ":" + r["name"]
-    for r in existing_rules().values()
-    if r["kind"] == "starlark_doc_extract"
-])
-
-_ = len(_DOC_EXTRACT_TARGETS) == 10 or fail(
-    "Expected 10 starlark_doc_extract targets in //docs, got %d" % len(
-        _DOC_EXTRACT_TARGETS,
-    ),
 )
 
 filegroup(
