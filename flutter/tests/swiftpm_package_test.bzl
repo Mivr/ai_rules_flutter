@@ -140,6 +140,15 @@ let package = Package(
 )
 """
 
+_NANOPB = """// swift-tools-version:5.9
+import PackageDescription
+let package = Package(
+    name: "nanopb",
+    products: [.library(name: "nanopb", targets: ["nanopb"])],
+    targets: [.target(name: "nanopb", path: ".", sources: ["pb_common.c"], publicHeadersPath: "spm_headers")],
+)
+"""
+
 _EXCLUDE_NORMALIZED = """// swift-tools-version:5.9
 import PackageDescription
 let package = Package(
@@ -507,6 +516,24 @@ def _target_path_spellings_test_impl(ctx):
     asserts.equals(env, "", swiftpm_normalize_relative_path(_only_target(_PATH_EMPTY).path).path)
     return unittest.end(env)
 
+def _unlisted_public_header_stays_public_test_impl(ctx):
+    env = unittest.begin(ctx)
+    rel_dir = "pkg"
+    files = {
+        rel_dir + "/pb.h": True,
+        rel_dir + "/pb_common.c": True,
+        rel_dir + "/pb_decode.c": True,
+        rel_dir + "/spm_headers/pb.h": True,
+        rel_dir + "/spm_headers/pb_extra.h": True,
+    }
+    selected = _select("nanopb", _NANOPB, rel_dir, files, {rel_dir + "/spm_headers": True})
+    asserts.true(env, selected.ok)
+    asserts.equals(env, [rel_dir + "/pb_common.c"], selected.c_srcs)
+    asserts.equals(env, [rel_dir + "/spm_headers/pb.h", rel_dir + "/spm_headers/pb_extra.h"], selected.public_hdrs)
+    asserts.equals(env, [], selected.private_hdrs)
+    return unittest.end(env)
+
+_unlisted_public_header_stays_public_test = unittest.make(_unlisted_public_header_stays_public_test_impl)
 _normalizes_relative_paths_test = unittest.make(_normalizes_relative_paths_test_impl)
 _normalized_public_headers_path_test = unittest.make(_normalized_public_headers_path_test_impl)
 _normalized_exclude_and_sources_entries_test = unittest.make(_normalized_exclude_and_sources_entries_test_impl)
@@ -530,6 +557,7 @@ def swiftpm_package_test_suite(name):
     small_unittest_suite(
         name + "_unit",
         _normalizes_relative_paths_test,
+        _unlisted_public_header_stays_public_test,
         _normalized_public_headers_path_test,
         _normalized_exclude_and_sources_entries_test,
         _target_path_spellings_test,
