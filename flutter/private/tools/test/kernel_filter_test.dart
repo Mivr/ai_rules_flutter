@@ -16,8 +16,6 @@ import '../kernel_filter.dart';
 
 typedef _Errors = List<String>;
 
-typedef _Manifest = KernelInputsManifest;
-
 typedef _Run = ({int code, String err, String out});
 
 const _id = '53d4fd45-0cd8-4542-bca7-7ba7c9385b70';

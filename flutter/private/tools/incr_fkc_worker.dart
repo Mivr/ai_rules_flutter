@@ -31,11 +31,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'directive_guard.dart';
+import 'incr_fkc_guard_cache.dart';
 import 'incr_fkc_scratch.dart';
 import 'incr_fkc_server.dart';
 import 'kernel_filter.dart';
 import 'sha256.dart';
+
+export 'incr_fkc_guard_cache.dart' show GuardCache, GuardScan;
 
 /// The outcome of one worker request.
 typedef IncrResult = ({int exitCode, String output});
@@ -49,85 +51,6 @@ typedef RequestParts = ({
   KernelInputsManifest manifest,
   bool devIncremental,
 });
-
-/// Scans [subset] against the full [declared] set under the roots, returning
-/// each readable source's diagnostics.
-typedef GuardScan = Map<String, List<String>> Function(
-  List<String> subset,
-  List<String> declared,
-  List<String> roots,
-);
-
-/// The directive guard with a per-source verdict cache.
-///
-/// A source's verdict depends on its own content, the declared set (sources
-/// that exist) and the roots. While the declared set and roots are those of the
-/// previous check, only sources whose content digest changed are rescanned;
-/// any other change of the declared set or roots rescans every source. The
-/// first check scans everything and so seeds the per-source verdicts.
-class GuardCache {
-  new({GuardScan? scan}) : _scan = scan ?? _defaultScan;
-
-  final GuardScan _scan;
-  Set<String>? _declared;
-  List<String>? _roots;
-  final Map<String, String?> _digests = {};
-  final Map<String, List<String>> _verdicts = {};
-
-  static Map<String, List<String>> _defaultScan(
-    List<String> subset,
-    List<String> declared,
-    List<String> roots,
-  ) => scanFlutterDirectivesAgainst(subset, declared, roots, tool: 'flutter');
-
-  /// The guard errors for [dartSources] under [roots] given the current
-  /// content [hashes] (null marks a missing file), in a full scan's order.
-  List<String> check(
-    List<String> dartSources,
-    List<String> roots,
-    Map<String, String?> hashes,
-  ) {
-    final Set<String> declared = {
-      for (final s in dartSources)
-        if (hashes[s] != null) s,
-    };
-    final List<String> stale = _staleSources(declared, roots, hashes);
-    if (stale.isNotEmpty) {
-      _verdicts.addAll(_scan(stale, declared.toList(), roots));
-      for (final s in stale) {
-        _digests[s] = hashes[s];
-      }
-    }
-    return [
-      for (final s in declared.toList()..sort()) ...?_verdicts[s],
-    ];
-  }
-
-  /// The sources to rescan; resets the cache first when the declared set or
-  /// roots differ from the previous check's.
-  List<String> _staleSources(
-    Set<String> declared,
-    List<String> roots,
-    Map<String, String?> hashes,
-  ) {
-    final Set<String>? prior = _declared;
-    final bool same =
-        prior != null &&
-        prior.length == declared.length &&
-        prior.containsAll(declared) &&
-        _roots!.join('\x00') == roots.join('\x00');
-    if (!same) {
-      _digests.clear();
-      _verdicts.clear();
-      _declared = declared;
-      _roots = List.of(roots);
-    }
-    return [
-      for (final s in declared)
-        if (!_digests.containsKey(s) || _digests[s] != hashes[s]) s,
-    ];
-  }
-}
 
 /// One warm server and the last accepted request behind it.
 class IncrServerState {
@@ -370,7 +293,7 @@ class IncrWorker {
     final String sep = Platform.pathSeparator;
     final full = '${wdir.path}${sep}full.dill';
     final inc = '${wdir.path}${sep}inc.dill';
-    final session = await _sessions(
+    final CompilerSession session = await _sessions(
       parts.fs,
       full,
       inc,
@@ -466,8 +389,9 @@ class IncrWorker {
     final String key = configurationKey(parts.fs, sha256Hex);
     IncrServerState? state = _servers[key];
     if (state != null) _touch(key);
-    final hashes = _changeSet(inputPaths, state, digests);
-    final plan = _planCompile(
+    final ({Map<String, String?> current, List<String> changed}) hashes =
+        _changeSet(inputPaths, state, digests);
+    final ({bool cold, List<String> uris}) plan = _planCompile(
       state,
       hashes.changed,
       parts.manifest.sources.toSet(),
@@ -519,7 +443,8 @@ class IncrWorker {
   /// Validates one request's argv and manifest. Throws [FormatException] with
   /// the action-failing message when malformed.
   RequestParts _parseRequest(List<String> argv) {
-    final ({List<String> command, String manifestPath}) split = splitWorkerArgv(
+    final ({List<String> command, bool devIncremental, String manifestPath})
+    split = splitWorkerArgv(
       argv,
     );
     final List<String> fs = split.command;
@@ -568,10 +493,10 @@ class IncrWorker {
     IncrServerState? state,
     Map<String, String> digests,
   ) {
-    final stored = state?.contentHashes ?? {};
+    final Map<String, String?> stored = state?.contentHashes ?? {};
     final Set<String> listed = inputPaths.toSet();
     final current = <String, String?>{};
-    for (final p in {...inputPaths, ...stored.keys}) {
+    for (final String p in {...inputPaths, ...stored.keys}) {
       current[p] = _inputHash(p, listed.contains(p) ? digests : const {});
     }
     final List<String> changed = [
@@ -620,8 +545,10 @@ class IncrWorker {
     ];
     // The guard's cache key comes from the sources' own contents, never from
     // the request digests that decide the recompile.
-    final contents = {for (final p in dartSources) p: _contentHash(p)};
-    final errors = guard.check(dartSources, roots, contents);
+    final Map<String, String?> contents = {
+      for (final p in dartSources) p: _contentHash(p),
+    };
+    final List<String> errors = guard.check(dartSources, roots, contents);
     if (errors.isEmpty) return null;
     return errors.join('\n');
   }
@@ -633,7 +560,7 @@ class IncrWorker {
     List<String> roots,
     GuardCache guard,
   ) async {
-    final state = await _startFresh(key, parts, roots);
+    final IncrServerState state = await _startFresh(key, parts, roots);
     state.guard = guard;
     final CompileResult r = await state.session.compile(parts.entry);
     foldDepLines(state.currentReads, r.depLines);
@@ -822,7 +749,7 @@ Future<void> runPersistentWorker({
       try {
         // Request digests decide the recompile; a wrong digest from Bazel
         // silently skips a recompile. Inputs without one are hashed.
-        final result = await worker.handleRequest(
+        final IncrResult result = await worker.handleRequest(
           expandWorkerFlagfiles(stripWorkerArgv0(rawArgs)),
           inputs,
           digests: digests,

@@ -77,7 +77,7 @@ List<String> _findWorkspaces(String root) {
   final found = <String>[];
   final stack = <Directory>[Directory('$root/e2e')];
   while (stack.isNotEmpty) {
-    final current = stack.removeLast();
+    final Directory current = stack.removeLast();
     var hasModule = false;
     final subdirs = <Directory>[];
     for (final FileSystemEntity child in _listOrFail(current)) {
