@@ -1,5 +1,6 @@
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
-load("@rules_dart//dart:defs.bzl", "dart_library")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_library")
+load("@rules_flutter//flutter:defs.bzl", "flutter_library")
 load(":consumer_compile.bzl", "consumer_caller")
 load(":consumer_extra_roots_test.bzl", "consumer_extra_roots_test_suite")
 load(":consumer_hermetic_test.bzl", "consumer_hermetic_test_suite")
@@ -305,4 +306,21 @@ build_test(
     targets = [
         "@local_macos_engine//:engine_debug_library",
     ],
+)
+
+# Every `analysis_options.yaml` in this workspace, for the `dart_analyze`
+# aspect `.bazelrc` enables. The workspace has none, so the analyzer runs
+# with its defaults.
+dart_analysis_config(name = "analysis_config")
+
+# Analyzer red path for a real `flutter_library` (manual, must fail): its one
+# `unused_element` diagnostic in `lib/bad_flutter.dart` fails `bazel test`
+# under the `dart_analyze` aspect, and its `dart:ui` import resolves only
+# through the `sky_engine` closure the rule records. Manual so `//...` stays
+# green; CI runs it explicitly and requires the failure.
+flutter_library(
+    name = "bad_flutter_lib",
+    package_name = "bad_flutter_lib",
+    srcs = ["lib/bad_flutter.dart"],
+    tags = ["manual"],
 )
