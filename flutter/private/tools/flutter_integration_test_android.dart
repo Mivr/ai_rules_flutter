@@ -7,6 +7,7 @@ import 'dart:io';
 
 import 'package:runfiles/runfiles.dart';
 
+import 'android_discovery_diagnostics.dart';
 import 'flutter_integration_test_launcher.dart';
 import 'test_support.dart';
 
@@ -604,7 +605,7 @@ class AndroidPlatformLauncher implements PlatformLauncher {
       adbPort: ports.adbPort,
     );
     final emulatorLogs = <String>[];
-    await _launchEmulator(
+    final Process emulator = await _launchEmulator(
       emulatorArgs,
       scratch.path,
       runtimeEnv,
@@ -613,8 +614,34 @@ class AndroidPlatformLauncher implements PlatformLauncher {
 
     final serial = 'emulator-${ports.consolePort}';
     final bootDeadline = DateTime.now().add(bootTimeout);
-    await _waitForEmulatorBoot(serial, emulatorLogs, bootDeadline);
+    await _guardDiscovery(
+      serial,
+      () => _bootAndLaunch(serial, binding, emulatorLogs, bootDeadline),
+      () => DiscoveryProbe(
+        adbBinary: adbBinary,
+        runtimeEnv: runtimeEnv,
+        scratchDir: scratch.path,
+        testTmpDir: baseTempDir,
+        ports: DiscoveryPorts(
+          consolePort: ports.consolePort,
+          adbPort: ports.adbPort,
+          adbServerPort: ports.adbServerPort,
+          logLines: emulatorLogs.where(isEmulatorPortLine).toList(),
+        ),
+        emulator: (pid: emulator.pid, alive: _emulatorExitCode == null),
+      ),
+    );
+    return _startLogcat(serial, runtimeEnv);
+  }
 
+  /// Waits for boot, installs the APK and starts the activity.
+  Future<void> _bootAndLaunch(
+    String serial,
+    HarnessBinding binding,
+    List<String> emulatorLogs,
+    DateTime bootDeadline,
+  ) async {
+    await _waitForEmulatorBoot(serial, emulatorLogs, bootDeadline);
     await _forwardHarnessPorts(serial, binding.port);
     await _installApk(serial);
     await _configureDeviceTimezone(serial);
@@ -623,7 +650,22 @@ class AndroidPlatformLauncher implements PlatformLauncher {
     await _runAdb(serial, const <String>['logcat', '-b', 'all', '-c']);
 
     await _startFlutterActivity(serial, binding.url);
-    return _startLogcat(serial, runtimeEnv);
+  }
+
+  /// Runs [body]; a discovery failure (boot timeout or `device 'serial' not
+  /// found`) is rethrown with the diagnostic block of [probe] appended.
+  Future<void> _guardDiscovery(
+    String serial,
+    Future<void> Function() body,
+    DiscoveryProbe Function() probe,
+  ) async {
+    try {
+      await body();
+    } on Object catch (e, st) {
+      if (!isDiscoveryFailure(e, serial)) rethrow;
+      final String block = await collectAndroidDiscoveryDiagnostics(probe());
+      Error.throwWithStackTrace(decorateDiscoveryFailure(e, block), st);
+    }
   }
 
   void _startWatchdog(String serial) {
