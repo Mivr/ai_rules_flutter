@@ -127,13 +127,22 @@ def _podspec(defines):
     """A minimal podspec struct carrying only `defines`."""
     return struct(frameworks = [], weak_frameworks = [], libraries = [], defines = defines)
 
+def _block(text, name):
+    """The attribute text of the target named `name` in rendered BUILD `text`."""
+    marker = '    name = "%s",\n' % name
+    tail = text.partition(marker)[2]
+    return tail.partition("\n)")[0] if tail else ""
+
 def _splice_test_impl(ctx):
     """Podspec defines splice into one `plugin_defines`; user entries override."""
     env = unittest.begin(ctx)
     podspec_apple = struct(ios_podspec = _podspec(["A=1", "B=2"]), macos_podspec = None)
     base = apple_plugin_targets("p", ["ios/Classes"], [], "ios")
     spliced = splice_apple_podspec_link_settings(base, "p", podspec_apple)
-    asserts.equals(env, 2, spliced.count('    plugin_defines = ["A=1", "B=2"],'))
+    asserts.equals(env, 1, spliced.count('    plugin_defines = ["A=1", "B=2"],'))
+    asserts.equals(env, 1, spliced.count("plugin_defines = "))
+    asserts.false(env, "plugin_defines" in _block(spliced, "p_apple_ios_xtool"), spliced)
+    asserts.true(env, "plugin_defines" in _block(spliced, "p_apple_ios"), spliced)
 
     none_apple = struct(ios_podspec = _podspec([]), macos_podspec = None)
     asserts.equals(env, base, splice_apple_podspec_link_settings(base, "p", none_apple))
@@ -141,10 +150,47 @@ def _splice_test_impl(ctx):
     user = apple_plugin_targets("p", ["ios/Classes"], [], "ios", ['B="x y"', "C"])
     merged = splice_apple_podspec_link_settings(user, "p", podspec_apple)
     asserts.equals(env, 2, merged.count("plugin_defines = "))
-    asserts.equals(env, 2, merged.count('    plugin_defines = ["A=1", "B=\\"x y\\"", "C"],'))
+    asserts.equals(env, 1, merged.count('    plugin_defines = ["A=1", "B=\\"x y\\"", "C"],'))
+
+    # The user's own value still reaches the xtool target untouched (its refusal applies).
+    asserts.true(env, '    plugin_defines = ["B=\\"x y\\"", "C"],' in _block(merged, "p_apple_ios_xtool"), merged)
     return unittest.end(env)
 
 _splice_test = unittest.make(_splice_test_impl)
+
+def _xtool_frameworks_test_impl(ctx):
+    """A podspec with defines and frameworks gives `_xtool` the frameworks and no defines."""
+    env = unittest.begin(ctx)
+    podspec = struct(frameworks = ["UIKit"], weak_frameworks = [], libraries = [], defines = ["A=1"])
+    base = apple_plugin_targets("p", ["ios/Classes"], [], "ios")
+    spliced = splice_apple_podspec_link_settings(base, "p", struct(ios_podspec = podspec, macos_podspec = None))
+    xtool = _block(spliced, "p_apple_ios_xtool")
+    asserts.true(env, 'sdk_frameworks = ["UIKit"],' in xtool, xtool)
+    asserts.false(env, "plugin_defines" in xtool, xtool)
+    apple = _block(spliced, "p_apple_ios")
+    asserts.true(env, 'sdk_frameworks = ["UIKit"],' in apple, apple)
+    asserts.true(env, 'plugin_defines = ["A=1"],' in apple, apple)
+    return unittest.end(env)
+
+_xtool_frameworks_test = unittest.make(_xtool_frameworks_test_impl)
+
+def _xtool_no_refusal_trigger_test_impl(ctx):
+    """A generated `_xtool` block built from a podspec with defines carries no `plugin_defines`."""
+    env = unittest.begin(ctx)
+    for platform in ("ios", "macos"):
+        podspec = _podspec(["A=1", "B=2"])
+        apple = struct(
+            ios_podspec = podspec if platform == "ios" else None,
+            macos_podspec = podspec if platform == "macos" else None,
+        )
+        base = apple_plugin_targets("p", [platform + "/Classes"], [], platform)
+        text = splice_apple_podspec_link_settings(base, "p", apple)
+        xtool = _block(text, "p_apple_%s_xtool" % platform)
+        asserts.true(env, xtool != "", text)
+        asserts.false(env, "plugin_defines" in xtool, xtool)
+    return unittest.end(env)
+
+_xtool_no_refusal_trigger_test = unittest.make(_xtool_no_refusal_trigger_test_impl)
 
 _LOCAL_MANIFEST = """// swift-tools-version: 5.9
 import PackageDescription
@@ -210,5 +256,7 @@ def podspec_xcconfig_defines_test_suite(name):
         _podspec_reader_test,
         _podspec_scoping_test,
         _splice_test,
+        _xtool_frameworks_test,
+        _xtool_no_refusal_trigger_test,
         _local_targets_test,
     )
