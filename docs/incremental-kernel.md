@@ -101,10 +101,20 @@ built from Dart (no host Python, no new downloads):
   the output is identical without any persistent state.
 
 The worker decides what changed from the SHA-256 digests Bazel sends with
-each input in the request (hex or base64), and reads a file's contents only
-for an input with no usable digest (absent, empty or not 32 bytes). The
-trade-off: a wrong digest from Bazel silently skips a recompile. The
-directive guard and the read-set check still read the sources themselves.
+each input in the request. Bazel 9.x builds a digest as the 64 lowercase hex
+characters of the SHA-256, as bytes, and the JSON worker protocol prints that
+`bytes` field as base64, so the worker receives 88 base64 characters that
+decode to those 64 hex characters. It accepts that form, the 64 hex
+characters themselves, and the base64 of the 32 raw digest bytes. Any other
+value (wrong length, not base64, or a decoded value that is not 64 hex
+characters) is not usable.
+
+A file's contents are read for change detection only for an input with no
+usable digest (absent, empty or malformed). The trade-off: a wrong digest from
+Bazel silently skips a recompile. The directive guard still reads every Dart
+source itself, because it must see an edit a stale digest hides; it reuses the
+content hash that change detection already computed for the same request, so
+no source is hashed twice. The read-set check reads the sources as well.
 
 Each worker keeps at most one warm server by default. One warm server holds
 about 1.75 GiB of compiler state, so on small machines bound the worker

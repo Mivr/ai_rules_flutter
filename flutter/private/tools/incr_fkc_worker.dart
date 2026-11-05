@@ -326,9 +326,15 @@ class IncrWorker {
   }
 
   /// The hash of [rel] for change detection: Bazel's request digest when it
-  /// carries a usable one, else the file's contents.
-  String? _inputHash(String rel, Map<String, String> digests) {
-    return normalizeRequestDigest(digests[rel]) ?? _contentHash(rel);
+  /// carries a usable one, else the file's contents, which are also recorded
+  /// in [read] so the guard of the same request does not hash them again.
+  String? _inputHash(
+    String rel,
+    Map<String, String> digests,
+    Map<String, String?> read,
+  ) {
+    final String? trusted = normalizeRequestDigest(digests[rel]);
+    return trusted ?? (read[rel] = _contentHash(rel));
   }
 
   /// The refusal text for the cumulative read set, or null when clean. Uses
@@ -389,8 +395,9 @@ class IncrWorker {
     final String key = configurationKey(parts.fs, sha256Hex);
     IncrServerState? state = _servers[key];
     if (state != null) _touch(key);
+    final Map<String, String?> read = <String, String?>{};
     final ({Map<String, String?> current, List<String> changed}) hashes =
-        _changeSet(inputPaths, state, digests);
+        _changeSet(inputPaths, state, digests, read);
     final ({bool cold, List<String> uris}) plan = _planCompile(
       state,
       hashes.changed,
@@ -406,6 +413,7 @@ class IncrWorker {
       parts.manifest,
       roots,
       guard,
+      read,
     );
     if (guardError != null) {
       return (exitCode: 1, output: guardError);
@@ -492,12 +500,17 @@ class IncrWorker {
     List<String> inputPaths,
     IncrServerState? state,
     Map<String, String> digests,
+    Map<String, String?> read,
   ) {
     final Map<String, String?> stored = state?.contentHashes ?? {};
     final Set<String> listed = inputPaths.toSet();
     final current = <String, String?>{};
     for (final String p in {...inputPaths, ...stored.keys}) {
-      current[p] = _inputHash(p, listed.contains(p) ? digests : const {});
+      current[p] = _inputHash(
+        p,
+        listed.contains(p) ? digests : const {},
+        read,
+      );
     }
     final List<String> changed = [
       for (final p in current.keys)
@@ -532,12 +545,14 @@ class IncrWorker {
 
   /// Runs the directive guard before the compiler on every request: any
   /// changed `.dart` file (by its contents, read here) invalidates its
-  /// content-digest cache. Returns the
+  /// content-digest cache. A source this request's change detection already
+  /// read is not hashed again: [read] holds those content hashes. Returns the
   /// refusal text, or null when the sources are clean.
   String? _checkGuard(
     KernelInputsManifest manifest,
     List<String> roots,
     GuardCache guard,
+    Map<String, String?> read,
   ) {
     final List<String> dartSources = [
       for (final p in manifest.sources)
@@ -546,7 +561,8 @@ class IncrWorker {
     // The guard's cache key comes from the sources' own contents, never from
     // the request digests that decide the recompile.
     final Map<String, String?> contents = {
-      for (final p in dartSources) p: _contentHash(p),
+      for (final String p in dartSources)
+        p: read.containsKey(p) ? read[p] : _contentHash(p),
     };
     final List<String> errors = guard.check(dartSources, roots, contents);
     if (errors.isEmpty) return null;
@@ -684,21 +700,28 @@ Future<int> runOneShotWorker(
   }
 }
 
-/// Lowercase hex of a SHA-256 [digest] as Bazel sends it (hex or base64), or
-/// null when it is absent, empty or not 32 bytes.
+/// Lowercase hex of a SHA-256 [digest] as Bazel sends it, or null when it is
+/// absent, empty or none of the accepted forms: 64 hex characters, the base64
+/// of those 64 hex characters (what Bazel 9.x sends over JSON, where its
+/// `bytes` field holds the hex text), or the base64 of the 32 raw bytes.
 String? normalizeRequestDigest(String? digest) {
   if (digest == null || digest.isEmpty) return null;
-  if (RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(digest)) {
-    return digest.toLowerCase();
-  }
+  if (_hex64.hasMatch(digest)) return digest.toLowerCase();
+  final List<int> bytes;
   try {
-    final List<int> bytes = base64.decode(base64.normalize(digest));
-    if (bytes.length != 32) return null;
-    return [for (final b in bytes) b.toRadixString(16).padLeft(2, '0')].join();
+    bytes = base64.decode(base64.normalize(digest));
   } on FormatException {
     return null; // Not base64: the caller hashes the contents instead.
   }
+  if (bytes.length == 32) {
+    return [for (final b in bytes) b.toRadixString(16).padLeft(2, '0')].join();
+  }
+  if (bytes.length != 64) return null;
+  final text = String.fromCharCodes(bytes);
+  return _hex64.hasMatch(text) ? text.toLowerCase() : null;
 }
+
+final RegExp _hex64 = RegExp(r'^[0-9a-fA-F]{64}$');
 
 /// The non-empty `digest` strings of a request's `inputs`, keyed by path.
 Map<String, String> requestDigests(List<Map<String, dynamic>> inputs) {
