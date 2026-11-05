@@ -1475,12 +1475,19 @@ bzl_library(
         ":flutter_ios_application",
         ":flutter_ios_registrant",
         ":flutter_ios_xcframework_plist",
+        ":flutter_ios_xcframework_transitions",
         ":ios_app",
         ":validation",
         "//flutter:providers",
         "@bazel_skylib//lib:dicts",
         "@rules_swift//swift",
     ],
+)
+
+bzl_library(
+    name = "flutter_ios_xcframework_transitions",
+    srcs = ["flutter_ios_xcframework_transitions.bzl"],
+    visibility = ["//visibility:public"],
 )
 
 bzl_library(

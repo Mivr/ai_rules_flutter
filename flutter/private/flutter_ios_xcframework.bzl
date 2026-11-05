@@ -38,74 +38,16 @@ load(
     "framework_info_plist",
     "xcframework_info_plist",
 )
+load(
+    "//flutter/private:flutter_ios_xcframework_transitions.bzl",
+    "ios_device_transition",
+    "ios_sim_arm64_transition",
+    "ios_sim_x64_transition",
+)
 load("//flutter/private:ios_app.bzl", _flutter_ios_engine = "flutter_ios_engine")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 
 _RESERVED_FRAMEWORKS = ["App", "Flutter", "FlutterPluginRegistrant"]
-
-def _xcframework_transition_impl(platform_label):
-    """Builds a transition to one iOS platform in release mode.
-
-    Add-to-app xcframeworks are shipping artifacts: the device and simulator
-    slices are AOT snapshots, so the transition forces `-c opt` and clears the
-    profile flag rather than inheriting whatever the calling build used.
-    """
-    return {
-        "//command_line_option:compilation_mode": "opt",
-        "//command_line_option:platforms": str(platform_label),
-        str(Label("//flutter:profile")): False,
-    }
-
-def _ios_device_transition_impl(_settings, _attr):
-    return _xcframework_transition_impl(Label("//flutter/platforms:ios_arm64"))
-
-def _ios_sim_arm64_transition_impl(_settings, _attr):
-    return _xcframework_transition_impl(Label("//flutter/private:ios_sim_arm64"))
-
-def _ios_sim_x64_transition_impl(_settings, _attr):
-    return _xcframework_transition_impl(Label("//flutter/platforms:ios_x64"))
-
-_ios_device_transition = transition(
-    implementation = _ios_device_transition_impl,
-    inputs = [
-        "//command_line_option:compilation_mode",
-        "//command_line_option:platforms",
-        str(Label("//flutter:profile")),
-    ],
-    outputs = [
-        "//command_line_option:compilation_mode",
-        "//command_line_option:platforms",
-        str(Label("//flutter:profile")),
-    ],
-)
-
-_ios_sim_arm64_transition = transition(
-    implementation = _ios_sim_arm64_transition_impl,
-    inputs = [
-        "//command_line_option:compilation_mode",
-        "//command_line_option:platforms",
-        str(Label("//flutter:profile")),
-    ],
-    outputs = [
-        "//command_line_option:compilation_mode",
-        "//command_line_option:platforms",
-        str(Label("//flutter:profile")),
-    ],
-)
-
-_ios_sim_x64_transition = transition(
-    implementation = _ios_sim_x64_transition_impl,
-    inputs = [
-        "//command_line_option:compilation_mode",
-        "//command_line_option:platforms",
-        str(Label("//flutter:profile")),
-    ],
-    outputs = [
-        "//command_line_option:compilation_mode",
-        "//command_line_option:platforms",
-        str(Label("//flutter:profile")),
-    ],
-)
 
 def validate_xcframework_application(application):
     """Fails with the macro's own message when `application` is missing.
@@ -134,6 +76,20 @@ def _framework_members(target, framework_name):
             ) + "expected a flutter_ios_framework output.",
         )
     return members
+
+def _attr_target(ctx, name):
+    """Returns the single target behind a label attribute.
+
+    Attributes with an outgoing Starlark transition reach the implementation as
+    a one-element list, so the target is read from index zero; untransitioned
+    attributes already hold the target itself.
+    """
+    value = getattr(ctx.attr, name)
+    if type(value) == "list":
+        if len(value) != 1:
+            fail("flutter_ios_xcframeworks: attribute %s resolved to %d targets; expected one." % (name, len(value)))
+        return value[0]
+    return value
 
 def _declare_symlink(ctx, path, source):
     """Declares `path` as a symlink to `source` and returns the output file."""
@@ -234,9 +190,9 @@ def _single_binary(target):
 
 def _app_xcframework(ctx):
     """Declares App.xcframework and returns its outputs and runfiles."""
-    device = _framework_members(ctx.attr.device_app_framework, "App")
-    sim_arm64 = _framework_members(ctx.attr.sim_arm64_app_framework, "App")
-    sim_x64 = _framework_members(ctx.attr.sim_x64_app_framework, "App")
+    device = _framework_members(_attr_target(ctx, "device_app_framework"), "App")
+    sim_arm64 = _framework_members(_attr_target(ctx, "sim_arm64_app_framework"), "App")
+    sim_x64 = _framework_members(_attr_target(ctx, "sim_x64_app_framework"), "App")
 
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     root = ctx.label.name + "/App.xcframework"
@@ -290,7 +246,7 @@ def _registrant_xcframework(ctx):
         ctx,
         dart_exe,
         dart_vm_files,
-        _single_binary(ctx.attr.device_registrant),
+        _single_binary(_attr_target(ctx, "device_registrant")),
         device_patched,
         "ios",
         ctx.attr.minimum_os_version,
@@ -300,7 +256,7 @@ def _registrant_xcframework(ctx):
         ctx,
         dart_exe,
         dart_vm_files,
-        _single_binary(ctx.attr.sim_arm64_registrant),
+        _single_binary(_attr_target(ctx, "sim_arm64_registrant")),
         arm64_patched,
         "iossim",
         ctx.attr.minimum_os_version,
@@ -310,7 +266,7 @@ def _registrant_xcframework(ctx):
         ctx,
         dart_exe,
         dart_vm_files,
-        _single_binary(ctx.attr.sim_x64_registrant),
+        _single_binary(_attr_target(ctx, "sim_x64_registrant")),
         x64_patched,
         "iossim",
         ctx.attr.minimum_os_version,
@@ -385,9 +341,9 @@ def _plugin_xcframeworks(ctx):
     slice holds a universal archive fused from the arm64 and x86_64 simulator
     builds of the same plugin, so every slice carries code for its own platform.
     """
-    device = _plugin_binaries(ctx.attr.application)
-    sim_arm64 = _plugin_binaries(ctx.attr.sim_arm64_application)
-    sim_x64 = _plugin_binaries(ctx.attr.sim_x64_application)
+    device = _plugin_binaries(_attr_target(ctx, "application"))
+    sim_arm64 = _plugin_binaries(_attr_target(ctx, "sim_arm64_application"))
+    sim_x64 = _plugin_binaries(_attr_target(ctx, "sim_x64_application"))
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     outputs = []
     for name, binary in device.items():
@@ -422,16 +378,16 @@ def _flutter_ios_xcframework_impl(ctx):
     transitive = [
         target[DefaultInfo].files
         for target in [
-            ctx.attr.device_app_framework,
-            ctx.attr.sim_arm64_app_framework,
-            ctx.attr.sim_x64_app_framework,
-            ctx.attr.device_registrant,
-            ctx.attr.sim_arm64_registrant,
-            ctx.attr.sim_x64_registrant,
+            _attr_target(ctx, "device_app_framework"),
+            _attr_target(ctx, "sim_arm64_app_framework"),
+            _attr_target(ctx, "sim_x64_app_framework"),
+            _attr_target(ctx, "device_registrant"),
+            _attr_target(ctx, "sim_arm64_registrant"),
+            _attr_target(ctx, "sim_x64_registrant"),
             ctx.attr.engine,
         ]
     ]
-    for application in [ctx.attr.application, ctx.attr.sim_arm64_application, ctx.attr.sim_x64_application]:
+    for application in [_attr_target(ctx, "application"), _attr_target(ctx, "sim_arm64_application"), _attr_target(ctx, "sim_x64_application")]:
         for entry in application[FlutterApplicationInfo].apple_plugin_libraries.to_list():
             transitive.append(entry.files)
     return [DefaultInfo(
@@ -446,49 +402,49 @@ flutter_ios_xcframework = rule(
             doc = "A flutter_application target whose plugins become xcframeworks, read in the device configuration so its iOS device plugin libraries are selected.",
             mandatory = True,
             providers = [FlutterApplicationInfo],
-            cfg = _ios_device_transition,
+            cfg = ios_device_transition,
         ),
         "sim_arm64_application": attr.label(
             doc = "The same flutter_application target, read in the simulator arm64 configuration so its simulator plugin archives are selected.",
             mandatory = True,
             providers = [FlutterApplicationInfo],
-            cfg = _ios_sim_arm64_transition,
+            cfg = ios_sim_arm64_transition,
         ),
         "sim_x64_application": attr.label(
             doc = "The same flutter_application target, read in the simulator x86_64 configuration so its simulator plugin archives are selected.",
             mandatory = True,
             providers = [FlutterApplicationInfo],
-            cfg = _ios_sim_x64_transition,
+            cfg = ios_sim_x64_transition,
         ),
         "device_app_framework": attr.label(
             doc = "The device arm64 App.framework target, built through the device transition.",
             mandatory = True,
-            cfg = _ios_device_transition,
+            cfg = ios_device_transition,
         ),
         "sim_arm64_app_framework": attr.label(
             doc = "The simulator arm64 App.framework target, built through the simulator transition.",
             mandatory = True,
-            cfg = _ios_sim_arm64_transition,
+            cfg = ios_sim_arm64_transition,
         ),
         "sim_x64_app_framework": attr.label(
             doc = "The simulator x86_64 App.framework target, built through the simulator transition.",
             mandatory = True,
-            cfg = _ios_sim_x64_transition,
+            cfg = ios_sim_x64_transition,
         ),
         "device_registrant": attr.label(
             doc = "The device arm64 linked GeneratedPluginRegistrant dynamic library.",
             mandatory = True,
-            cfg = _ios_device_transition,
+            cfg = ios_device_transition,
         ),
         "sim_arm64_registrant": attr.label(
             doc = "The simulator arm64 linked GeneratedPluginRegistrant dynamic library.",
             mandatory = True,
-            cfg = _ios_sim_arm64_transition,
+            cfg = ios_sim_arm64_transition,
         ),
         "sim_x64_registrant": attr.label(
             doc = "The simulator x86_64 linked GeneratedPluginRegistrant dynamic library.",
             mandatory = True,
-            cfg = _ios_sim_x64_transition,
+            cfg = ios_sim_x64_transition,
         ),
         "engine": attr.label(
             doc = "The pinned Flutter.xcframework filegroup for the active configuration.",
