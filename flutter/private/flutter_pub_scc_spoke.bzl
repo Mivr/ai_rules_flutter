@@ -298,7 +298,7 @@ def _emit_single_member_build(ctx, name, p, plugin_block, asset_block):
     check_plugin_native_deps(mctx, name, apple_for_check, bool(overlay_content))
 
     if name == "test":
-        ctx.file("test/flutter_test_package.bzl", scc_flutter_test_package_bzl_content())
+        ctx.file("test/flutter_test_package.bzl", scc_flutter_test_package_bzl_content(ctx))
 
     if overlay_content:
         overlay_meta = struct(

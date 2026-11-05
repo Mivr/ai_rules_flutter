@@ -345,7 +345,27 @@ def check_pubspec_identity_mismatch(hub_name, package_name, lock_version, pubspe
     if actual.canonical != locked.canonical:
         fail(pubspec_version_refusal(hub_name, package_name, locked.text, actual.text))
 
-def make_flutter_test_package_bzl_content(forward_flutter_providers = False):
+_RUNNER_INFO_PRIVATE_LOAD = "@rules_dart//dart/private:dart_test_runner.bzl"
+_RUNNER_INFO_PUBLIC_LOAD = "@rules_dart//dart:providers.bzl"
+
+def dart_test_runner_load_label(ctx):
+    """The `.bzl` the generated `flutter_test_package.bzl` loads the runner providers from.
+
+    A rules_dart that re-exports `DartTestRunnerInfo` from `dart:providers.bzl`
+    declares `dart/private` invisible to other repos, so the generated file must
+    load the public facade there. An older rules_dart has no such re-export and
+    only offers the private file.
+
+    Args:
+        ctx: The repository or module context generating the file.
+
+    Returns:
+        The label string to load `DartTestRunnerInfo` and `DartTestRunnerSnapshotInfo` from.
+    """
+    providers = ctx.read(ctx.path(Label("@rules_dart//dart:providers.bzl")))
+    return _RUNNER_INFO_PUBLIC_LOAD if "DartTestRunnerSnapshotInfo" in providers else _RUNNER_INFO_PRIVATE_LOAD
+
+def make_flutter_test_package_bzl_content(forward_flutter_providers = False, ctx = None):
     """Generates `flutter_test_package.bzl` content for a `package:test` spoke.
 
     Args:
@@ -353,6 +373,8 @@ def make_flutter_test_package_bzl_content(forward_flutter_providers = False):
             `DartKernelInfo`, `DartAnalyzableInfo`, and `FlutterInfo` from
             `library` when present. When False (single-package spokes),
             preserves the exact single-package spoke content.
+        ctx: The repository or module context, used to pick the `.bzl` the
+            runner providers load from. When None, the `dart/private` file.
 
     Returns:
         The Starlark source string for `flutter_test_package.bzl`.
@@ -382,7 +404,7 @@ def make_flutter_test_package_bzl_content(forward_flutter_providers = False):
     return """\
 {providers_load}
 load(
-    "@rules_dart//dart/private:dart_test_runner.bzl",
+    "{runner_load}",
     "DartTestRunnerInfo",
     "DartTestRunnerSnapshotInfo",
 ){extra_load}
@@ -425,4 +447,5 @@ flutter_test_package = rule(
         providers_load = providers_load,
         extra_load = extra_load,
         return_block = return_block,
+        runner_load = dart_test_runner_load_label(ctx) if ctx else _RUNNER_INFO_PRIVATE_LOAD,
     )
