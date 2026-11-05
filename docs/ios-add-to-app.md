@@ -103,7 +103,10 @@ Every native iOS plugin in the application's transitive graph contributes one
 xcframework named after its pub package. The framework's binary is the plugin
 library's compiled output from `ios_libs` (usually a
 `flutter_apple_plugin_library`); its module and headers are the ones the
-registrant imports. A plugin package named `App`, `Flutter` or
+registrant imports. The `ios-arm64` slice holds the device build. The
+`ios-arm64_x86_64-simulator` slice holds a universal static archive fused from
+the plugin's arm64 and x86_64 simulator builds, so a plugin must build for both
+the device and the simulator or the rule fails. A plugin package named `App`, `Flutter` or
 `FlutterPluginRegistrant` is refused because its xcframework would collide with
 the three fixed names.
 
