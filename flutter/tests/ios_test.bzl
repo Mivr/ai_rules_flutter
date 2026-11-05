@@ -562,7 +562,8 @@ def _bundling_tests(name):
             "__%s_registrant" % xcframework_name: "flutter_ios_registrant",
             "__%s_engine" % xcframework_name: "apple_dynamic_xcframework_import",
             "__%s_plugins" % xcframework_name: "flutter_apple_plugins_aggregator",
-            "__%s_registrant_binary" % xcframework_name: "swift_binary",
+            "__%s_registrant_lib" % xcframework_name: "swift_library",
+            "__%s_registrant_binary" % xcframework_name: "cc_binary",
         },
     )
     _xcframework_application_probe(
