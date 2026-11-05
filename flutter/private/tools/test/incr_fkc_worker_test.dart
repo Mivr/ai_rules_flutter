@@ -47,7 +47,10 @@ void main() {
         incrementalFlagIndex(['vm', '--x=1', 'fs.snapshot', '--y', 'e.dart']),
         2,
       );
-      expect(incrementalFlagIndex(['vm', 'script.dart', '--y', 'e.dart']), 1);
+      expect(
+        incrementalFlagIndex(['vm', 'script.dart', '--y', 'e.dart']),
+        1,
+      );
     });
   });
 
@@ -226,13 +229,13 @@ void main() {
     late Harness h;
     late List<FakeSession> sessions;
     late IncrWorker worker;
-    late _Dir savedCwd;
+    late Directory savedCwd;
 
     SessionFactory factoryFor(List<CompileResult> Function() scriptOf) {
       // One script shared by every server: a restarted server continues the
       // same phase order, so multi-request tests stage cold, warm and error
       // phases in order.
-      final shared = Queue.of(scriptOf());
+      final Queue<CompileResult> shared = Queue.of(scriptOf());
       return (fs, full, inc, cwd, {devIncremental = false}) async {
         final s = FakeSession(
           fullDill: full,
@@ -685,7 +688,7 @@ void main() {
     late Harness h;
     late List<FakeSession> sessions;
     late IncrWorker worker;
-    late _Dir savedCwd;
+    late Directory savedCwd;
 
     setUp(() {
       savedCwd = Directory.current;
@@ -778,46 +781,23 @@ void main() {
       expect(File('${h.cwd}/out/app.dill').existsSync(), isFalse);
     });
 
-    test('a read under a root that only the argv names is refused', () async {
-      // The argv mounts the mirror via `--filesystem-root`, but the
-      // manifest names no such read: allowances come only from the
-      // manifest, so the mount buys the compile no read.
-      final _Dir mirrorDir = Directory.systemTemp.createTempSync(
-        'incr_mirror_',
-      );
-      addTearDown(() => mirrorDir.deleteSync(recursive: true));
-      final String mirror = mirrorDir.path;
-      for (final rel in ['lib/main.dart', 'lib/a.dart', 'lib/new.dart']) {
-        File('$mirror/$rel')
-          ..createSync(recursive: true)
-          ..writeAsStringSync('int get fresh => 7;\n');
-      }
-      for (final rel in ['lib/main.dart', 'lib/a.dart']) {
-        File('$mirror/$rel')
-            .writeAsStringSync(File('${h.cwd}/$rel').readAsStringSync());
-      }
-      // lib/new.dart is a created library: mirrored like the build would
-      // stage it, but declared in no manifest section.
-      final mirrorReads = [
-        '+file://$mirror/lib/main.dart',
-        '+file://$mirror/lib/a.dart',
-        '+file://$mirror/lib/new.dart',
-        '+file://${h.cwd}/lib/main.dart',
-        '+file://${h.cwd}/lib/a.dart',
-        '+file://${h.cwd}/pkg_config.json',
-        '+file://${h.cwd}/platform.dill',
-      ];
-      worker = IncrWorker(
-        cwd: h.cwd,
-        tempParent: h.cwd,
-        sessions: (fs, full, inc, cwd) async {
-          final s = FakeSession(
-            fullDill: full,
-            dillBytes: utf8.encode('dill'),
-            script: [
-              (errors: 0, diagnostics: const [], depLines: mirrorReads),
-              (errors: 0, diagnostics: const [], depLines: mirrorReads),
-            ],
+    test(
+      'a read under a root that only the argv names is refused',
+      () async {
+        // The argv mounts the mirror via `--filesystem-root`, but the
+        // manifest names no such read: allowances come only from the
+        // manifest, so the mount buys the compile no read.
+        final Directory m = Directory.systemTemp.createTempSync('incr_mirror_');
+        addTearDown(() => m.deleteSync(recursive: true));
+        final String mirror = m.path;
+        for (final rel in ['lib/main.dart', 'lib/a.dart', 'lib/new.dart']) {
+          File('$mirror/$rel')
+            ..createSync(recursive: true)
+            ..writeAsStringSync('int get fresh => 7;\n');
+        }
+        for (final rel in ['lib/main.dart', 'lib/a.dart']) {
+          File('$mirror/$rel').writeAsStringSync(
+            File('${h.cwd}/$rel').readAsStringSync(),
           );
         }
         // lib/new.dart is a created library: mirrored like the build would
@@ -847,7 +827,7 @@ void main() {
             return s;
           },
         );
-        final result = await worker.handleRequest(
+        final IncrResult result = await worker.handleRequest(
           h.argvWithRoot(mirror),
           h.inputs,
         );
@@ -921,7 +901,7 @@ void main() {
 
   group('server LRU', () {
     test('evicts the least recently used server over the cap', () async {
-      final _Dir savedCwd = Directory.current;
+      final Directory savedCwd = Directory.current;
       final h = Harness(Directory.systemTemp.createTempSync('incr_lru_'));
       Directory.current = h.cwd;
       addTearDown(() => h.dir.deleteSync(recursive: true));
@@ -966,7 +946,7 @@ void main() {
 
   group('worker temp cleanup on every exit path', () {
     late Harness h;
-    late _Dir savedCwd;
+    late Directory savedCwd;
 
     SessionFactory oneScript(List<CompileResult> Function() scriptOf) {
       return (fs, full, inc, cwd, {devIncremental = false}) async =>
@@ -1013,7 +993,11 @@ void main() {
           tempParent: h.cwd,
           sessions: oneScript(
             () => [
-              (errors: 1, diagnostics: [error], depLines: const []),
+              (
+                errors: 1,
+                diagnostics: [error],
+                depLines: const [],
+              ),
             ],
           ),
         ),
@@ -1090,10 +1074,10 @@ void main() {
     test(
       'round-trips compile, recompile, accept, reject against a fake',
       () async {
-        final _Dir dir = Directory.systemTemp.createTempSync('incr_proto_');
-        addTearDown(() => dir.deleteSync(recursive: true));
+        final Directory d = Directory.systemTemp.createTempSync('incr_proto_');
+        addTearDown(() => d.deleteSync(recursive: true));
         const uuid = '11111111-2222-3333-4444-555555555555';
-        File('${dir.path}/fake_server.dart').writeAsStringSync('''
+        File('${d.path}/fake_server.dart').writeAsStringSync('''
 import 'dart:convert';
 import 'dart:io';
 void respond() {
@@ -1132,34 +1116,30 @@ void main() async {
         final FrontendServerSession session = await FrontendServerSession.start(
           [
             Platform.resolvedExecutable,
-            '${dir.path}/fake_server.dart',
+            '${d.path}/fake_server.dart',
             '--output-dill',
             'out/app.dill',
             'package:app/main.dart',
           ],
-          '${dir.path}/full.dill',
-          '${dir.path}/inc.dill',
-          cwd: dir.path,
+          '${d.path}/full.dill',
+          '${d.path}/inc.dill',
+          cwd: d.path,
         );
         addTearDown(session.close);
-        final CompileResult compiled = await session.compile(
-          'package:app/main.dart',
-        );
+        const entry = 'package:app/main.dart';
+        final CompileResult compiled = await session.compile(entry);
         expect(compiled.errors, 0);
         expect(compiled.depLines, hasLength(1));
         await session.accept();
-        final CompileResult delta = await session.recompile(
-          'package:app/main.dart',
-          ['org-dartlang-app:///lib/a.dart'],
-        );
+        final CompileResult delta = await session.recompile(entry, [
+          'org-dartlang-app:///lib/a.dart',
+        ]);
         expect(delta.errors, 0);
         await session.accept();
-        final CompileResult reset = await session.recompile(
-          'package:app/main.dart',
-          [],
-          resetFirst: true,
+        expect(
+          (await session.recompile(entry, [], resetFirst: true)).errors,
+          0,
         );
-        expect(reset.errors, 0);
         await session.accept();
         await session.reject();
         expect(session.alive, isTrue);

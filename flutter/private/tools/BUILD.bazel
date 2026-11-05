@@ -19,6 +19,7 @@ exports_files(
         "crc32.dart",
         "directive_guard.dart",
         "kernel_filter.dart",
+        "incr_fkc_guard_cache.dart",
         "incr_fkc_scratch.dart",
         "incr_fkc_server.dart",
         "incr_fkc_worker.dart",
@@ -217,6 +218,7 @@ dart_binary(
     name = "incr_fkc_worker",
     srcs = [
         "directive_guard.dart",
+        "incr_fkc_guard_cache.dart",
         "incr_fkc_scratch.dart",
         "incr_fkc_server.dart",
         "kernel_filter.dart",
@@ -541,6 +543,7 @@ _TOOL_SRCS = {
     ],
     "incr_fkc_worker.dart": [
         "directive_guard.dart",
+        "incr_fkc_guard_cache.dart",
         "incr_fkc_scratch.dart",
         "incr_fkc_server.dart",
         "kernel_filter.dart",

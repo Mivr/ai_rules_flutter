@@ -105,7 +105,7 @@ splitWorkerArgv(List<String> argvWithMarker) {
     for (final a in argvWithMarker)
       if (a != devIncrementalSerializationMarker) a,
   ];
-  final i = argv.indexOf('--declared-inputs');
+  final int i = argv.indexOf('--declared-inputs');
   if (i < 0 || i + 1 >= argv.length) {
     throw const FormatException(
       'incr_fkc_worker: missing required --declared-inputs <manifest>.',
@@ -370,7 +370,7 @@ class FrontendServerSession implements CompilerSession {
       }
     }
     flags[outI + 1] = fullDill;
-    final spawnArgs = frontendServerSpawnArgs(
+    final List<String> spawnArgs = frontendServerSpawnArgs(
       flags,
       incrementalDill,
       devIncremental: devIncremental,

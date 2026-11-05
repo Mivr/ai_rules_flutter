@@ -518,7 +518,7 @@ Map<String, List<String>> _directiveVerdicts(
   required String multiRootPrefix,
 }) {
   final verdicts = <String, List<String>>{};
-  for (final entry in contents.entries) {
+  for (final MapEntry<String, String> entry in contents.entries) {
     final String path = entry.key;
     final String from = normalizeStagedPath(path);
     final String fromKey = flutterSourceKey(path, fsRoots);
