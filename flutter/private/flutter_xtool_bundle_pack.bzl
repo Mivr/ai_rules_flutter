@@ -302,6 +302,7 @@ def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, framewor
         outputs = [executable_file],
         mnemonic = "FlutterXtoolRunner",
         progress_message = "Compiling runner executable for %s (%s) via xtool_pack" % (ctx.label, platform),
+        toolchain = None,
     )
     return executable_file
 
@@ -496,6 +497,7 @@ def run_xtool_pack_bundle(
         outputs = [archive_file, app_dir],
         mnemonic = mnemonic,
         progress_message = "Packaging %s (%s) via xtool_pack" % (ctx.label, platform),
+        toolchain = None,
     )
 
     return [

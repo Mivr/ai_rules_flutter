@@ -776,7 +776,7 @@ def _web_collect_engine_files(ctx):
     Returns:
       A `(flutter_js_file, renderer_files)` tuple.
     """
-    web_sdk_files = ctx.attr._web_sdk.files.to_list() if ctx.attr._web_sdk else []
+    web_sdk_files = ctx.attr._web_sdk[DefaultInfo].files.to_list() if ctx.attr._web_sdk else []
     flutter_js_file = None
     renderer_files = []
     for f in web_sdk_files:
@@ -943,6 +943,7 @@ def _web_substitute_templates(ctx, flutter_sdk_info, is_debug, index_template, b
         outputs = [index_html, bootstrap_js] + ([dev_bootstrap_js] if dev_bootstrap_js else []),
         mnemonic = "FlutterWebTemplate",
         progress_message = "Substituting web templates for %s" % ctx.label,
+        toolchain = None,
     )
     return index_html, bootstrap_js, dev_bootstrap_js
 
@@ -1146,6 +1147,7 @@ def _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets):
         outputs = [output_dir] + ([dump_info_file] if dump_info_file else []),
         mnemonic = "FlutterWebBundle",
         progress_message = "Bundling Flutter web app %s" % ctx.label,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     output_groups = OutputGroupInfo(
         dump_info = depset([dump_info_file] if dump_info_file else []),

@@ -42,6 +42,7 @@ def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
                     transitive = [dart_vm_files],
                 ),
                 outputs = [slice_file],
+                toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
             )
         ctx.actions.run(
             executable = dart_exe,
@@ -58,6 +59,7 @@ def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
                 transitive = [dart_vm_files],
             ),
             outputs = [out_file],
+            toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
         )
     else:
         ctx.actions.run(
@@ -81,6 +83,7 @@ def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
                 transitive = [dart_vm_files],
             ),
             outputs = [out_file],
+            toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
         )
 
 def _fake_application_impl(ctx):
@@ -151,6 +154,7 @@ def _fake_application_impl(ctx):
             transitive = [dart_vm_files],
         ),
         outputs = [flutter_assets],
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
     plugins = []
@@ -291,6 +295,7 @@ def _fake_macho_binary_impl(ctx):
             transitive = [dart_vm_files],
         ),
         outputs = [out],
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return [DefaultInfo(files = depset([out]), executable = out)]
 
@@ -365,6 +370,7 @@ def _fake_xcframework_impl(ctx):
             transitive = [dart_vm_files],
         ),
         outputs = [binary],
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     ctx.actions.write(plist, _FAKE_FRAMEWORK_PLIST.format(name = fw_name))
     ctx.actions.write(header, "// Synthetic %s framework header\n" % fw_name)
@@ -445,6 +451,7 @@ def _macho_verify_probe_impl(ctx):
         outputs = [stamp],
         mnemonic = "FlutterMachOVerifyProbe",
         progress_message = "Verifying Mach-O binary for %s with llvm-objdump" % ctx.label,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return [DefaultInfo(files = depset([stamp]))]
 

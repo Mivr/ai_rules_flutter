@@ -1011,6 +1011,7 @@ def _web_integration_test_templates(ctx, setup, builds, inputs):
         outputs = [index_html, bootstrap_js],
         mnemonic = "FlutterWebTemplate",
         progress_message = "Substituting web templates for %s" % ctx.label,
+        toolchain = None,
     )
     return struct(
         bootstrap_js = bootstrap_js,
@@ -1098,6 +1099,7 @@ def _web_integration_test_bundle(ctx, setup, compile, assets, templates):
         outputs = [output_dir],
         mnemonic = "FlutterWebBundle",
         progress_message = "Bundling Flutter web integration test %s" % ctx.label,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return output_dir
 
@@ -1317,6 +1319,7 @@ def _linux_integration_test_bundle(ctx, setup, kernel_dill, aot_output, assets, 
         outputs = [bundle_dir],
         mnemonic = "FlutterLinuxBundle",
         progress_message = "Bundling Flutter Linux integration test %s" % ctx.label,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return struct(
         binary_name = binary_name,
@@ -1365,7 +1368,7 @@ def _linux_integration_test_run(ctx, setup, bundle):
                 ctx.file._linux_xkbcomp,
                 ctx.file._linux_fontconfig,
                 library_tags,
-            ] + ctx.attr._linux_runtime_all_files.files.to_list(),
+            ] + ctx.attr._linux_runtime_all_files[DefaultInfo].files.to_list(),
         ),
     )
 

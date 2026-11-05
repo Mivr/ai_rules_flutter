@@ -40,6 +40,7 @@ def _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, spec):
         outputs = [output] + spec.extra_outputs,
         mnemonic = spec.mnemonic,
         progress_message = "AOT compiling Flutter %s %s" % (spec.snapshot_kind, ctx.label),
+        toolchain = None,
     )
 
 # `extra_gen_snapshot_options` entries that take a plain-integer value, as flag

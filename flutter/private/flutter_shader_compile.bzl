@@ -164,6 +164,7 @@ def _run_shader_compile(ctx, compile, tools):
             outputs = [compile.output, compile.spirv_output],
             mnemonic = "FlutterShaderCompile",
             progress_message = "Compiling shader %s for %s" % (compile.shader.short_path, compile.target_platform),
+            toolchain = None,
         )
         return
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
@@ -183,6 +184,7 @@ def _run_shader_compile(ctx, compile, tools):
         outputs = [compile.output, compile.spirv_output],
         mnemonic = "FlutterShaderCompile",
         progress_message = "Compiling shader %s for %s" % (compile.shader.short_path, compile.target_platform),
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
 def shader_compile_tools(impellerc, shader_lib, compile_tool):

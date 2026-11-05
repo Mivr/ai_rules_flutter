@@ -520,6 +520,7 @@ def flutter_kernel_module_action(ctx, tools, module, options):
             "supports-workers": "1",
             "requires-worker-protocol": "proto",
         },
+        toolchain = None,
     )
     return excluded
 

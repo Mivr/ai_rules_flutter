@@ -413,6 +413,7 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
         outputs = [output_dir],
         mnemonic = "FlutterAssetBundle",
         progress_message = "Bundling Flutter assets %s" % ctx.label,
+        toolchain = None,
     )
 
     return output_dir

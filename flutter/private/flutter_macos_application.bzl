@@ -81,6 +81,7 @@ def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_d
             outputs = [prepared_binary],
             mnemonic = "FlutterMacOSStubDylib",
             progress_message = "Creating stub macOS App.framework binary for debug mode",
+            toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
         )
         return prepared_binary
     if not app_info.aot_output:
@@ -118,6 +119,7 @@ def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_d
         outputs = [prepared_binary],
         mnemonic = "FlutterMacOSRetagDylib",
         progress_message = "Retagging App dylib for macos (min %s)" % minimum_os_version,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return prepared_binary
 
@@ -241,6 +243,7 @@ def _flutter_macos_framework_impl(ctx):
         outputs = [framework_zip],
         mnemonic = "FlutterMacOSFramework",
         progress_message = "Assembling App.framework for %s" % ctx.label,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
     return [
@@ -400,6 +403,7 @@ def _flutter_macos_native_libs_impl(ctx):
         outputs = [staged],
         mnemonic = "FlutterMacOSNativeLibs",
         progress_message = "Staging native libraries for %{label}",
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return [DefaultInfo(files = depset([staged]))]
 

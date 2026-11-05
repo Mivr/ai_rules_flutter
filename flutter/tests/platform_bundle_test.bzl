@@ -332,6 +332,7 @@ def _fake_android_bundle_app_impl(ctx):
         executable = ctx.executable._bundle_tool,
         arguments = [],
         outputs = [assets],
+        toolchain = None,
     )
     icu = ctx.actions.declare_file(ctx.label.name + "_icudtl.dat")
     ctx.actions.write(icu, "")

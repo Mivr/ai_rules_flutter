@@ -49,6 +49,25 @@ objc_copts_xtool_refusal = _objc_copts_xtool_refusal
 plugin_defines_xtool_refusal = _plugin_defines_xtool_refusal
 weak_sdk_frameworks_xtool_refusal = _weak_sdk_frameworks_xtool_refusal
 
+def _sdk_link_opts(frameworks, weak_frameworks, dylibs):
+    """Link options naming SDK frameworks, weak frameworks and dylibs, in that order.
+
+    `objc_library` refuses `sdk_frameworks`, `weak_sdk_frameworks` and
+    `sdk_dylibs` under `--incompatible_disallow_sdk_frameworks_attributes`;
+    the same names reach the final link as `linkopts`.
+
+    Args:
+        frameworks: Framework names, each linked as `-framework <name>`.
+        weak_frameworks: Framework names, each linked as `-weak_framework <name>`.
+        dylibs: Dylib names, each linked as `-l<name>`.
+
+    Returns:
+        The link option list.
+    """
+    opts = [o for fw in frameworks for o in ["-framework", fw]]
+    opts += [o for fw in weak_frameworks for o in ["-weak_framework", fw]]
+    return opts + ["-l" + dylib for dylib in dylibs]
+
 def _split_srcs(srcs):
     """Split srcs into (swift_files, objc_files, headers).
 
@@ -141,9 +160,7 @@ def _emit_plugin_objc_target(spec, objc_files, headers):
         srcs = objc_files,
         hdrs = headers,
         includes = spec.includes,
-        sdk_frameworks = spec.sdk_frameworks,
-        weak_sdk_frameworks = spec.weak_sdk_frameworks,
-        sdk_dylibs = spec.sdk_dylibs,
+        linkopts = _sdk_link_opts(spec.sdk_frameworks, spec.weak_sdk_frameworks, spec.sdk_dylibs),
         module_name = objc_module_name,
         enable_modules = True,
         copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
@@ -192,9 +209,7 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, headers, swift_deps):
         srcs = objc_files,
         hdrs = headers,
         includes = spec.includes,
-        sdk_frameworks = spec.sdk_frameworks,
-        weak_sdk_frameworks = spec.weak_sdk_frameworks,
-        sdk_dylibs = spec.sdk_dylibs,
+        linkopts = _sdk_link_opts(spec.sdk_frameworks, spec.weak_sdk_frameworks, spec.sdk_dylibs),
         enable_modules = True,
         copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
         deps = [":" + spec.framework_target] + swift_deps,
@@ -451,10 +466,11 @@ def flutter_apple_plugin_objc_library(
         includes = settings.includes,
         copts = plugin_objc_copts(getattr(settings, "copts", []), [], plugin_defines),
         cxxopts = settings.cxxopts,
-        linkopts = settings.linkopts,
-        sdk_frameworks = settings.sdk_frameworks,
-        weak_sdk_frameworks = settings.weak_sdk_frameworks if hasattr(settings, "weak_sdk_frameworks") else [],
-        sdk_dylibs = settings.sdk_dylibs,
+        linkopts = settings.linkopts + _sdk_link_opts(
+            settings.sdk_frameworks,
+            getattr(settings, "weak_sdk_frameworks", []),
+            settings.sdk_dylibs,
+        ),
         module_name = module_name,
         enable_modules = True,
         deps = objc_deps,
@@ -489,13 +505,7 @@ def _validate_plugin_args(name, platform, backend, objc_copts):
 
 def _with_pure_swift_linkopts(spec, extra_attrs):
     """Return a copy of `extra_attrs` adding SDK framework and dylib linkopts."""
-    swift_linkopts = []
-    for fw in spec.sdk_frameworks:
-        swift_linkopts.extend(["-framework", fw])
-    for fw in spec.weak_sdk_frameworks:
-        swift_linkopts.extend(["-weak_framework", fw])
-    for dylib in spec.sdk_dylibs:
-        swift_linkopts.append("-l" + dylib)
+    swift_linkopts = _sdk_link_opts(spec.sdk_frameworks, spec.weak_sdk_frameworks, spec.sdk_dylibs)
     out = dict(extra_attrs)
     if swift_linkopts:
         if "linkopts" in out:

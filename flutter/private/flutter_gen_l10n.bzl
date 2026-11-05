@@ -189,6 +189,7 @@ def _flutter_gen_l10n_impl(ctx):
         outputs = outs,
         mnemonic = "FlutterGenL10n",
         progress_message = "Generating localizations for %{label}",
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
     return [DefaultInfo(files = depset(outs))]

@@ -84,7 +84,7 @@ def font_file_table(label, font_files_dict):
     """
     path_to_file = {}
     for target, asset_path in font_files_dict.items():
-        files = target.files.to_list()
+        files = target[DefaultInfo].files.to_list()
         if len(files) != 1:
             fail("%s: font_files entry %s must resolve to exactly one File; got %d" % (label, target.label, len(files)))
         if files[0].is_directory:

@@ -95,6 +95,7 @@ def _flutter_xtool_bundle_version_impl(ctx):
             inputs = [control_file, ctx.info_file],
             outputs = [bundle_version_file],
             mnemonic = "FlutterXtoolBundleVersion",
+            toolchain = None,
         )
     else:
         ctx.actions.write(

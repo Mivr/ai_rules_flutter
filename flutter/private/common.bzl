@@ -533,6 +533,7 @@ def extract_library_tags_action(ctx, main_file):
         outputs = [output],
         mnemonic = "FlutterExtractLibraryTags",
         progress_message = "Extracting library tags %s" % ctx.label,
+        toolchain = None,
     )
     return output
 

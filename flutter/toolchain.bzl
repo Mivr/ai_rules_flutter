@@ -13,11 +13,11 @@ resolve_exec_dart = _resolve_exec_dart
 resolve_flutter_sdk_info = _resolve_flutter_sdk_info
 
 def _flutter_toolchain_impl(ctx):
-    tool_files = depset(transitive = [ctx.attr.dart_sdk.files, ctx.attr.patched_sdk.files])
-    dart_vm_files = ctx.attr.dart_vm_files.files if ctx.attr.dart_vm_files else tool_files
-    dart_pub_files = ctx.attr.dart_pub_files.files if ctx.attr.dart_pub_files else tool_files
-    dart2wasm_files = ctx.attr.dart2wasm_files.files if ctx.attr.dart2wasm_files else tool_files
-    dart2js_files = ctx.attr.dart2js_files.files if ctx.attr.dart2js_files else tool_files
+    tool_files = depset(transitive = [ctx.attr.dart_sdk[DefaultInfo].files, ctx.attr.patched_sdk[DefaultInfo].files])
+    dart_vm_files = ctx.attr.dart_vm_files[DefaultInfo].files if ctx.attr.dart_vm_files else tool_files
+    dart_pub_files = ctx.attr.dart_pub_files[DefaultInfo].files if ctx.attr.dart_pub_files else tool_files
+    dart2wasm_files = ctx.attr.dart2wasm_files[DefaultInfo].files if ctx.attr.dart2wasm_files else tool_files
+    dart2js_files = ctx.attr.dart2js_files[DefaultInfo].files if ctx.attr.dart2js_files else tool_files
 
     flutter_sdk_info = FlutterSdkInfo(
         version = ctx.attr.version,

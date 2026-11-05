@@ -50,6 +50,7 @@ def _flutter_plist_merge_impl(ctx):
         outputs = [output],
         mnemonic = "FlutterPlistMerge",
         progress_message = "Merging plist %s" % ctx.label,
+        toolchain = None,
     )
 
     return [DefaultInfo(files = depset([output]))]

@@ -341,24 +341,24 @@ def _error_message_wording_test_impl(ctx):
 _error_message_wording_test = unittest.make(_error_message_wording_test_impl)
 
 def _plugin_macro_surface_test_impl(ctx):
-    """Verify pure-Swift `linkopts` and ObjC `weak_sdk_frameworks` on `flutter_apple_plugin_library`."""
+    """Verify pure-Swift and ObjC SDK `linkopts` on `flutter_apple_plugin_library`."""
     env = unittest.begin(ctx)
     asserts.equals(
         env,
         ["-ObjC", "-framework", "AVFoundation", "-weak_framework", "MetricKit", "-lc++"],
         ctx.attr.swift_linkopts,
     )
-    asserts.equals(env, ["AVFoundation"], ctx.attr.objc_sdk_frameworks)
-    asserts.equals(env, ["MetricKit"], ctx.attr.objc_weak_sdk_frameworks)
-    asserts.equals(env, ["sqlite3"], ctx.attr.objc_sdk_dylibs)
+    asserts.equals(
+        env,
+        ["-framework", "AVFoundation", "-weak_framework", "MetricKit", "-lsqlite3"],
+        ctx.attr.objc_linkopts,
+    )
     return unittest.end(env)
 
 _plugin_macro_surface_test = unittest.make(
     _plugin_macro_surface_test_impl,
     attrs = {
-        "objc_sdk_dylibs": attr.string_list(mandatory = True),
-        "objc_sdk_frameworks": attr.string_list(mandatory = True),
-        "objc_weak_sdk_frameworks": attr.string_list(mandatory = True),
+        "objc_linkopts": attr.string_list(mandatory = True),
         "swift_linkopts": attr.string_list(mandatory = True),
     },
 )
@@ -627,9 +627,7 @@ def _declare_plugin_library_tests(name):
     _plugin_macro_surface_test(
         name = name + "_plugin_macro_surface_test",
         swift_linkopts = [str(x) for x in swift_target.get("linkopts", [])],
-        objc_sdk_frameworks = [str(x) for x in objc_inner.get("sdk_frameworks", [])],
-        objc_weak_sdk_frameworks = [str(x) for x in objc_inner.get("weak_sdk_frameworks", [])],
-        objc_sdk_dylibs = [str(x) for x in objc_inner.get("sdk_dylibs", [])],
+        objc_linkopts = [str(x) for x in objc_inner.get("linkopts", [])],
     )
     _pure_swift_ccinfo_test(
         name = name + "_pure_swift_ccinfo_test",

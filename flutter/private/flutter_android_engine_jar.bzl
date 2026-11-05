@@ -78,6 +78,7 @@ def _flutter_android_engine_jar_impl(ctx):
         outputs = [output],
         mnemonic = "FlutterStripEngine",
         progress_message = "Stripping the Flutter engine's native libraries for %{label}",
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
     return [DefaultInfo(files = depset([output]))]
 
