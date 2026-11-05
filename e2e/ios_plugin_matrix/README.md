@@ -115,15 +115,10 @@ bazel build --platforms=@rules_flutter//flutter/platforms:ios_arm64 @deps_pods__
 ```
 
 `build_expected_pods.json` gates all four fetch-`ok` builds and must not be
-empty (the runner exits at once when it is):
-
-- `image_picker_ios`, `webview_flutter_wkwebview` and `url_launcher_ios` map to
-  `ok`, which requires exit 0.
-- `permission_handler_apple` maps to `file not found`, the Clang `#import`
-  diagnostic from the Apple header discovery defect tracked in #172. It
-  requires a non-zero exit and a case-sensitive substring match, so a Bazel
-  `ERROR:` analysis, missing-target or incompatible-platform refusal does not
-  satisfy it. When #172 lands, flip it to `ok` here and in `expected_pods.json`.
+empty (the runner exits at once when it is). `image_picker_ios`,
+`webview_flutter_wkwebview`, `url_launcher_ios` and `permission_handler_apple`
+all map to `ok`, which requires exit 0: all four fetch-`ok` plugins build
+cleanly.
 
 A plugin not listed in the file still prints `RECORD` without failing. Any
 build that exits non-zero prints its `bazel build ...` command and the last 30
