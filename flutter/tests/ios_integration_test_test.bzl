@@ -20,6 +20,7 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//flutter:defs.bzl", "flutter_integration_test")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
+load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load(
     "//flutter/private:flutter_integration_test.bzl",
     "flutter_ios_integration_bootstrap",
@@ -280,22 +281,70 @@ def _linux_bootstrap_has_no_file_fallback_test_impl(ctx):
             _TEST_IMPORT,
             has_integration_test = has_integration_test,
         )["{harness_url_prologue}"]
-        asserts.false(
-            env,
-            "Directory.systemTemp" in prologue,
-            "the file fallback is iOS-only; the Linux bootstrap is unchanged",
-        )
-        asserts.false(
-            env,
-            "flutter_integration_test_harness_url" in prologue,
-            "the file fallback is iOS-only; the Linux bootstrap is unchanged",
-        )
-        asserts.false(
-            env,
-            "stderr.flush()" in prologue,
-            "the file fallback is iOS-only; the Linux bootstrap is unchanged",
-        )
+        for fallback in ("Directory.systemTemp", "flutter_integration_test_harness_url", "stderr.flush()"):
+            asserts.false(
+                env,
+                fallback in prologue,
+                "the file fallback is iOS-only; the Linux bootstrap is unchanged",
+            )
     return unittest.end(env)
+
+# Per platform: (strings the whole generated program must contain, strings it must not). The iOS program is the
+# Linux template with the iOS prologue: its file fallback is intended, a fixed port is still a regression.
+_FIXED_PORT = ["ws://127.0.0.1", "38427"]
+_FILE_FALLBACK = ["Directory.systemTemp", "flutter_integration_test_harness_url", "stderr.flush()"]
+_PROGRAM_CHECKS = {
+    "ios": (_FILE_FALLBACK + ["WebSocket.connect(wsUrl)"], _FIXED_PORT),
+    "linux": (["WebSocket.connect(wsUrl)"], _FIXED_PORT + _FILE_FALLBACK),
+}
+
+_PROGRAM_CASE = lambda platform, has_it: lambda name, size: _bootstrap_program_test(
+    name = name,
+    size = size,
+    platform = platform,
+    has_integration_test = has_it,
+    target_compatible_with = HOST_COMPATIBLE,
+)
+
+def _program_check_script(label, path, substitutions, platform):
+    """The shell script that checks the expanded program at `path` and names `label` in failures."""
+    have, not_have = _PROGRAM_CHECKS[platform]
+    checks = [("0", s, "missing required string") for s in have]
+    checks += [("1", s, "forbidden string") for s in not_have + sorted(substitutions)]
+    return "\n".join([
+        "#!/bin/sh",
+        "s=0",
+        "c() { grep -qF -- \"$2\" \"$TEST_SRCDIR/%s\"; [ $? -eq $1 ] || { echo \"FAIL: %s: $3 $2\" >&2; s=1; }; }" %
+        (path, label),
+    ] + ["c %s '%s' '%s'" % c for c in checks] + ["exit $s", ""])
+
+def _bootstrap_program_test_impl(ctx):
+    platform = ctx.attr.platform
+    has_it = ctx.attr.has_integration_test
+    substitutions = make_linux_integration_bootstrap_content(_TEST_IMPORT, has_it)
+    if platform == "ios":
+        substitutions = ios_integration_bootstrap_substitutions(substitutions)
+    program = ctx.actions.declare_file(ctx.label.name + "_program.dart")
+    ctx.actions.expand_template(template = ctx.file.template, output = program, substitutions = substitutions)
+    script = ctx.actions.declare_file(ctx.label.name + ".sh")
+    label = "%s program (has_integration_test = %s)" % (platform, has_it)
+    path = "%s/%s" % (ctx.workspace_name, program.short_path)
+    body = _program_check_script(label, path, substitutions, platform)
+    ctx.actions.write(script, body, is_executable = True)
+    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(files = [program]))]
+
+_bootstrap_program_test = rule(
+    implementation = _bootstrap_program_test_impl,
+    test = True,
+    attrs = {
+        "has_integration_test": attr.bool(mandatory = True),
+        "platform": attr.string(mandatory = True, values = ["linux", "ios"]),
+        "template": attr.label(
+            allow_single_file = True,
+            default = "//flutter/private/integration_test_bootstrap:linux_bootstrap.dart.tpl",
+        ),
+    },
+)
 
 def _bootstrap_file_test_impl(ctx):
     env = analysistest.begin(ctx)
@@ -611,6 +660,7 @@ def ios_integration_test_test_suite(name):
         _t5_test,
         _t6_test,
         _t7_test,
+        *[_PROGRAM_CASE(p, h) for p in ("linux", "ios") for h in (True, False)]
     )
     native.test_suite(
         name = name,
