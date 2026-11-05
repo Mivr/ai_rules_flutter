@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:test/test.dart';
 
@@ -222,6 +223,45 @@ void main() {
         Map<String, String?> hashes,
       ) => first ??= newCache().check(sources, roots, hashes);
       expect(warmEdit(neverRescans), isNot(['bad:b:r']));
+    });
+  });
+
+  group('normalizeRequestDigest', () {
+    final String hex = sha256Hex(utf8.encode('x'));
+
+    test('accepts the forms Bazel and the tests send', () {
+      expect(normalizeRequestDigest(hex), hex);
+      expect(normalizeRequestDigest(hex.toUpperCase()), hex);
+      expect(normalizeRequestDigest(base64.encode(utf8.encode(hex))), hex);
+      expect(
+        normalizeRequestDigest(base64.encode(utf8.encode(hex.toUpperCase()))),
+        hex,
+      );
+      expect(
+        normalizeRequestDigest(
+          base64.encode([
+            for (var i = 0; i < 64; i += 2)
+              int.parse(hex.substring(i, i + 2), radix: 16),
+          ]),
+        ),
+        hex,
+      );
+    });
+
+    test('rejects everything else', () {
+      expect(normalizeRequestDigest(null), isNull);
+      expect(normalizeRequestDigest(''), isNull);
+      expect(normalizeRequestDigest('not-a-digest'), isNull);
+      expect(normalizeRequestDigest(hex.substring(1)), isNull);
+      expect(
+        normalizeRequestDigest(base64.encode(utf8.encode('z' * 64))),
+        isNull,
+      );
+      expect(
+        normalizeRequestDigest(base64.encode(utf8.encode(hex.substring(2)))),
+        isNull,
+      );
+      expect(normalizeRequestDigest(base64.encode(List.filled(48, 7))), isNull);
     });
   });
 
@@ -543,6 +583,71 @@ void main() {
         };
         await warmWith(b64);
         expect(deltas(), 0);
+      });
+
+      Future<Map<String, int>> countReads(Future<void> Function() body) async {
+        final reads = <String, int>{};
+        await IOOverrides.runZoned(
+          body,
+          createFile: (path) {
+            final File real = Zone.root.run(() => File(path));
+            return path.endsWith('.dart') ? CountingFile(real, reads) : real;
+          },
+        );
+        return reads;
+      }
+
+      // Bazel 9.x sends the 64 hex characters as `bytes`, which proto3 JSON
+      // prints as base64: 88 characters that decode to 64.
+      String bazelForm(String hex) => base64.encode(utf8.encode(hex));
+
+      test('a Bazel-form digest is trusted without reading contents', () async {
+        final Map<String, String> digests = {
+          for (final e in digestsOf(h).entries) e.key: bazelForm(e.value),
+        };
+        expect(digests.values.first, hasLength(88));
+        await coldWith(digests);
+        edit();
+        await warmWith(digests);
+        expect(deltas(), 0, reason: 'unchanged digest, so no contents read');
+      });
+
+      test('a changed Bazel-form digest recompiles', () async {
+        final Map<String, String> digests = {
+          for (final e in digestsOf(h).entries) e.key: bazelForm(e.value),
+        };
+        await coldWith(digests);
+        edit();
+        await warmWith({
+          ...digests,
+          'lib/a.dart': bazelForm(fake),
+          'stage/lib/a.dart': bazelForm(fake),
+        });
+        expect(deltas(), 1);
+      });
+
+      test('a request with no digests reads each source once', () async {
+        await coldWith(const {});
+        final Map<String, int> reads = await countReads(
+          () => warmWith(const {}),
+        );
+        expect(reads, isNotEmpty);
+        expect(reads.values, everyElement(1), reason: '$reads');
+      });
+
+      test('a Bazel-form digest leaves the guard reading once', () async {
+        final Map<String, String> digests = {
+          for (final e in digestsOf(h).entries) e.key: bazelForm(e.value),
+        };
+        await coldWith(digests);
+        final Map<String, int> reads = await countReads(
+          () => warmWith(digests),
+        );
+        expect(
+          reads.values,
+          everyElement(lessThanOrEqualTo(1)),
+          reason: '$reads',
+        );
       });
 
       for (final MapEntry<String, String?> bad in <String, String?>{
@@ -1147,4 +1252,37 @@ void main() async {
       },
     );
   });
+}
+
+/// A [File] that counts `readAsBytesSync` calls per path and forwards the
+/// reads the worker makes to [_real].
+class CountingFile implements File {
+  new(this._real, this._reads);
+
+  final File _real;
+  final Map<String, int> _reads;
+
+  @override
+  String get path => _real.path;
+
+  @override
+  Uint8List readAsBytesSync() {
+    _reads[_real.path] = (_reads[_real.path] ?? 0) + 1;
+    return _real.readAsBytesSync();
+  }
+
+  @override
+  String readAsStringSync({Encoding encoding = utf8}) =>
+      _real.readAsStringSync(encoding: encoding);
+
+  @override
+  List<String> readAsLinesSync({Encoding encoding = utf8}) =>
+      _real.readAsLinesSync(encoding: encoding);
+
+  @override
+  bool existsSync() => _real.existsSync();
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('${invocation.memberName}');
 }
