@@ -1,3 +1,8 @@
+/// Tagged `runfiles`: the e2e source is a `data` dependency, so this needs the
+/// Bazel runfiles tree.
+@Tags(['runfiles'])
+library;
+
 import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/runfiles_helper.dart';
