@@ -97,6 +97,7 @@ void main() {
 
   final report = _Report();
   _checkAppInfoPlist(report, _read(appInfo));
+  _checkLibraryPaths(report, files);
   _checkDeviceApp(report, appDevice.path, _read(appDevice));
   _checkSimulatorApp(report, appSimulator.path, _read(appSimulator));
   _checkEngine(report, engineDevice, pinnedEngine);
@@ -237,11 +238,57 @@ void _checkAppInfoPlist(_Report report, Uint8List bytes) {
   }
 }
 
+/// Checks every produced xcframework resolves each `LibraryPath` on disk.
+///
+/// Xcode reads `LibraryPath` relative to the `LibraryIdentifier` directory, so
+/// `<xcframework>/<LibraryIdentifier>/<LibraryPath>/<Name>` must exist.
+void _checkLibraryPaths(_Report report, List<File> files) {
+  final plists = [
+    for (final f in files)
+      if (f.path.contains('/app_xcframeworks/') &&
+          f.path.endsWith('.xcframework/Info.plist'))
+        f,
+  ];
+  report.check(
+    'at least one xcframework Info.plist under app_xcframeworks',
+    ok: plists.isNotEmpty,
+    found: 'none',
+  );
+  final present = {for (final f in files) f.path};
+  for (final plist in plists) {
+    final xcframework = plist.parent.path;
+    for (final lib in _parseAvailableLibraries(latin1.decode(_read(plist)))) {
+      final binary = _sliceBinary(xcframework, lib);
+      report.check(
+        '$xcframework slice ${lib.identifier} to resolve LibraryPath '
+        '${lib.path} to an existing binary',
+        ok: binary != null && present.contains(binary),
+        found: 'no file at $binary',
+      );
+    }
+  }
+}
+
+/// The binary `<xcframework>/<LibraryIdentifier>/<LibraryPath>/<Name>`.
+String? _sliceBinary(String xcframework, _Library lib) {
+  final path = lib.path;
+  if (path == null) return null;
+  final name = path.split('/').last.replaceFirst(RegExp(r'\.framework$'), '');
+  return '$xcframework/${lib.identifier}/$path/$name';
+}
+
 /// One parsed `AvailableLibraries` entry.
 class _Library {
-  const _Library(this.identifier, this.platform, this.variant, this.archs);
+  const _Library(
+    this.identifier,
+    this.platform,
+    this.variant,
+    this.archs,
+    this.path,
+  );
 
   final String identifier;
+  final String? path;
   final String platform;
   final String? variant;
   final List<String> archs;
@@ -266,6 +313,7 @@ List<_Library> _parseAvailableLibraries(String text) {
     final body = dict.group(1)!;
     final identifier = _string(body, 'LibraryIdentifier');
     final platform = _string(body, 'SupportedPlatform');
+    final path = _string(body, 'LibraryPath');
     final variant = _string(body, 'SupportedPlatformVariant');
     final archBlock = RegExp(
       r'<key>\s*SupportedArchitectures\s*</key>\s*<array>(.*?)</array>',
@@ -285,7 +333,7 @@ List<_Library> _parseAvailableLibraries(String text) {
         'FAIL: expected LibraryIdentifier and SupportedPlatform, found $body',
       );
     }
-    libraries.add(_Library(identifier, platform, variant, archs));
+    libraries.add(_Library(identifier, platform, variant, archs, path));
   }
   return libraries;
 }
