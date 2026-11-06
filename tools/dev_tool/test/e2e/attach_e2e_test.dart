@@ -158,11 +158,14 @@ void main() {
         await dt.waitForHttpControl(timeout: const Duration(seconds: 90));
 
         // The tool being up does not mean the attached app has drawn yet.
-        final firstFrame = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'text': 'defines,live v1',
-          'timeoutMs': '30000',
-        });
+        final Map<String, dynamic> firstFrame = await dt.httpCommand(
+          'app.waitFor',
+          {
+            'appId': appId,
+            'text': 'defines,live v1',
+            'timeoutMs': '30000',
+          },
+        );
         expect(
           firstFrame['error'],
           isNull,
