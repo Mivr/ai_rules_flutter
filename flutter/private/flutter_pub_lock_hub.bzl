@@ -154,6 +154,7 @@ def _flutter_pub_lock_hub_impl(ctx):
         "android/BUILD.bazel",
         make_flutter_pub_hub_android_build_content(ctx.attr.packages, spoke_prefix, scc_targets),
     )
+    return ctx.repo_metadata(reproducible = True)
 
 flutter_pub_lock_hub = repository_rule(
     implementation = _flutter_pub_lock_hub_impl,

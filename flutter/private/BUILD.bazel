@@ -241,6 +241,7 @@ bzl_library(
         ":constants",
         ":download",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -413,6 +414,7 @@ bzl_library(
         ":download",
         ":engine_helpers",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -433,6 +435,7 @@ bzl_library(
     deps = [
         ":engine_helpers",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -445,6 +448,7 @@ bzl_library(
         ":download",
         ":engine_helpers",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -462,6 +466,7 @@ bzl_library(
         ":artifact_urls",
         ":download",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -489,6 +494,7 @@ bzl_library(
         ":artifact_urls",
         ":download",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -669,6 +675,7 @@ bzl_library(
         ":artifact_urls",
         ":download",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -896,6 +903,7 @@ bzl_library(
         ":download",
         ":engine_helpers",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -1320,6 +1328,7 @@ bzl_library(
         ":artifact_urls",
         ":download",
         ":local_sdk",
+        ":repo_metadata",
         "@rules_dart//dart/pub:pub_lock_package",
         "@rules_dart//dart/pub:yaml_parser",
     ],
@@ -1342,6 +1351,7 @@ bzl_library(
         ":artifact_urls",
         ":download",
         ":local_sdk",
+        ":repo_metadata",
     ],
 )
 
@@ -1411,6 +1421,7 @@ bzl_library(
         ":artifact_urls",
         ":download",
         ":local_sdk",
+        ":repo_metadata",
         ":toolchains_repo",
     ],
 )
@@ -1709,6 +1720,12 @@ bzl_library(
 bzl_library(
     name = "pub_lock_sdks",
     srcs = ["pub_lock_sdks.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "repo_metadata",
+    srcs = ["repo_metadata.bzl"],
     visibility = ["//visibility:public"],
 )
 

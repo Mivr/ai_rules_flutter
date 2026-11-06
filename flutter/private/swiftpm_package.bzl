@@ -649,7 +649,7 @@ def _swiftpm_package_impl(ctx):
         fail(hoist_error)
     if ctx.attr.build_file:
         ctx.file("BUILD.bazel", ctx.read(ctx.path(ctx.attr.build_file)))
-        return
+        return ctx.repo_metadata(reproducible = True)
     manifest = _swiftpm_manifest_filename(ctx, identity)
     if not manifest.ok:
         fail(manifest.error)
@@ -675,6 +675,7 @@ def _swiftpm_package_impl(ctx):
     if not translated.ok:
         fail(translated.error)
     ctx.file("BUILD.bazel", translated.text)
+    return ctx.repo_metadata(reproducible = True)
 
 swiftpm_package = repository_rule(
     implementation = _swiftpm_package_impl,

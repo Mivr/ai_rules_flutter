@@ -57,6 +57,7 @@ applies is a loud failure, where a rewrite would quietly drift.
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download_and_extract")
 load("//flutter/private:local_sdk.bzl", "copy_local_text_file", "read_local_sdk_version", "resolve_local_sdk_root")
+load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
 # edges are cut. Listed explicitly rather than globbed: the subset boundary is
@@ -155,6 +156,7 @@ dart_library(
     visibility = ["//visibility:public"],
 )
 """.format(version = version, srcs = srcs, deps = deps))
+    return download_mode_metadata(repository_ctx)
 
 flutter_gen_l10n_repo = repository_rule(
     implementation = _flutter_gen_l10n_repo_impl,

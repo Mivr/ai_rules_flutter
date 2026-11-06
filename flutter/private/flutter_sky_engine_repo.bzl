@@ -49,6 +49,7 @@ the extracted tree is repo-owned, so the stubs land beside it; in
 one through a directory symlink would write into the user's SDK.
 """
 
+load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 load(":artifact_urls.bzl", "engine_artifact_url", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
 load(":local_sdk.bzl", "link_local_file", "missing_local_source_message", "resolve_local_sdk_root")
@@ -253,7 +254,7 @@ def _flutter_sky_engine_repo_impl(repository_ctx):
         _plant_trimmed_part_stubs(repository_ctx)
         repository_ctx.file("sky_engine/BUILD.bazel", _PACKAGE_BUILD_TEMPLATE)
         repository_ctx.file("BUILD.bazel", _ROOT_BUILD_TEMPLATE)
-        return
+        return download_mode_metadata(repository_ctx)
 
     # Extracted at the repository root rather than under an `output` directory,
     # because the archive already nests everything one level under
@@ -288,6 +289,7 @@ def _flutter_sky_engine_repo_impl(repository_ctx):
     # …which would leave consumers writing `@flutter_sky_engine//sky_engine`,
     # naming the package twice. The alias buys back the obvious label.
     repository_ctx.file("BUILD.bazel", _ROOT_BUILD_TEMPLATE)
+    return download_mode_metadata(repository_ctx)
 
 flutter_sky_engine_repo = repository_rule(
     _flutter_sky_engine_repo_impl,

@@ -15,6 +15,7 @@ load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubsp
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download_and_extract")
 load("//flutter/private:local_sdk.bzl", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
+load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 
 def make_flutter_sdk_build_content(name, deps, language_version):
     """Generate BUILD content for a Flutter SDK spoke.
@@ -188,6 +189,7 @@ kt_android_library(
     visibility = ["//visibility:public"],
 )
 """)
+    return download_mode_metadata(repository_ctx)
 
 flutter_sdk_package = repository_rule(
     implementation = _flutter_sdk_package_impl,

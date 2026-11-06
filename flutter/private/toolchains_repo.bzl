@@ -349,6 +349,7 @@ def generate_toolchains_build(user_repository_name):
 
 def _flutter_toolchains_repo_impl(repository_ctx):
     repository_ctx.file("BUILD.bazel", generate_toolchains_build(repository_ctx.attr.user_repository_name))
+    return repository_ctx.repo_metadata(reproducible = True)
 
 flutter_toolchains_repo = repository_rule(
     _flutter_toolchains_repo_impl,
