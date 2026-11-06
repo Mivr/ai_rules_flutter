@@ -2,6 +2,11 @@
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load(
+    "//flutter/private:common.bzl",
+    "make_web_plugins_stub_content",
+    "make_web_ui_web_stub_content",
+)
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load(
     "//flutter/private:flutter_web_compile.bzl",
@@ -28,7 +33,6 @@ load(
     "service_worker_load_args",
     "service_worker_version_for",
 )
-load("//flutter/private:web_stub_content.bzl", "make_web_plugins_stub_content", "make_web_ui_web_stub_content")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 load(":action_content.bzl", "written_json")
 

@@ -1435,24 +1435,12 @@ bzl_library(
         ":flutter_kernel_module",
         ":flutter_library",
         ":flutter_web_compile",
-        ":flutter_web_debug",
         ":plugin_registrant",
         ":validation",
         ":web_service_worker",
-        ":web_stub_content",
         "//flutter:providers",
         "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
-    ],
-)
-
-bzl_library(
-    name = "flutter_web_debug",
-    srcs = ["flutter_web_debug.bzl"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":app_entrypoint",
-        ":common",
     ],
 )
 
@@ -1928,12 +1916,6 @@ bzl_library(
 bzl_library(
     name = "web_service_worker",
     srcs = ["web_service_worker.bzl"],
-    visibility = ["//visibility:public"],
-)
-
-bzl_library(
-    name = "web_stub_content",
-    srcs = ["web_stub_content.bzl"],
     visibility = ["//visibility:public"],
 )
 
