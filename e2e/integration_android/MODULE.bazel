@@ -126,6 +126,7 @@ maven.install(
     lock_file = "//:android_ide_common_30_1_3_install.json",
     repositories = [
         "https://maven.google.com",
+        "https://maven-central.storage-download.googleapis.com/maven2",
         "https://repo1.maven.org/maven2",
     ],
     use_starlark_android_rules = True,
@@ -196,6 +197,7 @@ maven.install(
     lock_file = "//:rules_android_maven_install.json",
     repositories = [
         "https://maven.google.com",
+        "https://maven-central.storage-download.googleapis.com/maven2",
         "https://repo1.maven.org/maven2",
     ],
     use_starlark_android_rules = True,
