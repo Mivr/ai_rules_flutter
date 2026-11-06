@@ -496,11 +496,14 @@ void main() {
         // `waitForHttpControl` says the tool is up, not that the attached app
         // has drawn its first frame, so wait for the label instead of reading
         // it once.
-        final Map<String, dynamic> before = await dt.httpCommand('app.waitFor', {
-          'appId': appId,
-          'text': 'iOS attach marker v1',
-          'timeoutMs': '30000',
-        });
+        final Map<String, dynamic> before = await dt.httpCommand(
+          'app.waitFor',
+          {
+            'appId': appId,
+            'text': 'iOS attach marker v1',
+            'timeoutMs': '30000',
+          },
+        );
         expect(
           before['error'],
           isNull,
