@@ -101,16 +101,19 @@ def _xcframework_plist_text(entries):
     return "\n".join(lines)
 
 def _device_and_simulator_entries(framework_name):
-    """The two library entries every add-to-app xcframework carries."""
+    """The two library entries every add-to-app xcframework carries.
+
+    `LibraryPath` is relative to the slice's `LibraryIdentifier` directory.
+    """
     return [
         _library_entry(
-            "%s/%s.framework" % (IOS_DEVICE, framework_name),
+            "%s.framework" % framework_name,
             IOS_DEVICE,
             _DEVICE_ARCHITECTURES,
             "",
         ),
         _library_entry(
-            "%s/%s.framework" % (IOS_SIMULATOR, framework_name),
+            "%s.framework" % framework_name,
             IOS_SIMULATOR,
             _SIMULATOR_ARCHITECTURES,
             "simulator",
