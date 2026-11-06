@@ -28,6 +28,7 @@ import 'package:flutter_bazel_dev_tool/teardown.dart';
 import 'package:flutter_bazel_dev_tool/toolchain_info.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_client.dart';
 import 'package:flutter_bazel_dev_tool/vm_service_logs.dart';
+import 'package:vm_service/vm_service.dart';
 
 class AttachCommand {
   static final parser = ArgParser()
