@@ -3,7 +3,7 @@
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load(
-    "//flutter/private:common.bzl",
+    "//flutter/private:web_stubs.bzl",
     "make_web_plugins_stub_content",
     "make_web_ui_web_stub_content",
 )
