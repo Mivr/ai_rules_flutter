@@ -19,6 +19,7 @@ load("//flutter/private:common.bzl", "shader_sources")
 load("//flutter/private:flutter_library.bzl", "flutter_library")
 load("//flutter/private:flutter_pub_assets.bzl", "asset_entry_problem_error")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
+load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _CONDITIONED_PUBSPEC = """\
 name: shader_conditions
@@ -266,7 +267,7 @@ def shader_conditions_test_suite(name):
         expected_substrings = ["`pkg_assets`", "`pkg_shaders`", "same file"],
     )
 
-    unittest.suite(
+    small_unittest_suite(
         name + "_unit",
         _t0_test,
         _t1_test,

@@ -30,7 +30,6 @@ its pubspec.yaml and the entry.
 
 load(":asset_uri.bzl", "encode_asset_key", "spoke_asset_uri_error")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND")
-load(":flutter_pub_package_helpers.bzl", "merge_pub_asset_conditions")
 
 # Bound for every asset directory walk. Starlark has no `while`, so every
 # walk is a bounded `for`; reaching the bound fails loudly (see
@@ -584,40 +583,34 @@ def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
         bound,
     )
 
-def build_pkg_shader_conditions(normalized_shaders, parsed_shaders, package_name):
-    """Build the condition dicts for a spoke's `pkg_shaders` entries.
+def shader_condition_entries(normalized_shaders, parsed_shaders):
+    """The per-file condition entries for a spoke's `pkg_shaders`.
 
     A shader entry carries the same `platforms` / `flavors` conditions as an
     asset entry, keyed the same way (`":" + path`), because the spoke passes
     both channels through `pkg_asset_platforms` / `pkg_asset_flavors`.
     Normalization keeps one entry per parsed entry in order, so the two lists
-    pair by index; entries for one file merge exactly as asset entries do
-    (`merge_pub_asset_conditions`), including the flavor-conflict refusal.
+    pair by index. The caller merges the entries exactly as asset entries
+    are merged (`merge_pub_asset_conditions`), flavor-conflict refusal
+    included.
 
     Args:
         normalized_shaders: `struct(path, key)` entries from
             `normalize_spoke_shaders`.
         parsed_shaders: The parsed `struct(path, is_map, flavors, platforms)`
             entries they came from, in the same order.
-        package_name: The pub package the entries come from, for the conflict
-            message.
 
     Returns:
-        A `struct(platforms, flavors)` of condition dicts (empty when the
-        shaders are unconditional); fails the fetch on a flavor conflict.
+        A list of `struct(path, flavors, platforms)`, one per shader entry.
     """
-    entries = []
-    for index, entry in enumerate(normalized_shaders):
-        parsed = parsed_shaders[index]
-        entries.append(struct(
+    return [
+        struct(
             path = entry.path,
-            flavors = parsed.flavors,
-            platforms = parsed.platforms,
-        ))
-    merged = merge_pub_asset_conditions(entries, package_name)
-    if merged.conflict:
-        fail(merged.conflict)
-    return struct(platforms = merged.platforms, flavors = merged.flavors)
+            flavors = parsed_shaders[index].flavors,
+            platforms = parsed_shaders[index].platforms,
+        )
+        for index, entry in enumerate(normalized_shaders)
+    ]
 
 def check_pub_asset_shader_conflict(package_name, pkg_assets, pkg_shaders):
     """Fail the spoke fetch when one file is both a pub asset and a pub shader.

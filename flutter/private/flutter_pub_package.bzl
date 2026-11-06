@@ -55,11 +55,11 @@ load(
 load(":flutter_pub_apple_local.bzl", "apply_apple_native_deps")
 load(
     ":flutter_pub_assets.bzl",
-    "build_pkg_shader_conditions",
     "check_asset_entry_problems",
     "check_pub_asset_shader_conflict",
     "ctx_package_lister",
     "expand_pub_asset_entries",
+    "shader_condition_entries",
 )
 load(":flutter_pub_cover.bzl", "covering_entry", "covering_entry_lookup")
 load(":flutter_pub_maven.bzl", _maven_deps_attr = "maven_deps_attr", _maven_ignore_attr = "maven_ignore_attr")
@@ -1205,7 +1205,9 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded, package_name)
     pkg_shaders_dict = build_pkg_shaders_dict(shaders)
     check_pub_asset_shader_conflict(package_name, pkg_assets_dict, pkg_shaders_dict)
-    shader_conditions = build_pkg_shader_conditions(shaders, asset_block.shaders, package_name)
+    shader_conditions = merge_pub_asset_conditions(shader_condition_entries(shaders, asset_block.shaders), package_name)
+    if shader_conditions.conflict:
+        fail(shader_conditions.conflict)
 
     # Both channels share the condition attrs: the generated spoke's
     # `pkg_asset_platforms` / `pkg_asset_flavors` carry asset and shader keys
