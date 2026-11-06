@@ -700,11 +700,14 @@ jobs:
       - name: Build e2e/dual_hub in tree
         working-directory: e2e/dual_hub
         run: bazel test //... --test_output=errors
+      # The build rewrites MODULE.bazel.lock; only the dirlink targets and the
+      # trees they point at must stay untouched.
       - name: dual_hub source tree unchanged by the dirlink fetch
         run: |
-          if [ -n "$(git status --porcelain -- e2e/dual_hub)" ]; then
-            echo "e2e/dual_hub changed during the build:"
-            git status --porcelain -- e2e/dual_hub
+          paths="e2e/dual_hub/hub_a/dirlink_plugin e2e/dual_hub/hub_a/shared_android e2e/dual_hub/hub_a/shared_assets"
+          if [ -n "$(git status --porcelain -- $paths)" ]; then
+            echo "dual_hub dirlink trees changed during the build:"
+            git status --porcelain -- $paths
             exit 1
           fi
       # pub_hosted_escape: the staged lock fixtures point at the local archives;
