@@ -32,6 +32,20 @@ cc_shared_library(
     deps = [":add_cc"],
 )
 
+# A second library, declared as a Dart Native Asset by
+# `//native_asset_plugin` and bound with `@Native` rather than opened by path.
+cc_library(
+    name = "cov13_asset_cc",
+    srcs = ["native/asset_triple.c"],
+    hdrs = ["native/asset_triple.h"],
+)
+
+cc_shared_library(
+    name = "cov13_asset",
+    visibility = ["//native_asset_plugin:__pkg__"],
+    deps = [":cov13_asset_cc"],
+)
+
 flutter_integration_test(
     name = "app_test",
     package_name = "integration_android",
@@ -48,6 +62,7 @@ flutter_integration_test(
     deps = [
         "//android_greeting_plugin",
         "//libs/cov13font",
+        "//native_asset_plugin",
         "@deps//:flutter",
         "@deps//:flutter_localizations",
         "@deps//:flutter_test",
