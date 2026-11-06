@@ -20,6 +20,46 @@ import '../kernel_filter.dart';
 import '../sha256.dart';
 import 'incr_fkc_test_support.dart';
 
+/// A session factory whose every server plays [script] and is recorded in
+/// [sessions].
+SessionFactory scripted(
+  List<FakeSession> sessions,
+  List<CompileResult> script,
+) => (fs, full, inc, cwd, {devIncremental = false}) async {
+  final s = FakeSession(
+    fullDill: full,
+    dillBytes: utf8.encode('dill'),
+    script: script,
+  );
+  sessions.add(s);
+  return s;
+};
+
+/// A compile result with [errors] and the compiler's [depLines].
+CompileResult compiled(List<String> depLines, {int errors = 0}) => (
+  errors: errors,
+  diagnostics: errors == 0 ? const [] : ['boom'],
+  depLines: depLines,
+);
+
+/// Asserts [r] failed with exit code 1 and its output contains [text].
+void expectRefused(IncrResult r, String text) {
+  expect(r.exitCode, 1);
+  expect(r.output, contains(text));
+}
+
+/// Asserts [r] succeeded, showing its output otherwise, and returns it.
+IncrResult expectOk(IncrResult r) {
+  expect(r.exitCode, 0, reason: r.output);
+  return r;
+}
+
+/// Writes [content] to `lib/[name]` and its staged twin.
+void writeBoth(Harness h, String name, String content) {
+  h.write('lib/$name', content);
+  h.write('stage/lib/$name', content);
+}
+
 void main() {
   group('configurationKey', () {
     List<String> fs(String out) => [
@@ -228,40 +268,28 @@ void main() {
 
   group('normalizeRequestDigest', () {
     final String hex = sha256Hex(utf8.encode('x'));
+    String b64(String text) => base64.encode(utf8.encode(text));
+    final List<int> raw = sha256(utf8.encode('x'));
 
     test('accepts the forms Bazel and the tests send', () {
-      expect(normalizeRequestDigest(hex), hex);
-      expect(normalizeRequestDigest(hex.toUpperCase()), hex);
-      expect(normalizeRequestDigest(base64.encode(utf8.encode(hex))), hex);
-      expect(
-        normalizeRequestDigest(base64.encode(utf8.encode(hex.toUpperCase()))),
-        hex,
-      );
-      expect(
-        normalizeRequestDigest(
-          base64.encode([
-            for (var i = 0; i < 64; i += 2)
-              int.parse(hex.substring(i, i + 2), radix: 16),
-          ]),
-        ),
-        hex,
-      );
+      final forms = [hex, hex.toUpperCase(), b64(hex), base64.encode(raw)];
+      for (final form in [...forms, b64(hex.toUpperCase())]) {
+        expect(normalizeRequestDigest(form), hex, reason: form);
+      }
     });
 
     test('rejects everything else', () {
-      expect(normalizeRequestDigest(null), isNull);
-      expect(normalizeRequestDigest(''), isNull);
-      expect(normalizeRequestDigest('not-a-digest'), isNull);
-      expect(normalizeRequestDigest(hex.substring(1)), isNull);
-      expect(
-        normalizeRequestDigest(base64.encode(utf8.encode('z' * 64))),
-        isNull,
-      );
-      expect(
-        normalizeRequestDigest(base64.encode(utf8.encode(hex.substring(2)))),
-        isNull,
-      );
-      expect(normalizeRequestDigest(base64.encode(List.filled(48, 7))), isNull);
+      for (final bad in [
+        null,
+        '',
+        'not-a-digest',
+        hex.substring(1),
+        b64('z' * 64),
+        b64(hex.substring(2)),
+        base64.encode(List.filled(48, 7)),
+      ]) {
+        expect(normalizeRequestDigest(bad), isNull, reason: '$bad');
+      }
     });
   });
 
@@ -333,8 +361,7 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok()]),
       );
-      final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 0, reason: result.output);
+      final IncrResult result = expectOk(await worker.handleRequest(h.argv, h.inputs));
       expect(result.output, isEmpty);
       expect(sessions, hasLength(1));
       expect(sessions.single.commands, [
@@ -353,12 +380,9 @@ void main() {
           cwd: h.cwd,
           sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
         );
-        IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-        expect(result.exitCode, 0, reason: result.output);
-        h.write('stage/lib/a.dart', 'int get answer => 43;\n');
-        h.write('lib/a.dart', 'int get answer => 43;\n');
-        result = await worker.handleRequest(h.argv, h.inputs);
-        expect(result.exitCode, 0, reason: result.output);
+        expectOk(await worker.handleRequest(h.argv, h.inputs));
+        writeBoth(h, 'a.dart', 'int get answer => 43;\n');
+        expectOk(await worker.handleRequest(h.argv, h.inputs));
         expect(sessions, hasLength(1));
         expect(sessions.single.commands, [
           'compile package:app/main.dart',
@@ -465,8 +489,7 @@ void main() {
           cwd: h.cwd,
           sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
         );
-        IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-        expect(result.exitCode, 0, reason: result.output);
+        IncrResult result = expectOk(await worker.handleRequest(h.argv, h.inputs));
         final List<String> argv2 = [
           for (final a in h.argv) a == 'out/app.dill' ? 'out/other.dill' : a,
         ];
@@ -489,12 +512,9 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
-      IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 0, reason: result.output);
-      h.write('stage/lib/a.dart', '// a comment\nint get answer => 42;\n');
-      h.write('lib/a.dart', '// a comment\nint get answer => 42;\n');
-      result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 0, reason: result.output);
+      expectOk(await worker.handleRequest(h.argv, h.inputs));
+      writeBoth(h, 'a.dart', '// a comment\nint get answer => 42;\n');
+      expectOk(await worker.handleRequest(h.argv, h.inputs));
       expect(
         sessions.single.commands.where((c) => c.contains('lib/a.dart')),
         hasLength(1),
@@ -515,8 +535,7 @@ void main() {
           .length;
 
       void edit() {
-        h.write('stage/lib/a.dart', edited);
-        h.write('lib/a.dart', edited);
+        writeBoth(h, 'a.dart', edited);
       }
 
       Future<void> coldWith(Map<String, String> digests) async {
@@ -601,23 +620,16 @@ void main() {
       // prints as base64: 88 characters that decode to 64.
       String bazelForm(String hex) => base64.encode(utf8.encode(hex));
 
-      test('a Bazel-form digest is trusted without reading contents', () async {
-        final Map<String, String> digests = {
-          for (final e in digestsOf(h).entries) e.key: bazelForm(e.value),
-        };
-        expect(digests.values.first, hasLength(88));
+      Map<String, String> bazelDigests() => {
+        for (final e in digestsOf(h).entries) e.key: bazelForm(e.value),
+      };
+
+      test('a Bazel-form digest is trusted until it changes', () async {
+        final Map<String, String> digests = bazelDigests();
         await coldWith(digests);
         edit();
         await warmWith(digests);
         expect(deltas(), 0, reason: 'unchanged digest, so no contents read');
-      });
-
-      test('a changed Bazel-form digest recompiles', () async {
-        final Map<String, String> digests = {
-          for (final e in digestsOf(h).entries) e.key: bazelForm(e.value),
-        };
-        await coldWith(digests);
-        edit();
         await warmWith({
           ...digests,
           'lib/a.dart': bazelForm(fake),
@@ -626,29 +638,16 @@ void main() {
         expect(deltas(), 1);
       });
 
-      test('a request with no digests reads each source once', () async {
-        await coldWith(const {});
-        final Map<String, int> reads = await countReads(
-          () => warmWith(const {}),
-        );
-        expect(reads, isNotEmpty);
-        expect(reads.values, everyElement(1), reason: '$reads');
-      });
-
-      test('a Bazel-form digest leaves the guard reading once', () async {
-        final Map<String, String> digests = {
-          for (final e in digestsOf(h).entries) e.key: bazelForm(e.value),
-        };
-        await coldWith(digests);
-        final Map<String, int> reads = await countReads(
-          () => warmWith(digests),
-        );
-        expect(
-          reads.values,
-          everyElement(lessThanOrEqualTo(1)),
-          reason: '$reads',
-        );
-      });
+      for (final bazel in [false, true]) {
+        test('a warm request reads a source at most once ($bazel)', () async {
+          final Map<String, String> digests = bazel ? bazelDigests() : {};
+          await coldWith(digests);
+          final Map<String, int> reads = await countReads(
+            () => warmWith(digests),
+          );
+          expect(reads.values, allOf(isNotEmpty, everyElement(1)));
+        });
+      }
 
       for (final MapEntry<String, String?> bad in <String, String?>{
         'no digest': null,
@@ -701,11 +700,9 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
-      IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 0, reason: result.output);
+      expectOk(await worker.handleRequest(h.argv, h.inputs));
       h.write('pkg_config.json', '{"v":2}\n');
-      result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 0, reason: result.output);
+      expectOk(await worker.handleRequest(h.argv, h.inputs));
       expect(sessions, hasLength(2));
       expect(sessions[0].closed, isTrue);
       expect(sessions[1].commands.first, 'compile package:app/main.dart');
@@ -727,19 +724,14 @@ void main() {
             ],
           ),
         );
-        IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-        expect(result.exitCode, 0, reason: result.output);
-        h.write('stage/lib/a.dart', 'broken syntax (((');
-        h.write('lib/a.dart', 'broken syntax (((');
+        IncrResult result = expectOk(await worker.handleRequest(h.argv, h.inputs));
+        writeBoth(h, 'a.dart', 'broken syntax (((');
         result = await worker.handleRequest(h.argv, h.inputs);
-        expect(result.exitCode, 1);
-        expect(result.output, contains(error));
+        expectRefused(result, error);
         expect(sessions.single.commands, contains('reject'));
         // The failed request keeps the last accepted hashes ...
-        h.write('stage/lib/a.dart', 'int get answer => 44;\n');
-        h.write('lib/a.dart', 'int get answer => 44;\n');
-        result = await worker.handleRequest(h.argv, h.inputs);
-        expect(result.exitCode, 0, reason: result.output);
+        writeBoth(h, 'a.dart', 'int get answer => 44;\n');
+        result = expectOk(await worker.handleRequest(h.argv, h.inputs));
         // ... so the repair still recompiles the file (never accepted
         // broken): one failed attempt plus the repair.
         expect(
@@ -766,11 +758,9 @@ void main() {
         ),
       );
       final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 1);
-      expect(result.output, contains('reset blew up'));
+      expectRefused(result, 'reset blew up');
       expect(sessions.single.closed, isTrue);
-      final IncrResult retry = await worker.handleRequest(h.argv, h.inputs);
-      expect(retry.exitCode, 0, reason: retry.output);
+      expectOk(await worker.handleRequest(h.argv, h.inputs));
       expect(sessions, hasLength(2));
     });
 
@@ -780,11 +770,9 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
       );
-      IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 0, reason: result.output);
+      expectOk(await worker.handleRequest(h.argv, h.inputs));
       sessions.single.dead = true;
-      result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 0, reason: result.output);
+      expectOk(await worker.handleRequest(h.argv, h.inputs));
       expect(sessions, hasLength(2));
     });
   });
@@ -806,15 +794,7 @@ void main() {
       worker = IncrWorker(
         cwd: h.cwd,
         tempParent: h.cwd,
-        sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
-          final s = FakeSession(
-            fullDill: full,
-            dillBytes: utf8.encode('dill'),
-            script: [h.ok(), h.ok()],
-          );
-          sessions.add(s);
-          return s;
-        },
+        sessions: scripted(sessions, [h.ok(), h.ok()]),
       );
     });
 
@@ -824,11 +804,9 @@ void main() {
     });
 
     test('a disallowed directive fails before the compiler runs', () async {
-      h.write('lib/main.dart', "import 'file:///etc/hostname';\n");
-      h.write('stage/lib/main.dart', "import 'file:///etc/hostname';\n");
+      writeBoth(h, 'main.dart', "import 'file:///etc/hostname';\n");
       final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 1);
-      expect(result.output, contains('lib/main.dart'));
+      expectRefused(result, 'lib/main.dart');
       expect(result.output, contains('is not a declared input'));
       expect(sessions, isEmpty);
     });
@@ -844,15 +822,13 @@ void main() {
           digests: digests,
         );
         expect(first.exitCode, 0);
-        h.write('lib/main.dart', "import 'file:///etc/hostname';\n");
-        h.write('stage/lib/main.dart', "import 'file:///etc/hostname';\n");
+        writeBoth(h, 'main.dart', "import 'file:///etc/hostname';\n");
         final IncrResult result = await worker.handleRequest(
           h.argv,
           h.inputs,
           digests: digests,
         );
-        expect(result.exitCode, 1);
-        expect(result.output, contains('is not a declared input'));
+        expectRefused(result, 'is not a declared input');
       },
     );
 
@@ -860,29 +836,13 @@ void main() {
       worker = IncrWorker(
         cwd: h.cwd,
         tempParent: h.cwd,
-        sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
-          final s = FakeSession(
-            fullDill: full,
-            dillBytes: utf8.encode('dill'),
-            script: [
-              (
-                errors: 0,
-                diagnostics: const [],
-                depLines: [...h.depLines(), '+file:///etc/hostname'],
-              ),
-              h.ok(),
-            ],
-          );
-          sessions.add(s);
-          return s;
-        },
+        sessions: scripted(sessions, [
+          compiled([...h.depLines(), '+file:///etc/hostname']),
+          h.ok(),
+        ]),
       );
       final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 1);
-      expect(
-        result.output,
-        contains(undeclaredReadMessage('+file:///etc/hostname')),
-      );
+      expectRefused(result, undeclaredReadMessage('+file:///etc/hostname'));
       expect(File('${h.cwd}/out/app.dill').existsSync(), isFalse);
     });
 
@@ -919,27 +879,18 @@ void main() {
         worker = IncrWorker(
           cwd: h.cwd,
           tempParent: h.cwd,
-          sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
-            final s = FakeSession(
-              fullDill: full,
-              dillBytes: utf8.encode('dill'),
-              script: [
-                (errors: 0, diagnostics: const [], depLines: mirrorReads),
-                (errors: 0, diagnostics: const [], depLines: mirrorReads),
-              ],
-            );
-            sessions.add(s);
-            return s;
-          },
+          sessions: scripted(sessions, [
+            compiled(mirrorReads),
+            compiled(mirrorReads),
+          ]),
         );
         final IncrResult result = await worker.handleRequest(
           h.argvWithRoot(mirror),
           h.inputs,
         );
-        expect(result.exitCode, 1);
-        expect(
-          result.output,
-          contains(undeclaredReadMessage('+file://$mirror/lib/new.dart')),
+        expectRefused(
+          result,
+          undeclaredReadMessage('+file://$mirror/lib/new.dart'),
         );
         expect(File('${h.cwd}/out/app.dill').existsSync(), isFalse);
       },
@@ -950,34 +901,19 @@ void main() {
       () async {
         worker = IncrWorker(
           cwd: h.cwd,
-          sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
-            final s = FakeSession(
-              fullDill: full,
-              dillBytes: utf8.encode('dill'),
-              script: [
-                h.ok(),
-                h.ok(),
-                (
-                  errors: 1,
-                  diagnostics: ['boom'],
-                  depLines: [...h.depLines(), '+file:///etc/sneak.dart'],
-                ),
-              ],
-            );
-            sessions.add(s);
-            return s;
-          },
+          sessions: scripted(sessions, [
+            h.ok(),
+            h.ok(),
+            compiled([
+              ...h.depLines(),
+              '+file:///etc/sneak.dart',
+            ], errors: 1),
+          ]),
         );
-        IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-        expect(result.exitCode, 0, reason: result.output);
-        h.write('stage/lib/a.dart', 'int get answer => 45;\n');
-        h.write('lib/a.dart', 'int get answer => 45;\n');
+        IncrResult result = expectOk(await worker.handleRequest(h.argv, h.inputs));
+        writeBoth(h, 'a.dart', 'int get answer => 45;\n');
         result = await worker.handleRequest(h.argv, h.inputs);
-        expect(result.exitCode, 1);
-        expect(
-          result.output,
-          contains(undeclaredReadMessage('+file:///etc/sneak.dart')),
-        );
+        expectRefused(result, undeclaredReadMessage('+file:///etc/sneak.dart'));
       },
     );
 
@@ -985,22 +921,13 @@ void main() {
       worker = IncrWorker(
         cwd: h.cwd,
         tempParent: h.cwd,
-        sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
-          final s = FakeSession(
-            fullDill: full,
-            dillBytes: utf8.encode('dill'),
-            script: [
-              (errors: 0, diagnostics: const [], depLines: const []),
-              (errors: 0, diagnostics: const [], depLines: const []),
-            ],
-          );
-          sessions.add(s);
-          return s;
-        },
+        sessions: scripted(sessions, [
+          compiled(const []),
+          compiled(const []),
+        ]),
       );
       final IncrResult result = await worker.handleRequest(h.argv, h.inputs);
-      expect(result.exitCode, 1);
-      expect(result.output, contains(noDependencyReadsMessage()));
+      expectRefused(result, noDependencyReadsMessage());
     });
   });
 
@@ -1017,15 +944,7 @@ void main() {
         cwd: h.cwd,
         tempParent: h.cwd,
         maxServers: 1,
-        sessions: (fs, full, inc, cwd, {devIncremental = false}) async {
-          final s = FakeSession(
-            fullDill: full,
-            dillBytes: utf8.encode('dill'),
-            script: [h.ok(), h.ok()],
-          );
-          sessions.add(s);
-          return s;
-        },
+        sessions: scripted(sessions, [h.ok(), h.ok()]),
       );
       addTearDown(worker.closeAll);
       final List<String> other = [
@@ -1270,17 +1189,6 @@ class CountingFile implements File {
     _reads[_real.path] = (_reads[_real.path] ?? 0) + 1;
     return _real.readAsBytesSync();
   }
-
-  @override
-  String readAsStringSync({Encoding encoding = utf8}) =>
-      _real.readAsStringSync(encoding: encoding);
-
-  @override
-  List<String> readAsLinesSync({Encoding encoding = utf8}) =>
-      _real.readAsLinesSync(encoding: encoding);
-
-  @override
-  bool existsSync() => _real.existsSync();
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>
