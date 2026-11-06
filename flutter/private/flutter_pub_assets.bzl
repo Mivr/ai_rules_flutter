@@ -583,26 +583,44 @@ def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
         bound,
     )
 
-def shader_condition_entries(normalized_shaders, parsed_shaders):
-    """The per-file condition entries for a spoke's `pkg_shaders`.
+def pub_shader_condition_entries(package_name, normalized_shaders, parsed_shaders, pkg_assets):
+    """The per-file condition entries for a spoke's `pkg_shaders`, conflicts refused.
 
     A shader entry carries the same `platforms` / `flavors` conditions as an
     asset entry, keyed the same way (`":" + path`), because the spoke passes
-    both channels through `pkg_asset_platforms` / `pkg_asset_flavors`.
-    Normalization keeps one entry per parsed entry in order, so the two lists
-    pair by index. The caller merges the entries exactly as asset entries
-    are merged (`merge_pub_asset_conditions`), flavor-conflict refusal
-    included.
+    both channels through one pair of attrs, `pkg_asset_platforms` and
+    `pkg_asset_flavors`. The caller merges these entries together with the
+    asset entries exactly as asset entries are merged
+    (`build_pkg_asset_conditions`), flavor-conflict refusal included.
+
+    flutter_tools bundles an asset and a shader through different channels
+    with different keys, but a rules_flutter bundle stages the same file once
+    and would let one channel silently stand in for the other. Both channels
+    share the condition attrs, so one file in both also has no single set of
+    conditions. The fetch therefore fails naming the package, the file and
+    both sections: list it in one section only.
+
+    Normalization keeps one entry per parsed entry in order, so the two
+    shader lists pair by index.
 
     Args:
+        package_name: The pub package the entries come from.
         normalized_shaders: `struct(path, key)` entries from
             `normalize_spoke_shaders`.
         parsed_shaders: The parsed `struct(path, is_map, flavors, platforms)`
             entries they came from, in the same order.
+        pkg_assets: The spoke's `":" + path` asset dict.
 
     Returns:
         A list of `struct(path, flavors, platforms)`, one per shader entry.
     """
+    for entry in normalized_shaders:
+        if ":" + entry.path in pkg_assets:
+            fail((
+                "flutter.pub spoke for \"{pkg}\": pubspec.yaml lists {path} " +
+                "as both a `flutter.assets` file and a `flutter.shaders` " +
+                "entry; list it in one section only."
+            ).format(pkg = package_name, path = entry.path))
     return [
         struct(
             path = entry.path,
@@ -611,26 +629,3 @@ def shader_condition_entries(normalized_shaders, parsed_shaders):
         )
         for index, entry in enumerate(normalized_shaders)
     ]
-
-def check_pub_asset_shader_conflict(package_name, pkg_assets, pkg_shaders):
-    """Fail the spoke fetch when one file is both a pub asset and a pub shader.
-
-    flutter_tools bundles an asset and a shader through different channels
-    with different keys, but a rules_flutter bundle stages the same file once
-    and would let one channel silently stand in for the other. Both channels
-    share the condition attrs, so one file in both also has no single set of
-    conditions. Naming the package, the file and both sections states the
-    fix: list it in one section only.
-
-    Args:
-        package_name: The pub package the entries come from.
-        pkg_assets: The spoke's `":" + path` asset dict.
-        pkg_shaders: The spoke's `":" + path` shader dict.
-    """
-    for key in pkg_shaders:
-        if key in pkg_assets:
-            fail((
-                "flutter.pub spoke for \"{pkg}\": pubspec.yaml lists {path} " +
-                "as both a `flutter.assets` file and a `flutter.shaders` " +
-                "entry; list it in one section only."
-            ).format(pkg = package_name, path = key[1:]))
