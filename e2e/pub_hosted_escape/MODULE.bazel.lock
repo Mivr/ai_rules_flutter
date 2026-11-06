@@ -11371,7 +11371,7 @@
     },
     "@@ai_rules_flutter+//flutter:extensions.bzl%flutter": {
       "general": {
-        "bzlTransitiveDigest": "KXaa1+NK5YzkI/7RvQKfFZOVt8JlwoIKbdTHfW3h0bI=",
+        "bzlTransitiveDigest": "KhyoeRVRM6eEBo6rRsI0eUyznKr09rIua1KF86V6kNI=",
         "usagesDigest": "feD8V8EqKnfiL4leJ3x7FHg6n3njJCRBKVG2fsJCrSY=",
         "recordedInputs": [
           "REPO_MAPPING:ai_rules_dart+,dart_pub_scanner ai_rules_dart++dart+dart_pub_scanner",
@@ -11388,13 +11388,13 @@
           "REPO_MAPPING:rules_cc+,platforms platforms",
           "REPO_MAPPING:rules_cc+,rules_cc rules_cc+",
           "REPO_MAPPING:rules_cc++compatibility_proxy+cc_compatibility_proxy,rules_cc rules_cc+",
-          "FILE:@@//locks/pubspec.ok.lock 49365e2de6c6837b1b783bc99fe81598d91add6d50e3a2da5f6268c5a9954bc8",
-          "FILE:@@//locks/pubspec.evil_hard_out.lock f138991844ac6a4ba2640116bd98b7806e59d52dd5ef157c3ae4842e767e9c1f",
-          "FILE:@@//locks/pubspec.evil_hard_in.lock 91e796e938203ac73b9262060fa7563537ca1e4bd556b48a770c921dbe3adc49",
-          "FILE:@@//locks/pubspec.evil_abs.lock ace46945423020b4dd5c14f548150f521e7159c43de9b89af474b347bb264290",
-          "FILE:@@//locks/pubspec.evil_esc.lock 1c6df479e487a72ef92e1e2f67f495527f51eba2df103cc5769704e207200dc5",
-          "FILE:@@//locks/pubspec.evil_path_abs.lock ad826dde075ac1be9792d8c865bc076303ae5d2ed24d533ad7c8c603c83f77aa",
-          "FILE:@@//locks/pubspec.evil_path_dotdot.lock 31f21da97bfd0e5aeb179843ff90e1b65a93fd45c067c7be703ac39328ab35b4",
+          "FILE:@@//locks/pubspec.ok.lock 698a76e6ef4c07396224e9bcb9f1bd2276d50cb7b14bb00dfd136ef7bfd8e40d",
+          "FILE:@@//locks/pubspec.evil_hard_out.lock 2a01333c3c4bd38fd0cb73c96a7dcf1c3ba1176361831d4351fb9036cc3cace2",
+          "FILE:@@//locks/pubspec.evil_hard_in.lock 4f5cd310529411874c1028f3a3a44779f4a2e275fb19f8a72f5e107ab02cf149",
+          "FILE:@@//locks/pubspec.evil_abs.lock 7c95c1247f37a69540a216f995755b4d0e933ca7dd40a8826d927fee61d09409",
+          "FILE:@@//locks/pubspec.evil_esc.lock 9aa3d14528125c734422add3c46d987b221d0a07c8c64a6889894acb02be30e6",
+          "FILE:@@//locks/pubspec.evil_path_abs.lock ed7c01194557c644e2b8e58a77a4028779ccfbfe27aa9e0ee60e73f62fa220db",
+          "FILE:@@//locks/pubspec.evil_path_dotdot.lock 85414445bf88f128bec4c6ae8c955ebb941bef1630d957557f08778ade7df3e1",
           "FILE:@@ai_rules_flutter+//tools/dev_tool/pubspec.lock 45215f501fd1efa31e9ba2ba59c2319e4ab1ad9f4594f7d8dc1e427fa722da67",
           "FILE:@@ai_rules_flutter+//flutter/private/gen_l10n/pubspec.lock e0b93104e8690fc41b26a845be6757a0f8f6d24da9aece4175ba61dc38248c2c",
           "REPO_MAPPING:ai_rules_dart+,dart_linux-x64 ai_rules_dart++dart+dart_linux-x64"
@@ -12497,7 +12497,7 @@
               "package_name": "ok_clean",
               "version": "1.0.0",
               "sha256": "8321508ddcea038d48f2d379283a26b417dab693a7acbf4f9a0da449ef407b39",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "hub_name": "ok_deps",
               "lock_packages": [
                 "ok_clean",
@@ -12526,7 +12526,7 @@
               "version": "1.0.0",
               "hub_name": "ok_deps",
               "sha256": "8321508ddcea038d48f2d379283a26b417dab693a7acbf4f9a0da449ef407b39",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "android_maven_deps": {},
               "android_maven_ignore": []
             }
@@ -12537,7 +12537,7 @@
               "package_name": "ok_inlink",
               "version": "1.0.0",
               "sha256": "a19d8e5fefcfdaff118d5a6dd17a391ab523ada2a0a3f35ed915a922c5b5e060",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "hub_name": "ok_deps",
               "lock_packages": [
                 "ok_clean",
@@ -12566,7 +12566,7 @@
               "version": "1.0.0",
               "hub_name": "ok_deps",
               "sha256": "a19d8e5fefcfdaff118d5a6dd17a391ab523ada2a0a3f35ed915a922c5b5e060",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "android_maven_deps": {},
               "android_maven_ignore": []
             }
@@ -12592,7 +12592,7 @@
               "package_name": "evil_hard_out",
               "version": "1.0.0",
               "sha256": "c90cb2ff161872ee5bdf9c9f7e42e76e1d6d54618356e8d5b121c4ca3461723c",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "hub_name": "eh_out",
               "lock_packages": [
                 "evil_hard_out"
@@ -12620,7 +12620,7 @@
               "version": "1.0.0",
               "hub_name": "eh_out",
               "sha256": "c90cb2ff161872ee5bdf9c9f7e42e76e1d6d54618356e8d5b121c4ca3461723c",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "android_maven_deps": {},
               "android_maven_ignore": []
             }
@@ -12646,7 +12646,7 @@
               "package_name": "evil_hard_in",
               "version": "1.0.0",
               "sha256": "2e48a6e0dc5094a18d70e16b23851fa980912577b97afb10c3b664fe3c625903",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "hub_name": "eh_in",
               "lock_packages": [
                 "evil_hard_in"
@@ -12674,7 +12674,7 @@
               "version": "1.0.0",
               "hub_name": "eh_in",
               "sha256": "2e48a6e0dc5094a18d70e16b23851fa980912577b97afb10c3b664fe3c625903",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "android_maven_deps": {},
               "android_maven_ignore": []
             }
@@ -12700,7 +12700,7 @@
               "package_name": "evil_abs",
               "version": "1.0.0",
               "sha256": "e0352e4993c543f0ba90bcd757d607357645bfc35be084dc026c56961d3c6719",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "hub_name": "eabs",
               "lock_packages": [
                 "evil_abs"
@@ -12728,7 +12728,7 @@
               "version": "1.0.0",
               "hub_name": "eabs",
               "sha256": "e0352e4993c543f0ba90bcd757d607357645bfc35be084dc026c56961d3c6719",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "android_maven_deps": {},
               "android_maven_ignore": []
             }
@@ -12754,7 +12754,7 @@
               "package_name": "evil_esc",
               "version": "1.0.0",
               "sha256": "9bc0a20957728603bf6822c4931540dfe466db1268ef564813fb276dc5a5674a",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "hub_name": "eesc",
               "lock_packages": [
                 "evil_esc"
@@ -12782,7 +12782,7 @@
               "version": "1.0.0",
               "hub_name": "eesc",
               "sha256": "9bc0a20957728603bf6822c4931540dfe466db1268ef564813fb276dc5a5674a",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "android_maven_deps": {},
               "android_maven_ignore": []
             }
@@ -12808,7 +12808,7 @@
               "package_name": "evil_path_abs",
               "version": "1.0.0",
               "sha256": "a747a5abdbce360f782b584bc7ee24ac776ef4af86cfeef94627683954db4584",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "hub_name": "ep_abs",
               "lock_packages": [
                 "evil_path_abs"
@@ -12836,7 +12836,7 @@
               "version": "1.0.0",
               "hub_name": "ep_abs",
               "sha256": "a747a5abdbce360f782b584bc7ee24ac776ef4af86cfeef94627683954db4584",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "android_maven_deps": {},
               "android_maven_ignore": []
             }
@@ -12862,7 +12862,7 @@
               "package_name": "evil_path_dotdot",
               "version": "1.0.0",
               "sha256": "07d64d557c0f0d3ba51791e7f1d76c60a916a22443b9b9fa741aff78d76be878",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "hub_name": "ep_dotdot",
               "lock_packages": [
                 "evil_path_dotdot"
@@ -12890,7 +12890,7 @@
               "version": "1.0.0",
               "hub_name": "ep_dotdot",
               "sha256": "07d64d557c0f0d3ba51791e7f1d76c60a916a22443b9b9fa741aff78d76be878",
-              "base_url": "file://FIXTURES_ROOT",
+              "base_url": "file:///var/tmp/rdf-ctl/work/coder/rules_flutter-162-a4/e2e/pub_hosted_escape/fixtures",
               "android_maven_deps": {},
               "android_maven_ignore": []
             }
