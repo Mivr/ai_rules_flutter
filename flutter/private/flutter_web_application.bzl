@@ -937,7 +937,12 @@ def _web_substitute_templates(ctx, flutter_sdk_info, is_debug, index_template, b
             template_config_file.path,
         ],
         inputs = depset(
-            direct = builtins.template_inputs + [index_template, bootstrap_template, template_config_file, ctx.executable._web_template_tool],
+            direct = builtins.template_inputs + [
+                index_template,
+                bootstrap_template,
+                template_config_file,
+                ctx.executable._web_template_tool,
+            ],
             transitive = [flutter_sdk_info.dart_vm_files],
         ),
         outputs = [index_html, bootstrap_js] + ([dev_bootstrap_js] if dev_bootstrap_js else []),
@@ -1128,7 +1133,14 @@ def _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets):
     bundle_config_file = ctx.actions.declare_file(ctx.label.name + "_web_bundle_config.json")
     ctx.actions.write(bundle_config_file, json.encode(config))
 
-    all_inputs = program.compile_outputs + program.dart2js_dirs + bundle.engine_inputs + bundle.web_asset_files + [flutter_assets, bundle.index_html, bundle.bootstrap_js, bundle.manifest_json, bundle.version_json, bundle_config_file]
+    all_inputs = program.compile_outputs + program.dart2js_dirs + bundle.engine_inputs + bundle.web_asset_files + [
+        flutter_assets,
+        bundle.index_html,
+        bundle.bootstrap_js,
+        bundle.manifest_json,
+        bundle.version_json,
+        bundle_config_file,
+    ]
     if bundle.service_worker_file:
         all_inputs.append(bundle.service_worker_file)
 
@@ -1495,8 +1507,22 @@ def _flutter_web_bundle_impl(ctx):
     flutter_js_file, renderer_files = _web_collect_engine_files(ctx)
 
     # Step 6b: Substitute both templates in one action.
-    builtins = _web_template_builtins(ctx, flutter_sdk_info, program.builds, templates.index_template, templates.bootstrap_template, flutter_js_file)
-    index_html, bootstrap_js, dev_bootstrap_js = _web_substitute_templates(ctx, flutter_sdk_info, is_debug, templates.index_template, templates.bootstrap_template, builtins)
+    builtins = _web_template_builtins(
+        ctx,
+        flutter_sdk_info,
+        program.builds,
+        templates.index_template,
+        templates.bootstrap_template,
+        flutter_js_file,
+    )
+    index_html, bootstrap_js, dev_bootstrap_js = _web_substitute_templates(
+        ctx,
+        flutter_sdk_info,
+        is_debug,
+        templates.index_template,
+        templates.bootstrap_template,
+        builtins,
+    )
 
     # Step 7: Assemble into output directory using the Dart bundler tool.
     bundle = _web_assemble_copies(ctx, program, struct(
@@ -1509,7 +1535,8 @@ def _flutter_web_bundle_impl(ctx):
         flutter_js_file = flutter_js_file,
         renderer_files = renderer_files,
     ))
-    output_dir, _dump_info_file, output_groups = _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets)
+    bundler = _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets)
+    output_dir, _dump_info_file, output_groups = bundler
 
     analyzable_info = _web_analyzable_info(ctx, lib_root)
 

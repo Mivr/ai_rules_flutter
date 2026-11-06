@@ -17,12 +17,14 @@ load(":xtool_version.bzl", "FlutterXtoolVersionInfo")
 
 # -- Shared bundle helpers -----------------------------------------------------
 
+_SOURCE_SUFFIXES = (".swift", ".m", ".mm", ".c", ".cc", ".cpp")
+
 def _classify_runner_file(seen, buckets, f):
     """Sort one file into the runner's source/header/modulemap buckets, deduplicated by path."""
     if f.path in seen:
         return
     seen[f.path] = True
-    if f.path.endswith(".swift") or f.path.endswith(".m") or f.path.endswith(".mm") or f.path.endswith(".c") or f.path.endswith(".cc") or f.path.endswith(".cpp"):
+    if f.path.endswith(_SOURCE_SUFFIXES):
         buckets["sources"].append(f)
     elif f.path.endswith(".h"):
         buckets["headers"].append(f)
@@ -52,7 +54,15 @@ def _collect_runner_linker_sdk_names(target, sdk_frameworks, seen_sdk_fw, sdk_dy
             elif flags[idx].startswith("-l") and len(flags[idx]) > 2:
                 _add_sdk_name(seen_sdk_dylib, sdk_dylibs, flags[idx][2:])
 
-def _collect_runner_dep_files(ctx, seen, buckets, sdk_frameworks, seen_sdk_fw, sdk_dylibs, seen_sdk_dylib, transitive_sets):
+def _collect_runner_dep_files(
+        ctx,
+        seen,
+        buckets,
+        sdk_frameworks,
+        seen_sdk_fw,
+        sdk_dylibs,
+        seen_sdk_dylib,
+        transitive_sets):
     """Classify plugin/dep files and record their SDK frameworks, dylibs and header sets."""
     for target in ctx.attr.plugins + ctx.attr.deps:
         for f in target[DefaultInfo].files.to_list():
@@ -82,7 +92,16 @@ def _collect_runner_compile_inputs(ctx):
     buckets = {"sources": sources, "headers": headers, "modulemaps": modulemaps}
 
     _collect_runner_own_files(ctx, seen, buckets)
-    _collect_runner_dep_files(ctx, seen, buckets, sdk_frameworks, seen_sdk_fw, sdk_dylibs, seen_sdk_dylib, transitive_sets)
+    _collect_runner_dep_files(
+        ctx,
+        seen,
+        buckets,
+        sdk_frameworks,
+        seen_sdk_fw,
+        sdk_dylibs,
+        seen_sdk_dylib,
+        transitive_sets,
+    )
 
     return sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, transitive_sets
 
@@ -190,7 +209,8 @@ def _xtool_sdk_availability(ctx):
 def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, frameworks, sdk_transitive):
     """Compile the runner executable via `xtool_pack compile-runner`; returns its File."""
     executable_file = ctx.actions.declare_file("%s_runner_bin" % ctx.label.name)
-    sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, plugin_transitive_sets = _collect_runner_compile_inputs(ctx)
+    collected = _collect_runner_compile_inputs(ctx)
+    sources, headers, modulemaps, sdk_frameworks, sdk_dylibs, plugin_transitive_sets = collected
 
     runner_args = ctx.actions.args()
     runner_args.add("compile-runner")
@@ -230,7 +250,15 @@ def _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, framewor
     )
     return executable_file
 
-def _add_xtool_bundle_content_args(ctx, args, families, fw_dirs, native_libs, resources, additional_content_pairs, infoplists):
+def _add_xtool_bundle_content_args(
+        ctx,
+        args,
+        families,
+        fw_dirs,
+        native_libs,
+        resources,
+        additional_content_pairs,
+        infoplists):
     """Append the bundle payload flags (families, defines, plists, frameworks, libs, resources)."""
     for fam in families:
         args.add("--family", fam)
@@ -386,7 +414,15 @@ def run_xtool_pack_bundle(
 
     executable_file = ctx.file.executable
     if not executable_file:
-        executable_file = _compile_xtool_runner(ctx, platform, app_name, arch, sdk_available, frameworks, sdk_transitive)
+        executable_file = _compile_xtool_runner(
+            ctx,
+            platform,
+            app_name,
+            arch,
+            sdk_available,
+            frameworks,
+            sdk_transitive,
+        )
 
     args = _xtool_bundle_base_args(ctx, platform, app_name, executable_file, archive_file, app_dir)
 
@@ -401,7 +437,16 @@ def run_xtool_pack_bundle(
     if ctx.attr.version:
         _add_xtool_version_args(ctx, args, direct_inputs)
 
-    _add_xtool_bundle_content_args(ctx, args, families, frameworks.bundle.dirs, native_libs, resources, additional_content_pairs, infoplists)
+    _add_xtool_bundle_content_args(
+        ctx,
+        args,
+        families,
+        frameworks.bundle.dirs,
+        native_libs,
+        resources,
+        additional_content_pairs,
+        infoplists,
+    )
 
     _add_xtool_signing_args(ctx, args, direct_inputs)
 
