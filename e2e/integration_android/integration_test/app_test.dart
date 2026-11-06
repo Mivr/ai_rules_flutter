@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:android_greeting_plugin/android_greeting_plugin.dart';
 import 'package:cov13font/cov13font.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_android/l10n/app_localizations.dart';
