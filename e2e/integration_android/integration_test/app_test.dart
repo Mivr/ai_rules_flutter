@@ -135,9 +135,9 @@ void main() {
     );
     expect(iconParagraph.text.style?.fontFamily, 'MaterialIcons');
 
-    final manifest =
-        jsonDecode(await rootBundle.loadString('FontManifest.json'))
-            as List<Object?>;
+    final manifest = jsonDecode(
+      await rootBundle.loadString('FontManifest.json'),
+    ) as List<Object?>;
     final assetByFamily = <String, String>{
       for (final entry in manifest.cast<Map<String, Object?>>())
         entry['family']! as String:
