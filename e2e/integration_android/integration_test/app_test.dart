@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_android/l10n/app_localizations.dart';
 import 'package:integration_android/main.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:native_asset_plugin/native_asset_plugin.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -161,7 +162,11 @@ void main() {
     await loader.load();
   });
 
-  testWidgets('calls the native asset through dart:ffi', (tester) async {
+  testWidgets('calls the native asset through @Native', (tester) async {
+    expect(tripleViaNativeAsset(14), 42);
+  });
+
+  testWidgets('opens the native dep through dart:ffi', (tester) async {
     final add = DynamicLibrary.open('libadd.so')
         .lookupFunction<Int32 Function(Int32, Int32), int Function(int, int)>(
           'add',
