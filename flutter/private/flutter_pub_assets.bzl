@@ -583,15 +583,17 @@ def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
         bound,
     )
 
-def pub_shader_condition_entries(package_name, normalized_shaders, parsed_shaders, pkg_assets):
-    """The per-file condition entries for a spoke's `pkg_shaders`, conflicts refused.
+def pub_shader_condition_entries(package_name, expanded, normalized_shaders, parsed_shaders):
+    """The asset entries plus the per-file condition entries for a spoke's `pkg_shaders`.
 
     A shader entry carries the same `platforms` / `flavors` conditions as an
     asset entry, keyed the same way (`":" + path`), because the spoke passes
     both channels through one pair of attrs, `pkg_asset_platforms` and
     `pkg_asset_flavors`. The caller merges these entries together with the
     asset entries exactly as asset entries are merged
-    (`build_pkg_asset_conditions`), flavor-conflict refusal included.
+    (`build_pkg_asset_conditions`), flavor-conflict refusal included; this
+    function returns the asset entries followed by the shader entries so that
+    call takes one list.
 
     flutter_tools bundles an asset and a shader through different channels
     with different keys, but a rules_flutter bundle stages the same file once
@@ -605,23 +607,24 @@ def pub_shader_condition_entries(package_name, normalized_shaders, parsed_shader
 
     Args:
         package_name: The pub package the entries come from.
+        expanded: Per-file asset entries from `expand_pub_asset_entries`.
         normalized_shaders: `struct(path, key)` entries from
             `normalize_spoke_shaders`.
         parsed_shaders: The parsed `struct(path, is_map, flavors, platforms)`
             entries they came from, in the same order.
-        pkg_assets: The spoke's `":" + path` asset dict.
 
     Returns:
-        A list of `struct(path, flavors, platforms)`, one per shader entry.
+        `expanded` followed by a `struct(path, flavors, platforms)` per shader.
     """
+    asset_paths = {entry.path: True for entry in expanded}
     for entry in normalized_shaders:
-        if ":" + entry.path in pkg_assets:
+        if entry.path in asset_paths:
             fail((
                 "flutter.pub spoke for \"{pkg}\": pubspec.yaml lists {path} " +
                 "as both a `flutter.assets` file and a `flutter.shaders` " +
                 "entry; list it in one section only."
             ).format(pkg = package_name, path = entry.path))
-    return [
+    return expanded + [
         struct(
             path = entry.path,
             flavors = parsed_shaders[index].flavors,

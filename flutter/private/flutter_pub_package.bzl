@@ -1201,7 +1201,8 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     pkg_assets_dict = build_pkg_assets_dict(expanded)
 
     # One pair of condition attrs carries asset and shader keys alike.
-    pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(expanded + pub_shader_condition_entries(package_name, shaders, asset_block.shaders, pkg_assets_dict), package_name)
+    entries = pub_shader_condition_entries(package_name, expanded, shaders, asset_block.shaders)
+    pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(entries, package_name)
     return struct(
         fonts_json_str = spoke_fonts.fonts_json_str,
         font_files = spoke_fonts.font_files,
@@ -1209,9 +1210,7 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
         pkg_asset_platforms = pkg_asset_platforms,
         pkg_asset_flavors = pkg_asset_flavors,
         pkg_shaders = build_pkg_shaders_dict(shaders),
-        has_contributions = (
-            bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders)
-        ),
+        has_contributions = bool(asset_block.fonts) or bool(asset_block.assets) or bool(asset_block.shaders),
     )
 
 def _write_overlay_spoke(ctx, overlay_content, overlay_android_content):
