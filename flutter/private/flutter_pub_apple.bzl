@@ -1098,6 +1098,16 @@ def detect_apple_swiftpm_deps(ctx, package_name, apple):
         ),
     )
 
+def _fail_missing_apple_library(package_name, platform, suffix):
+    """Fail: the plugin's generated BUILD file lacks the platform library target."""
+    target = "{name}_apple_{platform}{suffix}".format(name = package_name, platform = platform, suffix = suffix)
+    fail(
+        "Flutter plugin {plugin}: expected a `{target}` library target to carry its SwiftPM dependencies.".format(
+            plugin = repr(package_name),
+            target = target,
+        ),
+    )
+
 def _with_apple_swiftpm_platform_deps(content, package_name, platform, labels):
     """Splice one platform's labels into its device and xtool blocks.
 
@@ -1123,10 +1133,10 @@ def _with_apple_swiftpm_platform_deps(content, package_name, platform, labels):
         marker = '    name = "{name}_apple_{platform}{suffix}",\n'.format(name = package_name, platform = platform, suffix = suffix)
         head, sep, tail = content.partition(marker)
         if not sep:
-            fail("Flutter plugin {plugin}: expected a `{target}` library target to carry its SwiftPM dependencies.".format(plugin = repr(package_name), target = "{name}_apple_{platform}{suffix}".format(name = package_name, platform = platform, suffix = suffix)))
+            _fail_missing_apple_library(package_name, platform, suffix)
         vis_head, vis_sep, vis_tail = tail.partition("\n    visibility = ")
         if not vis_sep:
-            fail("Flutter plugin {plugin}: expected a `{target}` library target to carry its SwiftPM dependencies.".format(plugin = repr(package_name), target = "{name}_apple_{platform}{suffix}".format(name = package_name, platform = platform, suffix = suffix)))
+            _fail_missing_apple_library(package_name, platform, suffix)
         content = head + sep + vis_head + "\n" + deps_block + vis_sep + vis_tail
     return content
 

@@ -189,6 +189,17 @@ bzl_library(
 )
 
 bzl_library(
+    name = "engine_support_repos",
+    srcs = ["engine_support_repos.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":artifact_urls",
+        ":download",
+        ":local_sdk",
+    ],
+)
+
+bzl_library(
     name = "flutter_android_apk_overlay",
     srcs = ["flutter_android_apk_overlay.bzl"],
     visibility = ["//visibility:public"],

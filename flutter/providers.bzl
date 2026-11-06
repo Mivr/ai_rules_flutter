@@ -138,7 +138,12 @@ def _overlay_product_fields(fields, product_tc):
             if not fields.get(k):
                 fields[k] = getattr(product_tc, k, None)
 
-def _overlay_font_subset_fields(fields, font_subset_tc, has_font_subset_type, primary_is_builtin, font_subset_is_builtin):
+def _overlay_font_subset_fields(
+        fields,
+        font_subset_tc,
+        has_font_subset_type,
+        primary_is_builtin,
+        font_subset_is_builtin):
     """Overlays `const_finder`/`font_subset`, honouring the builtin default.
 
     An explicitly declared font-subset toolchain wins over the product
@@ -186,12 +191,19 @@ def resolve_flutter_sdk_info(ctx):
     info = flutter_toolchain.flutter_sdk_info
     optional = _lookup_optional_toolchains(ctx)
 
-    if not optional.product and not optional.aot and not optional.desktop and not optional.material and not optional.font_subset and not optional.has_font_subset_type:
+    has_sub_toolchain = optional.product or optional.aot or optional.desktop or optional.material
+    if not has_sub_toolchain and not optional.font_subset and not optional.has_font_subset_type:
         return info
 
     fields = _snapshot_info_fields(info)
     _overlay_product_fields(fields, optional.product)
-    _overlay_font_subset_fields(fields, optional.font_subset, optional.has_font_subset_type, optional.primary_is_builtin, optional.font_subset_is_builtin)
+    _overlay_font_subset_fields(
+        fields,
+        optional.font_subset,
+        optional.has_font_subset_type,
+        optional.primary_is_builtin,
+        optional.font_subset_is_builtin,
+    )
     _overlay_aot_desktop_material_fields(fields, optional.aot, optional.desktop, optional.material)
 
     return FlutterSdkInfo(**fields)

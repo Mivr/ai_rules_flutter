@@ -176,7 +176,14 @@ def engine_cache_dir(artifact_path):
         return "common"
     cache_dir = "/".join(parts[:-1])
     base = parts[-1]
-    if base != "artifacts.zip" and not base.endswith(".framework.zip") and not base.endswith("-flutter.zip") and not base.endswith("-flutter-gtk.zip") and base not in ("font-subset.zip", "flutter-cpp-client-wrapper.zip"):
+    is_special_archive = (
+        base == "artifacts.zip" or
+        base.endswith(".framework.zip") or
+        base.endswith("-flutter.zip") or
+        base.endswith("-flutter-gtk.zip") or
+        base in ("font-subset.zip", "flutter-cpp-client-wrapper.zip")
+    )
+    if not is_special_archive:
         # A cross-compile gen_snapshot archive: one binary that extracts one
         # level deeper than its directory (`android-arm64-release/linux-x64.zip`
         # into `engine/android-arm64-release/linux-x64/`).
@@ -448,7 +455,8 @@ def stage_local_dart_sdk(repository_ctx, sdk_root):
     # But a `bin/` directory without a launcher is a broken SDK, and staging
     # it silently would fail later with an action that cannot find `dart` —
     # so the fetch fails here instead, naming the missing file.
-    if sdk_dart.get_child("bin").exists and not repository_ctx.path("dart-sdk/bin/dart").exists and not repository_ctx.path("dart-sdk/bin/dart.exe").exists:
+    has_launcher = repository_ctx.path("dart-sdk/bin/dart").exists or repository_ctx.path("dart-sdk/bin/dart.exe").exists
+    if sdk_dart.get_child("bin").exists and not has_launcher:
         fail(missing_local_source_message(
             "bin/cache/dart-sdk/bin/dart",
             "the Dart launcher",

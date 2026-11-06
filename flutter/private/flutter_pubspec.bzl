@@ -883,5 +883,7 @@ def parse_flutter_assets_block(content):
         assets = assets,
         shaders = shaders,
         uses_material_design = umd_raw if type(umd_raw) == "bool" else False,
-        asset_errors = root_problems + asset_problems + font_problems + shader_problems + flutter_problem + section_problems,
+        asset_errors = (
+            root_problems + asset_problems + font_problems + shader_problems + flutter_problem + section_problems
+        ),
     )

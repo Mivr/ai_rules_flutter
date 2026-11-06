@@ -271,7 +271,13 @@ def flutter_modular_test_kernel(ctx, *, test_uri, deps, output, use_base_dill = 
         dependency provides one (feed it to `flutter_prebuilt_test`'s
         `base_dill`), or `None` — always `None` with the default complete link.
     """
-    return _flutter_modular_test_kernel(ctx, test_uri = test_uri, deps = deps, output = output, use_base_dill = use_base_dill)
+    return _flutter_modular_test_kernel(
+        ctx,
+        test_uri = test_uri,
+        deps = deps,
+        output = output,
+        use_base_dill = use_base_dill,
+    )
 
 def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output, use_base_dill = False):
     """Compile a custom modular app kernel: the app's own sources, then link.

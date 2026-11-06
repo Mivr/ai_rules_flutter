@@ -95,7 +95,13 @@ def _flutter_sdk_kernel_binary_impl(ctx):
         executable = tools.dartaotruntime,
         arguments = [args],
         inputs = depset(
-            direct = [staged, package_config, tools.dartaotruntime, tools.gen_kernel_snapshot, tools.platform_dill] + tools.compile_inputs,
+            direct = [
+                staged,
+                package_config,
+                tools.dartaotruntime,
+                tools.gen_kernel_snapshot,
+                tools.platform_dill,
+            ] + tools.compile_inputs,
         ),
         outputs = [output],
         mnemonic = "FlutterToolKernel",

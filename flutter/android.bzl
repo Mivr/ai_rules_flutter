@@ -641,7 +641,7 @@ def _android_discover_runner(name, package_name, resources, binary_deps, base_ma
         binary_deps.append("__%s_runner" % name)
     return "__%s_manifest" % name, resources
 
-def _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manifest, binary_deps, deps, manifest):
+def _android_resolve_manifest(name, base_manifest, binary_deps, deps, manifest):
     """Resolves the effective manifest: variants, template, permissions.
 
     Folds each variant's permissions into its own mode's APKs, the merge
@@ -652,8 +652,8 @@ def _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manif
     create`'s debug-variant INTERNET does. Library permissions are lifted
     as Gradle does, whatever the merger flags.
     """
-    debug_overlay = _variant_overlay(name, "debug", debug_manifest, base_manifest)
-    profile_overlay = _variant_overlay(name, "profile", profile_manifest, base_manifest)
+    debug_overlay = _variant_overlay(name, "debug", manifest.debug_manifest, base_manifest)
+    profile_overlay = _variant_overlay(name, "profile", manifest.profile_manifest, base_manifest)
 
     if base_manifest == None:
         # No flutter create output — generate manifest from template. The
@@ -1058,7 +1058,8 @@ def flutter_android_app(
     if pub_hub_name:
         binary_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
 
-    base_manifest, resources = _android_discover_runner(name, package_name, resources, binary_deps, base_manifest, internal_tags)
+    discovered = _android_discover_runner(name, package_name, resources, binary_deps, base_manifest, internal_tags)
+    base_manifest, resources = discovered
 
     # Resolve the variant overlays — every state explicit:
     #   False → no variant handling, even if the file exists.
@@ -1078,8 +1079,10 @@ def flutter_android_app(
         target_sdk_version = target_sdk_version,
         permissions = permissions,
         internal_tags = internal_tags,
+        debug_manifest = debug_manifest,
+        profile_manifest = profile_manifest,
     )
-    actual_manifest = _android_resolve_manifest(name, base_manifest, debug_manifest, profile_manifest, binary_deps, deps, manifest)
+    actual_manifest = _android_resolve_manifest(name, base_manifest, binary_deps, deps, manifest)
 
     # 9. Final android_binary, behind a proxy that scopes rules_go pure mode
     # to this app, and 10. the payload overlay. The overlay is the target
