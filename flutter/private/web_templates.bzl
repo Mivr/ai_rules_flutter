@@ -48,6 +48,14 @@ _flutter.buildConfig = %s;
 def web_template_builtins(ctx, flutter_sdk_info, builds, index_template, bootstrap_template, flutter_js_file):
     """Builds the template substitution builtins shared by every template.
 
+    Args:
+        ctx: The rule context.
+        flutter_sdk_info: The resolved Flutter SDK.
+        builds: Build descriptions, most preferred first.
+        index_template: The index.html template file.
+        bootstrap_template: The flutter_bootstrap.js template file.
+        flutter_js_file: The engine's `flutter.js`, or None.
+
     Returns:
       A struct with `shared_builtins`, `template_inputs`, `index_builtins`
       and `dev_builtins`.
@@ -103,6 +111,14 @@ def web_substitute_templates(ctx, flutter_sdk_info, is_debug, index_template, bo
     The bootstrap goes first so index.html can inline the *substituted*
     bootstrap through `{{flutter_bootstrap_js}}` — the same ordering
     `WebTemplatedFiles.build` uses upstream.
+
+    Args:
+        ctx: The rule context.
+        flutter_sdk_info: The resolved Flutter SDK.
+        is_debug: Whether this is a debug build.
+        index_template: The index.html template file.
+        bootstrap_template: The flutter_bootstrap.js template file.
+        builtins: The struct `web_template_builtins` returns.
 
     Returns:
       An `(index_html, bootstrap_js, dev_bootstrap_js)` tuple. The bootstrap
