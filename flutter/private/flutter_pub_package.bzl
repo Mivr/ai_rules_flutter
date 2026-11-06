@@ -72,7 +72,7 @@ load(
     ":flutter_pub_package_helpers.bzl",
     _build_pkg_asset_conditions = "build_pkg_asset_conditions",
     _check_pubspec_identity_mismatch = "check_pubspec_identity_mismatch",
-    _format_pub_asset_attrs_impl = "format_pub_asset_attrs",
+    _format_pub_asset_attrs = "format_pub_asset_attrs_with_shaders",
     _make_flutter_test_package_bzl_content = "make_flutter_test_package_bzl_content",
     _malformed_pub_version_refusal = "malformed_pub_version_refusal",
     _merge_pub_asset_conditions = "merge_pub_asset_conditions",
@@ -301,57 +301,6 @@ def build_pkg_shaders_dict(parsed_shaders):
         Dict mapping `":" + path` labels to percent-encoded bundle keys.
     """
     return {":" + entry.path: entry.key for entry in parsed_shaders}
-
-# File extensions a shader may `#include`: the spoke links them beside a
-# top-level declared shader so its scoped include glob resolves.
-_PATH_SPOKE_SHADER_INCLUDE_EXTS = ("glsl", "frag", "vert")
-
-def scoped_shader_includes_block(shader_paths):
-    """Render `shader_includes` covering only the declared shaders' own directories.
-
-    Each non-empty dirname contributes `<dir>/**/*.glsl|frag|vert`; a
-    top-level shader contributes root `*.ext`. Sorted for determinism, so
-    `example/build/` output can never become an include through a
-    package-wide `**` glob.
-
-    Args:
-        shader_paths: Declared shader paths (the `pkg_shaders` values).
-
-    Returns:
-        The `shader_includes = glob(...)` BUILD block.
-    """
-    dirs = {}
-    for path in shader_paths:
-        dirs[path.rpartition("/")[0]] = True
-    lines = []
-    for d in sorted(dirs.keys()):
-        for ext in _PATH_SPOKE_SHADER_INCLUDE_EXTS:
-            pattern = d + "/**/*." + ext if d else "*." + ext
-
-            # `d` is a declared shader's own directory, read from the
-            # pubspec; the pattern renders through the escaping helper.
-            lines.append("        " + starlark_string_literal(pattern) + ",")
-    return "    shader_includes = glob(\n        [\n{}\n        ],\n        allow_empty = True,\n    ),".format("\n".join(lines))
-
-def _format_pub_asset_attrs(
-        fonts_json_str,
-        font_files,
-        pkg_assets,
-        pkg_shaders,
-        pkg_asset_platforms = {},
-        pkg_asset_flavors = {}):
-    """Render the pub-asset attrs as BUILD source, omitting empty ones."""
-    res = _format_pub_asset_attrs_impl(
-        fonts_json_str,
-        font_files,
-        pkg_assets,
-        pkg_shaders,
-        pkg_asset_platforms,
-        pkg_asset_flavors,
-    )
-    if pkg_shaders:
-        res += scoped_shader_includes_block(sorted(pkg_shaders.values())) + "\n"
-    return res
 
 def _format_code_asset_attrs(code_assets, has_unreplaced_hook):
     """Render the `code_assets` / `has_unreplaced_hook` attrs for a spoke.
@@ -1612,7 +1561,6 @@ def _generate_spoke(ctx):
 
 spoke_asset_inputs = _spoke_asset_inputs
 detect_desktop_plugin_sources = _detect_desktop_plugin_sources
-format_pub_asset_attrs_with_shaders = _format_pub_asset_attrs
 
 flutter_pub_package = repository_rule(
     implementation = _flutter_pub_package_impl,

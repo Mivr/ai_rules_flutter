@@ -62,8 +62,8 @@ load(
     "path_spoke_platform_dirs",
     "pubspec_name_refusal",
     "pubspec_version_refusal",
-    "scoped_shader_includes_block",
 )
+load("//flutter/private:flutter_pub_package_helpers.bzl", "scoped_shader_includes_block")
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_pub_semver.bzl", "parse_pub_version")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
