@@ -163,6 +163,25 @@ dart_test(
     ],
 )
 
+# Maven mirror guard: every `maven.install` lists Google's Maven Central
+# mirror between maven.google.com and repo1.maven.org, and every lock it names
+# records the mirror. Same discovery mechanism as above.
+dart_test(
+    name = "maven_mirror_guard_test",
+    size = "small",
+    data = ["maven_mirror_guard_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :maven_mirror_guard_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "maven_mirror_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 # Release-archive guard: every e2e workspace except e2e/smoke must be
 # export-ignored in .gitattributes. Same discovery mechanism as above.
 dart_test(
