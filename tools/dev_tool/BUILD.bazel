@@ -235,6 +235,7 @@ _UNIT_TESTS = {
     },
     "package_roots_test": {},
     "process_group_exec_test": {"data": [":process_group_exec"]},
+    "flutter_bazel_binary_test": {"data": [":flutter_bazel"]},
     "shutdown_signals_test": {},
     "screenshot_blankness_test": {
         "harness": True,
@@ -259,6 +260,7 @@ _MEDIUM_TESTS = [
     "cdp_viewport_test",
     "dev_tool_e2e_harness_test",
     "dev_tool_e2e_log_test",
+    "flutter_bazel_binary_test",
     "device_integration_test",
     "device_test",
     "http_control_channel_test",
