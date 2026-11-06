@@ -90,6 +90,7 @@
 @rules_flutter//tools/changelog:check	dev tooling outside this task's paths; needs a follow-up for CLI spawns
 @rules_flutter//tools/check_e2e_coverage:check_e2e_coverage	dev tooling outside this task's paths; needs a follow-up for CLI spawns
 @rules_flutter//tools/dev_tool:flutter_bazel	dev tooling outside this task's paths; needs a follow-up for CLI spawns
+@rules_flutter//tools/dev_tool:flutter_bazel_binary_test	dev tooling outside this task's paths; needs a follow-up for CLI spawns
 @rules_flutter//tools/dev_tool:loose_sources	dev tooling outside this task's paths; needs a follow-up for CLI spawns
 @rules_flutter//tools/dev_tool:process_group_exec	dev tooling outside this task's paths; needs a follow-up for CLI spawns
 @rules_flutter//tools/incr_kernel_identity:incr_kernel_identity	dev tooling outside this task's paths; needs a follow-up for CLI spawns
