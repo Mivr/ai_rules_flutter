@@ -67,7 +67,17 @@ def _classify_header_token(t, prev, stop_on_do):
     return ""
 
 def skip_condition_header(tokens, n, idx, stop_on_do):
-    """Advance past an `if`/`unless`/`elsif`/`case`/`when`/`def` header to its body."""
+    """Advance past an `if`/`unless`/`elsif`/`case`/`when`/`def` header to its body.
+
+    Args:
+        tokens: lexed podspec tokens.
+        n: number of tokens.
+        idx: index of the header keyword token.
+        stop_on_do: whether a top-level `do` ends the header.
+
+    Returns:
+        Index of the first token of the body.
+    """
     j = idx + 1
     depth = 0
     prev = None
@@ -197,7 +207,16 @@ def _boundary_action(t, prev, state, tokens, n, j):
     return None
 
 def read_statement_or_block_open(tokens, n, idx):
-    """Scan one statement or `do`/`{` block header starting at `tokens[idx]`."""
+    """Scan one statement or `do`/`{` block header starting at `tokens[idx]`.
+
+    Args:
+        tokens: lexed podspec tokens.
+        n: number of tokens.
+        idx: index of the first token of the statement.
+
+    Returns:
+        The scanned statement or block-open result.
+    """
     state = {"stmt": [], "assign_pos": -1, "rhs_end": 0, "mod_pos": -1, "rhs_line": 0}
     depth = 0
     prev = None
