@@ -272,14 +272,19 @@ void main() {
     final List<int> raw = sha256(utf8.encode('x'));
 
     test('accepts the forms Bazel and the tests send', () {
-      final forms = [hex, hex.toUpperCase(), b64(hex), base64.encode(raw)];
-      for (final form in [...forms, b64(hex.toUpperCase())]) {
+      final List<String> forms = [
+        hex,
+        hex.toUpperCase(),
+        b64(hex),
+        base64.encode(raw),
+      ];
+      for (final String form in [...forms, b64(hex.toUpperCase())]) {
         expect(normalizeRequestDigest(form), hex, reason: form);
       }
     });
 
     test('rejects everything else', () {
-      for (final bad in [
+      for (final String? bad in [
         null,
         '',
         'not-a-digest',
@@ -361,7 +366,9 @@ void main() {
         tempParent: h.cwd,
         sessions: factoryFor(() => [h.ok(), h.ok()]),
       );
-      final IncrResult result = expectOk(await worker.handleRequest(h.argv, h.inputs));
+      final IncrResult result = expectOk(
+        await worker.handleRequest(h.argv, h.inputs),
+      );
       expect(result.output, isEmpty);
       expect(sessions, hasLength(1));
       expect(sessions.single.commands, [
@@ -489,7 +496,9 @@ void main() {
           cwd: h.cwd,
           sessions: factoryFor(() => [h.ok(), h.ok(), h.ok(), h.ok()]),
         );
-        IncrResult result = expectOk(await worker.handleRequest(h.argv, h.inputs));
+        IncrResult result = expectOk(
+          await worker.handleRequest(h.argv, h.inputs),
+        );
         final List<String> argv2 = [
           for (final a in h.argv) a == 'out/app.dill' ? 'out/other.dill' : a,
         ];
@@ -724,7 +733,9 @@ void main() {
             ],
           ),
         );
-        IncrResult result = expectOk(await worker.handleRequest(h.argv, h.inputs));
+        IncrResult result = expectOk(
+          await worker.handleRequest(h.argv, h.inputs),
+        );
         writeBoth(h, 'a.dart', 'broken syntax (((');
         result = await worker.handleRequest(h.argv, h.inputs);
         expectRefused(result, error);
@@ -910,7 +921,9 @@ void main() {
             ], errors: 1),
           ]),
         );
-        IncrResult result = expectOk(await worker.handleRequest(h.argv, h.inputs));
+        IncrResult result = expectOk(
+          await worker.handleRequest(h.argv, h.inputs),
+        );
         writeBoth(h, 'a.dart', 'int get answer => 45;\n');
         result = await worker.handleRequest(h.argv, h.inputs);
         expectRefused(result, undeclaredReadMessage('+file:///etc/sneak.dart'));

@@ -395,7 +395,7 @@ class IncrWorker {
     final String key = configurationKey(parts.fs, sha256Hex);
     IncrServerState? state = _servers[key];
     if (state != null) _touch(key);
-    final Map<String, String?> read = <String, String?>{};
+    final read = <String, String?>{};
     final ({Map<String, String?> current, List<String> changed}) hashes =
         _changeSet(inputPaths, state, digests, read);
     final ({bool cold, List<String> uris}) plan = _planCompile(
