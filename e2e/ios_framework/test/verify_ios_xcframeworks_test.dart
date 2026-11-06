@@ -144,7 +144,7 @@ Directory _workspaceRoot(String srcDir, String workspace) {
 /// Every file under [root], following runfiles symlinks.
 List<File> _allFiles(Directory root) {
   final out = <File>[];
-  for (final entity in root.listSync(recursive: true, followLinks: true)) {
+  for (final entity in root.listSync(recursive: true)) {
     if (entity is File) out.add(entity);
   }
   return out;
@@ -305,7 +305,7 @@ List<_Library> _parseAvailableLibraries(String text) {
     _abort('FAIL: expected AvailableLibraries in App.xcframework/Info.plist');
   }
   final dicts = RegExp(
-    r'<dict>(.*?)</dict>',
+    '<dict>(.*?)</dict>',
     dotAll: true,
   ).allMatches(text.substring(at));
   final libraries = <_Library>[];
@@ -323,7 +323,7 @@ List<_Library> _parseAvailableLibraries(String text) {
         ? <String>[]
         : [
             for (final m in RegExp(
-              r'<string>(.*?)</string>',
+              '<string>(.*?)</string>',
               dotAll: true,
             ).allMatches(archBlock.group(1)!))
               m.group(1)!,
