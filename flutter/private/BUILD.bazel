@@ -1755,6 +1755,7 @@ bzl_library(
 bzl_library(
     name = "swiftpm_headers",
     srcs = ["swiftpm_headers.bzl"],
+    deps = [":swiftpm_paths"],
     visibility = ["//visibility:public"],
 )
 
