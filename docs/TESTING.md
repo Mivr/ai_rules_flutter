@@ -1380,6 +1380,14 @@ bazel test //:scratch_golden_test --test_arg=--update-goldens
 # Then delete the scratch target, its source, and the generated PNG.
 ```
 
+The `--update-goldens` write path is also checked in CI, not only by hand:
+`bazel run //:update_goldens_check -- --bazel=bazel` in `e2e/codegen`
+(`e2e/codegen/tools/update_goldens_check.dart`) builds a scratch copy of the
+workspace in a temporary directory, adds a golden test with a stale PNG, and
+asserts that the test fails, that `bazel run <target> -- --update-goldens`
+rewrites the PNG, and that the test then passes. It runs as its own step in the
+`e2e-linux-app` job and in the nightly `e2e-macos-apple` job.
+
 ### App output forwarding (manual)
 
 Unit tests cover the buffering, filtering and routing; they cannot prove that a

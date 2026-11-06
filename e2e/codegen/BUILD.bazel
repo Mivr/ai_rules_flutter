@@ -424,6 +424,16 @@ dart_library(
     main = "tools/%s.dart" % name,
 ) for name in _GENERATOR_SCRIPTS]
 
+# Proves `bazel run <flutter_test> -- --update-goldens` rewrites a stale golden
+# PNG and that the test then passes. It works on a scratch copy of this
+# workspace in a temporary directory and never writes into the source tree.
+# `bazel run //:update_goldens_check -- --bazel=bazel`; CI runs it as its own
+# step on Linux and macOS.
+dart_binary(
+    name = "update_goldens_check",
+    main = "tools/update_goldens_check.dart",
+)
+
 # --- Localizations (flutter_gen_l10n) ---
 # Exercises: the vendored `flutter gen-l10n` generator end to end — arb files in,
 # AppLocalizations Dart out, compiled and run against package:flutter.

@@ -174,6 +174,12 @@ jobs:
       - name: bazel test pub_scc (e2e/pub_scc)
         working-directory: e2e/pub_scc
         run: bazel test //... --test_output=errors
+      # `bazel run <flutter_test> -- --update-goldens` on a scratch copy of
+      # e2e/codegen: a stale PNG fails the test, the update rewrites it, and
+      # the test then passes.
+      - name: Check --update-goldens rewrites a stale golden (e2e/codegen)
+        working-directory: e2e/codegen
+        run: bazel run //:update_goldens_check -- --bazel=bazel
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
@@ -575,6 +581,12 @@ jobs:
           fi
       - name: Run e2e/codegen
         run: bazel run //tools/e2e_runner -- --workspace=e2e/codegen --bazel=bazel
+      # `bazel run <flutter_test> -- --update-goldens` on a scratch copy of
+      # e2e/codegen: a stale PNG fails the test, the update rewrites it, and
+      # the test then passes.
+      - name: Check --update-goldens rewrites a stale golden (e2e/codegen)
+        working-directory: e2e/codegen
+        run: bazel run //:update_goldens_check -- --bazel=bazel
       - name: Disk report (after e2e/codegen)
         if: always()
         uses: ./.github/actions/disk-report
