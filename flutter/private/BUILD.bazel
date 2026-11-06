@@ -571,6 +571,7 @@ bzl_library(
         ":flutter_web_compile",
         ":plugin_registrant",
         ":validation",
+        ":web_stubs",
         "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
     ],
@@ -1398,6 +1399,8 @@ bzl_library(
         ":plugin_registrant",
         ":validation",
         ":web_service_worker",
+        ":web_stubs",
+        ":web_templates",
         "//flutter:providers",
         "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
@@ -1869,6 +1872,19 @@ bzl_library(
     name = "web_service_worker",
     srcs = ["web_service_worker.bzl"],
     visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "web_stubs",
+    srcs = ["web_stubs.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "web_templates",
+    srcs = ["web_templates.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [":web_service_worker"],
 )
 
 bzl_library(

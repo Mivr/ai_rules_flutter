@@ -361,6 +361,52 @@ def _xtool_bundle_base_args(ctx, platform, app_name, executable_file, archive_fi
     args.add("--output-app-dir", app_dir.path)
     return args
 
+def _add_xtool_env_args(ctx, args, archive_file):
+    """Adds the isolated-environment flags and returns the action's `env`.
+
+    Args:
+        ctx: Rule context of the calling bundle rule.
+        args: The `ctx.actions.args()` being built.
+        archive_file: The bundle archive; its directory is the action's tmp dir.
+
+    Returns:
+        The environment dict for the pack action.
+    """
+    action_env = _xtool_bundle_action_env(ctx, archive_file.dirname)
+    args.add("--isolated-env")
+    for env_key in sorted(ctx.attr.env.keys()):
+        if env_key != "TMPDIR" and env_key != "TEST_TMPDIR":
+            args.add("--declared-env", env_key)
+    if ctx.attr.certificate_password_env:
+        args.add("--certificate-password-env", ctx.attr.certificate_password_env)
+        if ctx.attr.certificate_password_env not in action_env:
+            action_env[ctx.attr.certificate_password_env] = ""
+    return action_env
+
+def _xtool_bundle_providers(ctx, archive_file, app_dir, executable_file):
+    """The pack action's providers.
+
+    Args:
+        ctx: Rule context of the calling bundle rule.
+        archive_file: The bundle archive.
+        app_dir: The unpacked `.app` directory.
+        executable_file: The runner binary inside the bundle.
+
+    Returns:
+        `DefaultInfo` with the archive, plus `OutputGroupInfo`.
+    """
+    return [
+        DefaultInfo(
+            files = depset([archive_file]),
+            runfiles = ctx.runfiles(files = [archive_file]),
+        ),
+        OutputGroupInfo(
+            archive = depset([archive_file]),
+            app_dir = depset([app_dir]),
+            runner_binary = depset([executable_file]),
+        ),
+    ]
+
 def run_xtool_pack_bundle(
         ctx,
         *,
@@ -450,15 +496,7 @@ def run_xtool_pack_bundle(
 
     _add_xtool_signing_args(ctx, args, direct_inputs)
 
-    action_env = _xtool_bundle_action_env(ctx, archive_file.dirname)
-    args.add("--isolated-env")
-    for env_key in sorted(ctx.attr.env.keys()):
-        if env_key != "TMPDIR" and env_key != "TEST_TMPDIR":
-            args.add("--declared-env", env_key)
-    if ctx.attr.certificate_password_env:
-        args.add("--certificate-password-env", ctx.attr.certificate_password_env)
-        if ctx.attr.certificate_password_env not in action_env:
-            action_env[ctx.attr.certificate_password_env] = ""
+    action_env = _add_xtool_env_args(ctx, args, archive_file)
 
     ctx.actions.run(
         executable = ctx.executable._xtool_pack,
@@ -475,14 +513,4 @@ def run_xtool_pack_bundle(
         toolchain = None,
     )
 
-    return [
-        DefaultInfo(
-            files = depset([archive_file]),
-            runfiles = ctx.runfiles(files = [archive_file]),
-        ),
-        OutputGroupInfo(
-            archive = depset([archive_file]),
-            app_dir = depset([app_dir]),
-            runner_binary = depset([executable_file]),
-        ),
-    ]
+    return _xtool_bundle_providers(ctx, archive_file, app_dir, executable_file)

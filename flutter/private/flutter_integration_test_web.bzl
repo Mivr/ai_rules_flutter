@@ -30,7 +30,6 @@ load(
     "COPY_TO_DIRECTORY_TOOLCHAINS",
     "FLUTTER_DEPS_DOC",
     "flutter_web_shader_aspect",
-    "make_web_wrapper_main_content",
     "merge_dart_defines",
     "resolve_exec_dart_vm",
     "resolve_flutter_sdk_info",
@@ -87,6 +86,7 @@ load(
     "validate_web_compiler_renderer",
     "web_renderer",
 )
+load("//flutter/private:web_stubs.bzl", "make_web_wrapper_main_content")
 
 def _web_sdk_file_list(ctx):
     """All files the web SDK target carries (renderer/template lookup)."""
