@@ -64,12 +64,24 @@ load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library", _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_apple_xcframework_import.bzl", _flutter_apple_xcframework_import = "flutter_apple_xcframework_import")
-load("//flutter/private:flutter_ios_application.bzl", _flutter_ios_application = "flutter_ios_application", _flutter_ios_framework_rule = "flutter_ios_framework", _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks", _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests")
+load(
+    "//flutter/private:flutter_ios_application.bzl",
+    _flutter_ios_application = "flutter_ios_application",
+    _flutter_ios_framework_rule = "flutter_ios_framework",
+    _flutter_ios_native_frameworks_rule = "flutter_ios_native_frameworks",
+    _flutter_ios_privacy_manifests_rule = "flutter_ios_privacy_manifests",
+)
 load("//flutter/private:flutter_ios_registrant.bzl", _flutter_ios_registrant_rule = "flutter_ios_registrant")
 load("//flutter/private:flutter_ios_xcframework.bzl", _flutter_ios_xcframeworks = "flutter_ios_xcframeworks")
 load("//flutter/private:flutter_plist_merge.bzl", _flutter_entitlements_merge = "flutter_entitlements_merge")
 load("//flutter/private:flutter_xtool_bundle.bzl", _flutter_darwin_xcframework_import = "flutter_darwin_xcframework_import", _flutter_xtool_bundle_version = "flutter_xtool_bundle_version", _flutter_xtool_ios_bundle = "flutter_xtool_ios_bundle")
-load("//flutter/private:ios_app.bzl", _IOS_DEFAULT_LAUNCH_STORYBOARD = "IOS_DEFAULT_LAUNCH_STORYBOARD", _IOS_DEFAULT_MAIN_STORYBOARD = "IOS_DEFAULT_MAIN_STORYBOARD", _flutter_ios_app = "flutter_ios_app", _flutter_ios_engine = "flutter_ios_engine")
+load(
+    "//flutter/private:ios_app.bzl",
+    _IOS_DEFAULT_LAUNCH_STORYBOARD = "IOS_DEFAULT_LAUNCH_STORYBOARD",
+    _IOS_DEFAULT_MAIN_STORYBOARD = "IOS_DEFAULT_MAIN_STORYBOARD",
+    _flutter_ios_app = "flutter_ios_app",
+    _flutter_ios_engine = "flutter_ios_engine",
+)
 load("//flutter/private:ios_sim_debug.bzl", _ios_sim_debug_app = "ios_sim_debug_app")
 
 # Re-export constants for user BUILD files.

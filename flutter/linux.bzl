@@ -79,7 +79,16 @@ flutter_linux_registrant_gen = _flutter_linux_registrant
 flutter_linux_plugin_library = _flutter_linux_plugin_library
 
 # rule_test_coverage: no-actions
-def flutter_linux_runner_lib_gen(name, engine, registrant, application = None, gtk_app_id = "com.example.flutter", window_title = "Flutter", srcs = [], hdrs = [], **kwargs):
+def flutter_linux_runner_lib_gen(
+        name,
+        engine,
+        registrant,
+        application = None,
+        gtk_app_id = "com.example.flutter",
+        window_title = "Flutter",
+        srcs = [],
+        hdrs = [],
+        **kwargs):
     """Compiles a GTK Linux runner binary from template or custom sources.
 
     Uses the Chromium sysroot for hermetic GTK3 compilation, enabling

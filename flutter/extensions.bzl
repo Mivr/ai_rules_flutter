@@ -377,7 +377,13 @@ def _register_all_toolchains(module_ctx, registrations, merged, lock_flutter_con
             sdk_configured = darwin_sdk.configured,
         )
         if source.local_path:
-            selected_info[name] = _register_local_toolchain(name, source.local_path, lock_flutter_constraints, darwin_sdk, llvm_tool_repos)
+            selected_info[name] = _register_local_toolchain(
+                name,
+                source.local_path,
+                lock_flutter_constraints,
+                darwin_sdk,
+                llvm_tool_repos,
+            )
             continue
         selected_info[name] = _register_download_toolchain(name, source.version, merged, darwin_sdk, llvm_tool_repos)
     return selected_info

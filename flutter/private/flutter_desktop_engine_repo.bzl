@@ -10,7 +10,15 @@ One repo per unique target platform, shared across hosts.
 load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 load(":artifact_urls.bzl", "desktop_engine_artifact_path", "engine_artifact_url", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
-load(":engine_helpers.bzl", "WINDOWS_CPP_CLIENT_WRAPPER_FILES", "cpp_client_wrapper_artifact_path", "cpp_client_wrapper_missing_error", "cpp_client_wrapper_sha_error", "engine_filegroup_for_os", "extract_macos_inner_framework")
+load(
+    ":engine_helpers.bzl",
+    "WINDOWS_CPP_CLIENT_WRAPPER_FILES",
+    "cpp_client_wrapper_artifact_path",
+    "cpp_client_wrapper_missing_error",
+    "cpp_client_wrapper_sha_error",
+    "engine_filegroup_for_os",
+    "extract_macos_inner_framework",
+)
 load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "macos_framework_cache_path", "resolve_local_sdk_root")
 
 def _link_local_desktop_engine(repository_ctx, target_os, target_arch, artifact_path):
@@ -22,10 +30,13 @@ def _link_local_desktop_engine(repository_ctx, target_os, target_arch, artifact_
         # xcframework; only a downloaded double-zip needs unpacking. The
         # linked inner framework has the same Versions/A shape the
         # download mode produces, so consumers cannot tell the difference.
+        framework_rel = "bin/cache/artifacts/engine/" + macos_framework_cache_path(
+            engine_cache_dir(artifact_path),
+        )
         link_local_dir(
             repository_ctx,
             sdk_root,
-            "bin/cache/artifacts/engine/" + macos_framework_cache_path(engine_cache_dir(artifact_path)),
+            framework_rel,
             "engine/FlutterMacOS.framework",
             "the {} desktop engine".format(artifact_path),
         )

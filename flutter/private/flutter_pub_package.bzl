@@ -73,12 +73,12 @@ load(
     ":flutter_pub_package_helpers.bzl",
     _build_pkg_asset_conditions = "build_pkg_asset_conditions",
     _check_pubspec_identity_mismatch = "check_pubspec_identity_mismatch",
-    _format_pub_asset_attrs = "format_pub_asset_attrs_with_shaders",
     _make_flutter_test_package_bzl_content = "make_flutter_test_package_bzl_content",
     _malformed_pub_version_refusal = "malformed_pub_version_refusal",
     _merge_pub_asset_conditions = "merge_pub_asset_conditions",
     _missing_pubspec_refusal = "missing_pubspec_refusal",
     _parse_pubspec_identity = "parse_pubspec_identity",
+    _pub_attrs = "format_pub_asset_attrs_with_shaders",
     _pubspec_name_refusal = "pubspec_name_refusal",
     _pubspec_version_refusal = "pubspec_version_refusal",
 )
@@ -406,7 +406,7 @@ def make_flutter_library_build_content(
     """
     deps_block = _spoke_deps_block(deps)
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_asset_flavors)
+    pub_attrs = _pub_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_asset_flavors)
 
     return """\
 load("@rules_flutter//flutter:defs.bzl", "flutter_library")
@@ -559,7 +559,7 @@ def make_flutter_plugin_build_content(
         apple_ios_privacy_manifests,
     )
 
-    pub_attrs = _format_pub_asset_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_asset_flavors)
+    pub_attrs = _pub_attrs(fonts_json_str, font_files, pkg_assets, pkg_shaders, pkg_asset_platforms, pkg_asset_flavors)
 
     return """\
 load("@rules_flutter//flutter:defs.bzl", "flutter_plugin")
@@ -913,7 +913,7 @@ def apply_overlay_substitutions(content, hub_name, package_name, version, langua
     )
     return _rewrite_cat_genrules(substituted, package_name, template)
 
-def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, language_version, dep_labels, relpath, guard_hub_deps = False):
+def _overlay_template(ctx, root_label, package_name, version, lang_version, labels, relpath, guard_hub_deps = False):
     """Look up an overlay template at `<root>/<package>/<version-ladder>/<relpath>`.
 
     Walks the version-specificity ladder
@@ -922,7 +922,7 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
     `{PKG}`, `{VERSION}`, `{LANGUAGE_VERSION}` and `{DEPS}` substitutions
     applied) on first match. Returns empty string when no template is found.
 
-    `dep_labels` are the spoke labels the package's own pubspec resolves to,
+    `labels` are the spoke labels the package's own pubspec resolves to,
     which `{DEPS}` expands into. `guard_hub_deps` rejects a template that
     hand-writes those labels instead — see `find_hardcoded_hub_dep`. Only the
     top-level BUILD sets it: `{DEPS}` is a Dart dependency list, so it is not
@@ -940,7 +940,7 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
       transitive deps not in the curated `_MAVEN_COORD_TO_LABEL`)
       ship this alongside the top-level overlay.
     """
-    anchor = ctx.path(overlay_root_label)
+    anchor = ctx.path(root_label)
     ctx.watch(anchor)
     root = anchor.dirname
     ctx.watch(root)
@@ -1010,23 +1010,23 @@ def _resolve_overlay_template(ctx, overlay_root_label, package_name, version, la
                 hub_name = ctx.attr.hub_name,
                 package_name = package_name,
                 version = version,
-                language_version = language_version,
-                deps = render_overlay_deps(dep_labels),
+                language_version = lang_version,
+                deps = render_overlay_deps(labels),
                 template = str(tpl),
             )
     return ""
 
-resolve_overlay_template = _resolve_overlay_template
+resolve_overlay_template = _overlay_template
 
 def _resolve_overlay(ctx, overlay_root_label, package_name, version, language_version, dep_labels):
     """Resolve the top-level BUILD.bazel.tpl overlay.
 
-    Equivalent to `_resolve_overlay_template(..., "BUILD.bazel.tpl")`.
+    Equivalent to `_overlay_template(..., "BUILD.bazel.tpl")`.
     Kept as a separate helper because the top-level lookup is the most
     common call shape; consumers wanting the Android sub-package
-    template call `_resolve_overlay_template` directly.
+    template call `_overlay_template` directly.
     """
-    return _resolve_overlay_template(
+    return _overlay_template(
         ctx,
         overlay_root_label,
         package_name,
@@ -1074,7 +1074,7 @@ def resolve_overlay_roots(ctx, overlay_roots, package_name, version, language_ve
             # overlay root. Plugins whose Android side has real sources
             # ship one alongside the top-level BUILD; plugins that don't
             # leave it absent and the empty-stub fallback fires below.
-            overlay_android_content = _resolve_overlay_template(
+            overlay_android_content = _overlay_template(
                 ctx,
                 overlay_label,
                 package_name,
