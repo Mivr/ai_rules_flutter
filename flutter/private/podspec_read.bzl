@@ -14,16 +14,16 @@ load(
     "parse_string_list_tokens",
 )
 load(
-    ":podspec_read_xcconfig.bzl",
-    "splice_podspec_defines",
-    "xcconfig_hash_defines",
-    "xcconfig_merge_defines",
-)
-load(
     ":podspec_read_stmt.bzl",
     "END_OPENERS",
     "read_statement_or_block_open",
     "skip_condition_header",
+)
+load(
+    ":podspec_read_xcconfig.bzl",
+    "splice_podspec_defines",
+    "xcconfig_hash_defines",
+    "xcconfig_merge_defines",
 )
 load(":starlark_literal.bzl", "starlark_string_literal")
 
