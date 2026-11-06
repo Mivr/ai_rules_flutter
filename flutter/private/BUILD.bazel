@@ -1026,6 +1026,12 @@ bzl_library(
 )
 
 bzl_library(
+    name = "podspec_read_stmt",
+    srcs = ["podspec_read_stmt.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
     name = "podspec_read_xcconfig",
     srcs = ["podspec_read_xcconfig.bzl"],
     visibility = ["//visibility:public"],
@@ -1043,6 +1049,7 @@ bzl_library(
         ":flutter_apple_plugin_defines",
         ":podspec_read_check",
         ":podspec_read_ruby",
+        ":podspec_read_stmt",
         ":podspec_read_xcconfig",
         ":starlark_literal",
     ],
