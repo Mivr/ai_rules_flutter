@@ -403,6 +403,7 @@ bzl_library(
         "//flutter/private:constants",
         "//flutter/private:download",
         "//flutter/private:engine_helpers",
+        "//flutter/private:engine_support_repos",
         "//flutter/private:flutter_android_engine_repo",
         "//flutter/private:flutter_cross_repo",
         "//flutter/private:flutter_desktop_cross_repo",

@@ -525,7 +525,9 @@ def mirror_tree_bounded(ctx, stack, scope, bound):
                 continue
             if child.is_dir:
                 ctx.watch(child)
-                stack.append((child, child_rel, seen + (fold_path_case(child_real, scope.case_insensitive),), tree_root))
+                stack.append(
+                    (child, child_rel, seen + (fold_path_case(child_real, scope.case_insensitive),), tree_root),
+                )
                 continue
             if name in _PATH_SPOKE_SKIP_FILES:
                 ctx.watch(child)
@@ -677,7 +679,15 @@ def _link_scoped_dir_entry(ctx, src, entry_path, scope, apply_skip = True):
         return
     node, repo_rel, node_real = resolved
     if not paths_match(node_real, scope.package_realpath + "/" + repo_rel, scope.case_insensitive):
-        _mirror_single_link(ctx, node, repo_rel, node_real, scope, (fold_path_case(scope.package_realpath, scope.case_insensitive),), apply_skip)
+        _mirror_single_link(
+            ctx,
+            node,
+            repo_rel,
+            node_real,
+            scope,
+            (fold_path_case(scope.package_realpath, scope.case_insensitive),),
+            apply_skip,
+        )
         return
     if node.is_dir:
         _link_scoped_tree(ctx, node, repo_rel, scope, PUB_WALK_BOUND, apply_skip)
@@ -707,7 +717,15 @@ def link_scoped_file_entry(ctx, src, entry_path, scope, apply_skip = True):
         return
     node, repo_rel, node_real = resolved
     if not paths_match(node_real, scope.package_realpath + "/" + repo_rel, scope.case_insensitive):
-        _mirror_single_link(ctx, node, repo_rel, node_real, scope, (fold_path_case(scope.package_realpath, scope.case_insensitive),), apply_skip)
+        _mirror_single_link(
+            ctx,
+            node,
+            repo_rel,
+            node_real,
+            scope,
+            (fold_path_case(scope.package_realpath, scope.case_insensitive),),
+            apply_skip,
+        )
         return
     if node.is_dir:
         _link_scoped_tree(ctx, node, repo_rel, scope, PUB_WALK_BOUND, apply_skip)

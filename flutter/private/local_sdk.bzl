@@ -453,7 +453,8 @@ def stage_local_dart_sdk(repository_ctx, sdk_root):
     # But a `bin/` directory without a launcher is a broken SDK, and staging
     # it silently would fail later with an action that cannot find `dart` —
     # so the fetch fails here instead, naming the missing file.
-    if sdk_dart.get_child("bin").exists and not repository_ctx.path("dart-sdk/bin/dart").exists and not repository_ctx.path("dart-sdk/bin/dart.exe").exists:
+    has_launcher = repository_ctx.path("dart-sdk/bin/dart").exists or repository_ctx.path("dart-sdk/bin/dart.exe").exists
+    if sdk_dart.get_child("bin").exists and not has_launcher:
         fail(missing_local_source_message(
             "bin/cache/dart-sdk/bin/dart",
             "the Dart launcher",
