@@ -199,6 +199,7 @@ def _chrome_headless_shell_repo_impl(repository_ctx):
 
     repository_ctx.file("fonts/fonts.conf", _FONTS_CONF)
     repository_ctx.file("BUILD.bazel", _BUILD_CONTENT)
+    return repository_ctx.repo_metadata(reproducible = True)
 
 chrome_headless_shell_repo = repository_rule(
     _chrome_headless_shell_repo_impl,

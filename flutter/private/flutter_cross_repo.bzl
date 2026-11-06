@@ -8,6 +8,7 @@ For iOS, the gen_snapshot is bundled inside the iOS engine artifact
 engine repo's gen_snapshot_arm64 instead of downloading a separate one.
 """
 
+load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 load(":artifact_urls.bzl", "engine_artifact_url", "gen_snapshot_cross_artifact_path", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_host_platform", "platform_to_arch", "platform_to_os")
@@ -153,6 +154,7 @@ def _flutter_cross_compilation_repo_impl(repository_ctx):
         downloaded_gen_snapshot = downloaded_gen_snapshot,
     )
     repository_ctx.file("BUILD.bazel", build_content)
+    return download_mode_metadata(repository_ctx)
 
 _BUILD_TEMPLATE = """{load_block}
 

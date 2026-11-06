@@ -57,7 +57,10 @@ def _android_sdk_impl(rctx):
             output = package.output,
             stripPrefix = package.strip_prefix,
         )
-    rctx.symlink(rctx.attr._helper, "helper.bzl")
+
+    # Copied, not symlinked: a link into the main repo would hold a host path
+    # and keep the repository out of the repo contents cache.
+    rctx.file("helper.bzl", rctx.read(rctx.attr._helper))
     rctx.template(
         "BUILD.bazel",
         rctx.attr._template,
@@ -71,6 +74,7 @@ def _android_sdk_impl(rctx):
         },
         executable = False,
     )
+    return rctx.repo_metadata(reproducible = True)
 
 android_sdk = repository_rule(
     implementation = _android_sdk_impl,
@@ -93,7 +97,7 @@ def _android_ndk_impl(rctx):
     """Materialize the pinned Linux NDK, or an empty repository elsewhere."""
     if not rctx.os.name.startswith("linux"):
         rctx.file("BUILD.bazel", 'package(default_visibility = ["//visibility:public"])\n')
-        return
+        return rctx.repo_metadata(reproducible = True)
     rctx.download_and_extract(
         url = _NDK_URL,
         sha256 = _NDK_SHA256,
@@ -141,6 +145,7 @@ def _android_ndk_impl(rctx):
         substitutions = {"{api_level}": str(_API_LEVEL)},
         executable = False,
     )
+    return rctx.repo_metadata(reproducible = True)
 
 android_ndk = repository_rule(
     implementation = _android_ndk_impl,

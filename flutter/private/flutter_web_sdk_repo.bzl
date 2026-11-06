@@ -6,6 +6,7 @@ and rewrites web-sdk/libraries.json per exec platform to reference the
 shared host Dart SDK repositories via declared labels.
 """
 
+load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 load(":artifact_urls.bzl", "engine_artifact_url", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
 load(":local_sdk.bzl", "link_local_dir", "resolve_local_sdk_root")
@@ -339,7 +340,7 @@ def _detect_host_platform(repository_ctx):
         return "windows-x64"
     return "linux-arm64" if is_arm else "linux-x64"
 
-def _flutter_web_sdk_repo_impl(repository_ctx):
+def _write_web_sdk_repo(repository_ctx):
     engine_revision = repository_ctx.attr.engine_revision
     rewritten_dir = "web-sdk"
     if getattr(repository_ctx.attr, "local_path", ""):
@@ -415,7 +416,13 @@ def _flutter_web_sdk_repo_impl(repository_ctx):
         ),
     )
 
-flutter_web_sdk_repo_impl = _flutter_web_sdk_repo_impl
+def _flutter_web_sdk_repo_impl(repository_ctx):
+    _write_web_sdk_repo(repository_ctx)
+    return download_mode_metadata(repository_ctx)
+
+# The tests drive the repo-writing body directly, with a fake context that has
+# no `repo_metadata`.
+flutter_web_sdk_repo_impl = _write_web_sdk_repo
 
 flutter_web_sdk_repo = repository_rule(
     _flutter_web_sdk_repo_impl,

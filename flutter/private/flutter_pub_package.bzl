@@ -1086,19 +1086,6 @@ def resolve_overlay_roots(ctx, overlay_roots, package_name, version, language_ve
             break
     return overlay_content, overlay_android_content
 
-def _fetch_pub_archive(ctx):
-    """Downloads and extracts the package archive, like `pub_lock_package`.
-
-    Delegates to `fetch_hosted_archive`: a sha256-verified download, the
-    gzip trailer trim, rules_dart's header scan over the trimmed bytes
-    before `ctx.extract`, and its symlink walk over the extracted tree
-    before anything reads it. A refused archive fails the fetch with
-    rules_dart's diagnostic naming the package and the entry.
-    """
-    refusal = fetch_hosted_archive(ctx, scan_hosted_archive, walk_hosted_package)
-    if refusal:
-        fail(refusal)
-
 def _read_spoke_pubspec(ctx):
     """Parses the extracted `pubspec.yaml` into spoke inputs.
 
@@ -1347,8 +1334,17 @@ def _build_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hook):
     return _build_dart_spoke_content(ctx, pubspec, dep_labels, unreplaced_hook)
 
 def _flutter_pub_package_impl(ctx):
-    _fetch_pub_archive(ctx)
+    # Downloads and extracts the package archive, like `pub_lock_package`.
+    # `fetch_hosted_archive` does a sha256-verified download, the gzip
+    # trailer trim, rules_dart's header scan over the trimmed bytes before
+    # `ctx.extract`, and its symlink walk over the extracted tree before
+    # anything reads it. A refused archive fails the fetch with rules_dart's
+    # diagnostic naming the package and the entry.
+    refusal = fetch_hosted_archive(ctx, scan_hosted_archive, walk_hosted_package)
+    if refusal:
+        fail(refusal)
     _generate_spoke(ctx)
+    return ctx.repo_metadata(reproducible = True)
 
 def link_scoped_tree_bounded(ctx, node, repo_rel, package_name, package_realpath, workspace_realpath, linked, bound):
     """Mirror one real source directory into the spoke, reporting leftovers.

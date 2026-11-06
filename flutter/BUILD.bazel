@@ -415,6 +415,7 @@ bzl_library(
         "//flutter/private:linux_headless_runtime_repo",
         "//flutter/private:local_sdk",
         "//flutter/private:pub_lock_sdks",
+        "//flutter/private:repo_metadata",
         "//flutter/private:toolchains_repo",
         "//flutter/private:versions",
         "//flutter/private:xtool_darwin_sdk_repo",

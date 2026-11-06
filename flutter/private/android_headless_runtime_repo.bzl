@@ -326,6 +326,7 @@ def _android_headless_runtime_repo_impl(repository_ctx):
         repository_ctx.delete(tmp_dir)
 
     repository_ctx.file("BUILD.bazel", _BUILD_CONTENT)
+    return repository_ctx.repo_metadata(reproducible = True)
 
 android_headless_runtime_repo = repository_rule(
     _android_headless_runtime_repo_impl,
