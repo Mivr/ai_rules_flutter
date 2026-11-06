@@ -858,6 +858,7 @@ bzl_library(
         ":podspec_read",
         ":starlark_literal",
         ":swiftpm_manifest",
+        ":swiftpm_paths",
         ":swiftpm_resolved",
         ":swiftpm_translate",
     ],
@@ -1658,8 +1659,15 @@ bzl_library(
     srcs = ["swiftpm_clang.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":swiftpm_paths",
         ":swiftpm_settings",
     ],
+)
+
+bzl_library(
+    name = "swiftpm_headers",
+    srcs = ["swiftpm_headers.bzl"],
+    visibility = ["//visibility:public"],
 )
 
 bzl_library(
@@ -1693,9 +1701,17 @@ bzl_library(
         ":download",
         ":flutter_pub_walk",
         ":swiftpm_clang",
+        ":swiftpm_headers",
         ":swiftpm_manifest",
+        ":swiftpm_paths",
         ":swiftpm_translate",
     ],
+)
+
+bzl_library(
+    name = "swiftpm_paths",
+    srcs = ["swiftpm_paths.bzl"],
+    visibility = ["//visibility:public"],
 )
 
 bzl_library(
@@ -1708,6 +1724,9 @@ bzl_library(
     name = "swiftpm_settings",
     srcs = ["swiftpm_settings.bzl"],
     visibility = ["//visibility:public"],
+    deps = [
+        ":swiftpm_paths",
+    ],
 )
 
 bzl_library(
