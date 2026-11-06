@@ -176,7 +176,9 @@ def _check_vm_flags(label, vm_flags):
             if not eq or not _is_uint(value):
                 fail("%s: vm_flags %r needs `--name=<bytes>` with a plain integer value" % (label, flag))
         else:
-            fail("%s: vm_flags %r is not allowed: only heap/GC sizing (%s) and bare diagnostics (%s) may precede the snapshot; flags naming files or side effects (`--packages`, `--*-dill`, `--platform`, `--native-assets`, `--timeline-recorder`, `--snapshot*` and similar) are refused" % (label, flag, ", ".join(["--" + f for f in _VM_FLAG_SIZES]), ", ".join(["--" + f for f in _VM_FLAGS_BARE])))
+            sizes = ", ".join(["--" + f for f in _VM_FLAG_SIZES])
+            bare = ", ".join(["--" + f for f in _VM_FLAGS_BARE])
+            fail("%s: vm_flags %r is not allowed: only heap/GC sizing (%s) and bare diagnostics (%s) may precede the snapshot; flags naming files or side effects (`--packages`, `--*-dill`, `--platform`, `--native-assets`, `--timeline-recorder`, `--snapshot*` and similar) are refused" % (label, flag, sizes, bare))
 
 def _check_extra_flags(label, extra_flags):
     for flag in extra_flags:
@@ -300,7 +302,15 @@ def _run_kernel_action(ctx, run):
     if run.resource_set != None:
         run_kwargs["resource_set"] = run.resource_set
     if run.incr_worker:
-        _apply_incr_worker(ctx, run_kwargs, run.args, run.manifest, run.direct_inputs, run.dartaotruntime, run.frontend_server)
+        _apply_incr_worker(
+            ctx,
+            run_kwargs,
+            run.args,
+            run.manifest,
+            run.direct_inputs,
+            run.dartaotruntime,
+            run.frontend_server,
+        )
         if run.dev_incremental:
             # A dev dill differs from a one-shot compile: keep it off shared
             # caches and remote executors.
@@ -507,9 +517,20 @@ def _kernel_action_inputs(inputs, mount):
     """
     stage_files = mount.stage.files
     if inputs.from_dill != None:
-        direct_inputs = [inputs.main, inputs.package_config, inputs.frontend_server, inputs.platform_dill, inputs.from_dill] + stage_files
+        direct_inputs = [
+            inputs.main,
+            inputs.package_config,
+            inputs.frontend_server,
+            inputs.platform_dill,
+            inputs.from_dill,
+        ] + stage_files
     else:
-        direct_inputs = [inputs.main, inputs.package_config, inputs.frontend_server, inputs.platform_dill] + inputs.srcs + stage_files
+        direct_inputs = [
+            inputs.main,
+            inputs.package_config,
+            inputs.frontend_server,
+            inputs.platform_dill,
+        ] + inputs.srcs + stage_files
     if inputs.native_assets_manifest != None:
         direct_inputs.append(inputs.native_assets_manifest)
     if inputs.import_dill != None:

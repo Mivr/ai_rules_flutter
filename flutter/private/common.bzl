@@ -666,7 +666,9 @@ def _kernel_dev_config(ctx, st, mode):
         # the same way.
         dev_filesystem_roots = with_root(dev_pc.filesystem_roots, main_location.root if main_location else None)
         dev_filesystem_scheme = dev_pc.scheme
-        dev_app_sources = app_scheme_sources(st.app_pkg_name, st.app_lib_root, ctx.file.main, ctx.files.srcs) if ctx.file.main else []
+        dev_app_sources = []
+        if ctx.file.main:
+            dev_app_sources = app_scheme_sources(st.app_pkg_name, st.app_lib_root, ctx.file.main, ctx.files.srcs)
         dev_generated_source_paths = dev_pc.generated_source_paths
         dev_generated_source_uris = dev_pc.generated_source_uris
         dev_source_packages = dev_pc.source_packages
@@ -854,7 +856,12 @@ def make_kernel_target(aot = None, platform_dill = None, target_platform = None,
         frontend_server_target = frontend_server_target,
     )
 
-def make_kernel_inputs(native_assets_manifest = None, track_widget_creation = False, assets_dir = None, platform_build_args = [], recorded_uses = None):
+def make_kernel_inputs(
+        native_assets_manifest = None,
+        track_widget_creation = False,
+        assets_dir = None,
+        platform_build_args = [],
+        recorded_uses = None):
     """What else feeds the kernel compile besides sources and target.
 
     Args:
@@ -975,7 +982,14 @@ def _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
     if _use_modular_kernel(plan, agent, reg, flags):
         modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages)
         if modular_tools != None:
-            _compile_modular_kernel(ctx, st.app_lib_root, st.packages, plan.kernel_dill, plan.platform_dill, modular_tools)
+            _compile_modular_kernel(
+                ctx,
+                st.app_lib_root,
+                st.packages,
+                plan.kernel_dill,
+                plan.platform_dill,
+                modular_tools,
+            )
             return None
     return _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan)
 
@@ -1021,7 +1035,15 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, target, inputs):
     platform_dill = _resolve_kernel_platform_dill(target.platform_dill, aot, mode, flutter_sdk_info)
     agent = _stage_agent_extensions(ctx, aot, mode)
     reg = _kernel_registrant(ctx, target.target_platform, agent, dev.emit)
-    flags = _kernel_compile_flags(ctx, inputs.track_widget_creation, mode, aot, inputs.assets_dir, inputs.platform_build_args, target.target_platform)
+    flags = _kernel_compile_flags(
+        ctx,
+        inputs.track_widget_creation,
+        mode,
+        aot,
+        inputs.assets_dir,
+        inputs.platform_build_args,
+        target.target_platform,
+    )
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     config_file = _run_kernel_compile(
@@ -1131,13 +1153,18 @@ def _shader_jobs(ctx, target_platform = None):
         ))
     for entry in collect_sdk_shader_srcs(ctx.attr.deps):
         shader = entry.file if hasattr(entry, "file") else entry
-        jobs.append(struct(bundle_path = "shaders/" + encode_asset_key(shader.basename), file = shader, includes = entry.includes if hasattr(entry, "includes") else ()))
+        jobs.append(struct(
+            bundle_path = "shaders/" + encode_asset_key(shader.basename),
+            file = shader,
+            includes = entry.includes if hasattr(entry, "includes") else (),
+        ))
 
     # One flatten of the package-shader channel, through one `depset` union
     # over the deps: a shader file reached through W thin deps costs one
     # listing, not W. The union lists each contribution once in
     # first-reached order, so bundles without a repeat keep today's jobs.
-    for entry in depset(transitive = [dep[FlutterInfo].pub_shaders for dep in ctx.attr.deps if FlutterInfo in dep]).to_list():
+    pub_shaders = [dep[FlutterInfo].pub_shaders for dep in ctx.attr.deps if FlutterInfo in dep]
+    for entry in depset(transitive = pub_shaders).to_list():
         if not pub_shader_matches_target(entry, target_platform):
             continue
         prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
@@ -1415,7 +1442,14 @@ def declare_flutter_assets_dir(ctx):
     """
     return ctx.actions.declare_directory(ctx.label.name + "_flutter_assets")
 
-def make_bundle_inputs(target_platform, compiled_shaders = {}, kernel_dill = None, kernel_dills = [], tree_shake_key = "", is_debug = False, data_assets = None):
+def make_bundle_inputs(
+        target_platform,
+        compiled_shaders = {},
+        kernel_dill = None,
+        kernel_dills = [],
+        tree_shake_key = "",
+        is_debug = False,
+        data_assets = None):
     """One `flutter_build_assets` call's inputs: what to bundle and how its icons shake.
 
     Args:
@@ -1479,7 +1513,9 @@ def _bundle_tree_shake(ctx, flutter_sdk_info, bundle, fonts):
         A `make_tree_shake` struct.
     """
     const_finder, font_subset = resolve_font_subset_tools(flutter_sdk_info) if fonts else (None, None)
-    all_kernel_dills = list(bundle.kernel_dills) if bundle.kernel_dills else ([bundle.kernel_dill] if bundle.kernel_dill != None else [])
+    all_kernel_dills = list(bundle.kernel_dills)
+    if not all_kernel_dills and bundle.kernel_dill != None:
+        all_kernel_dills = [bundle.kernel_dill]
     needs_tree_shake = ctx.attr.tree_shake_icons and bool(fonts) and not bundle.is_debug and bool(all_kernel_dills)
     if needs_tree_shake and (const_finder == None or font_subset == None):
         fail(
