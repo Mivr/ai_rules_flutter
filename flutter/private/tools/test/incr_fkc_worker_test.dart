@@ -28,7 +28,7 @@ SessionFactory scripted(
 ) => (fs, full, inc, cwd, {devIncremental = false}) async {
   final s = FakeSession(
     fullDill: full,
-    dillBytes: utf8.encode('dill'),
+    dillBytes: utf8.encode('dill-bytes'),
     script: script,
   );
   sessions.add(s);
@@ -985,15 +985,6 @@ void main() {
     late Harness h;
     late Directory savedCwd;
 
-    SessionFactory oneScript(List<CompileResult> Function() scriptOf) {
-      return (fs, full, inc, cwd, {devIncremental = false}) async =>
-          FakeSession(
-            fullDill: full,
-            dillBytes: utf8.encode('dill-bytes'),
-            script: scriptOf(),
-          );
-    }
-
     setUp(() {
       savedCwd = Directory.current;
       h = Harness(Directory.systemTemp.createTempSync('incr_exit_'));
@@ -1013,7 +1004,7 @@ void main() {
         createWorker: () => IncrWorker(
           cwd: h.cwd,
           tempParent: h.cwd,
-          sessions: oneScript(() => [h.ok(), h.ok()]),
+          sessions: scripted([], [h.ok(), h.ok()]),
         ),
       );
       expect(code, 0);
@@ -1022,21 +1013,12 @@ void main() {
     });
 
     test('a one-shot failure leaves no incr_fkc_ dir', () async {
-      const error = 'lib/a.dart:1:5: Error: Expected `;`.';
       final int code = await runOneShotWorker(
         h.argv,
         createWorker: () => IncrWorker(
           cwd: h.cwd,
           tempParent: h.cwd,
-          sessions: oneScript(
-            () => [
-              (
-                errors: 1,
-                diagnostics: [error],
-                depLines: const [],
-              ),
-            ],
-          ),
+          sessions: scripted([], [compiled(const [], errors: 1)]),
         ),
       );
       expect(code, 1);
@@ -1057,7 +1039,7 @@ void main() {
         createWorker: () => IncrWorker(
           cwd: h.cwd,
           tempParent: h.cwd,
-          sessions: oneScript(() => [h.ok(), h.ok()]),
+          sessions: scripted([], [h.ok(), h.ok()]),
         ),
         stdinBytes: Stream.value(utf8.encode('$request\n')),
         responseSink: responses,
