@@ -55,6 +55,8 @@
 #   e2e-coverage:        //tools/check_e2e_coverage (every e2e module in a
 #     workflow or with a recorded reason)
 #   web-smoke:           web_example through the installed binary
+#   repo-contents-cache: //tools/repo_contents_cache (repos marked
+#     reproducible are shared through the repo contents cache)
 #   e2e-windows:         hello_world (Windows)
 # android_example runs in full.yaml (nightly) only: its APK + Kotlin actions
 # would make a push job the longest one.
@@ -1306,6 +1308,50 @@ jobs:
         run: bazel build --nobuild --lockfile_mode=error //...
       - name: git diff --exit-code MODULE.bazel MODULE.bazel.lock
         run: git diff --exit-code MODULE.bazel MODULE.bazel.lock
+  # Fails when a repository that returns `repo_metadata(reproducible = True)`
+  # is extracted into every output base instead of shared through the repo
+  # contents cache, or holds an absolute or repo-escaping symlink. Each run of
+  # //tools/repo_contents_cache fetches into two fresh output bases that share
+  # the repository cache and one temporary repo contents cache.
+  repo-contents-cache:
+    name: Repos share one repo contents cache entry
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable Linux sandbox user namespaces
+        run: .github/scripts/enable_linux_sandbox.sh
+      - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
+          cache-save: false
+      - name: Host SDK, web SDK, sky_engine, dev_root, fonts, gen_l10n, a dev_tool_deps spoke, sysroot, Chrome and Linux runtime
+        run: >
+          bazel run //tools/repo_contents_cache --
+          @@+flutter+flutter_linux-x64
+          @flutter_web_sdk
+          @flutter_sky_engine
+          @flutter_dev_root
+          @flutter_material_fonts
+          @@+flutter+flutter_font_subset_linux-x64
+          @flutter_gen_l10n
+          @@+flutter+dev_tool_deps__args
+          @@+flutter+flutter_linux_sysroot_x64
+          @flutter_chrome_headless_shell
+          @flutter_linux_headless_runtime
+      - name: A Flutter SDK spoke
+        run: >
+          bazel run //tools/repo_contents_cache --
+          --workspace=e2e/web_example
+          @@ai_rules_flutter++flutter+deps__flutter
+      - name: Negative case, local_path repos stay real directories
+        run: >
+          bazel run //tools/repo_contents_cache --
+          --workspace=e2e/smoke
+          --expect=real
+          @local_sky_engine
+          @local_linux-x64
+          @local_dev_root
   # Early warning, permanently non-blocking: runs the root tests on Bazel's
   # last release candidate so a break in the next Bazel release shows up before
   # it ships. An upstream release-candidate regression must never block a merge
@@ -1347,7 +1393,7 @@ jobs:
         run: bazel test --config=strict //... --test_output=errors
   conclusion:
     name: Conclusion
-    needs: [e2e-macos-apple, e2e-macos-toolchain, unit-tests, e2e-linux-app, e2e-linux-small, e2e-linux-examples, e2e-linux-pub-scc, e2e-linux-integration, e2e-windows, e2e-coverage, dart-tool-tests, pre-commit, web-smoke, reproducibility, mod-tidy]
+    needs: [e2e-macos-apple, e2e-macos-toolchain, unit-tests, e2e-linux-app, e2e-linux-small, e2e-linux-examples, e2e-linux-pub-scc, e2e-linux-integration, e2e-windows, e2e-coverage, dart-tool-tests, pre-commit, web-smoke, reproducibility, mod-tidy, repo-contents-cache]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
