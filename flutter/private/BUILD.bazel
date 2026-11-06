@@ -1136,7 +1136,6 @@ bzl_library(
     deps = [
         ":flutter_pub_android_package",
         ":flutter_pub_apple",
-        ":flutter_pub_package",
         ":flutter_pub_package_helpers",
         ":starlark_literal",
     ],

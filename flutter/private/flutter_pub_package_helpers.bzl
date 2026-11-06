@@ -187,6 +187,71 @@ def format_pub_asset_attrs(
         parts.append("    pkg_shaders = {},".format(_format_label_dict_literal(pkg_shaders)))
     return "\n".join(parts) + ("\n" if parts else "")
 
+# File extensions a shader may `#include`: the spoke links them beside a
+# top-level declared shader so its scoped include glob resolves.
+_PATH_SPOKE_SHADER_INCLUDE_EXTS = ("glsl", "frag", "vert")
+
+def scoped_shader_includes_block(shader_paths):
+    """Render `shader_includes` covering only the declared shaders' own directories.
+
+    Each non-empty dirname contributes `<dir>/**/*.glsl|frag|vert`; a
+    top-level shader contributes root `*.ext`. Sorted for determinism, so
+    `example/build/` output can never become an include through a
+    package-wide `**` glob.
+
+    Args:
+        shader_paths: Declared shader paths (the `pkg_shaders` values).
+
+    Returns:
+        The `shader_includes = glob(...)` BUILD block.
+    """
+    dirs = {}
+    for path in shader_paths:
+        dirs[path.rpartition("/")[0]] = True
+    lines = []
+    for d in sorted(dirs.keys()):
+        for ext in _PATH_SPOKE_SHADER_INCLUDE_EXTS:
+            pattern = d + "/**/*." + ext if d else "*." + ext
+
+            # `d` is a declared shader's own directory, read from the
+            # pubspec; the pattern renders through the escaping helper.
+            lines.append("        " + starlark_string_literal(pattern) + ",")
+    return "    shader_includes = glob(\n        [\n{}\n        ],\n        allow_empty = True,\n    ),".format("\n".join(lines))
+
+def format_pub_asset_attrs_with_shaders(
+        fonts_json_str,
+        font_files,
+        pkg_assets,
+        pkg_shaders,
+        pkg_asset_platforms = {},
+        pkg_asset_flavors = {}):
+    """Render the pub-asset attrs plus the scoped `shader_includes` block.
+
+    Args:
+        fonts_json_str: JSON-encoded font definitions.
+        font_files: Font file label map.
+        pkg_assets: Package asset label map.
+        pkg_shaders: Package shader label map; a non-empty map appends the
+            `shader_includes` block scoped to the declared shaders' directories.
+        pkg_asset_platforms: Platform restriction map.
+        pkg_asset_flavors: Flavor restriction map.
+
+    Returns:
+        Rendered attribute lines string, ending with the `shader_includes`
+        block when `pkg_shaders` is non-empty.
+    """
+    res = format_pub_asset_attrs(
+        fonts_json_str,
+        font_files,
+        pkg_assets,
+        pkg_shaders,
+        pkg_asset_platforms,
+        pkg_asset_flavors,
+    )
+    if pkg_shaders:
+        res += scoped_shader_includes_block(sorted(pkg_shaders.values())) + "\n"
+    return res
+
 def parse_pubspec_identity(content):
     """The `(name, version)` identity a path spoke verifies against its lock entry.
 

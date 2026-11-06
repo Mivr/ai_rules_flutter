@@ -23,11 +23,8 @@ load(
     "plugin_privacy_files_arg",
 )
 load(
-    "//flutter/private:flutter_pub_package.bzl",
-    "format_pub_asset_attrs_with_shaders",
-)
-load(
     "//flutter/private:flutter_pub_package_helpers.bzl",
+    "format_pub_asset_attrs_with_shaders",
     "make_flutter_test_package_bzl_content",
 )
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
