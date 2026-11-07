@@ -1,6 +1,7 @@
 """Unit tests for the `Package.swift` manifest parser."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("//flutter/private:flutter_pub_apple_byname.bzl", "apple_swiftpm_declares_package")
 load("//flutter/private:swiftpm_manifest.bzl", "parse_swiftpm_package", "parse_swiftpm_plugin_package")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
@@ -402,6 +403,7 @@ def swiftpm_manifest_test_suite(name):
         _manifest_constant_hints_test,
         _constant_before_declaration_test,
         _other_interpolations_still_refused_test,
+        _declares_package_fallback_test,
     )
     native.test_suite(
         name = name,
@@ -649,3 +651,13 @@ _manifest_constant_refusals_test = unittest.make(_manifest_constant_refusals_tes
 _manifest_constant_hints_test = unittest.make(_manifest_constant_hints_test_impl)
 _constant_before_declaration_test = unittest.make(_constant_before_declaration_test_impl)
 _other_interpolations_still_refused_test = unittest.make(_other_interpolations_still_refused_test_impl)
+
+def _declares_package_fallback_test_impl(ctx):
+    """Verifies apple_swiftpm_declares_package fallback when lexing fails."""
+    env = unittest.begin(ctx)
+    asserts.true(env, apple_swiftpm_declares_package('let x = "\n.package(url: "https://example.com/a.git")'))
+    asserts.true(env, apple_swiftpm_declares_package('let x = "\n. \t\r\npackage(url: "https://example.com/b.git")'))
+    asserts.false(env, apple_swiftpm_declares_package('let x = "\nlet y = 1'))
+    return unittest.end(env)
+
+_declares_package_fallback_test = unittest.make(_declares_package_fallback_test_impl)

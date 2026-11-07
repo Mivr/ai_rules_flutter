@@ -29,7 +29,7 @@ def apple_swiftpm_declares_package(text):
     """
     lexed = lex_swiftpm_manifest(text, "")
     if not lexed.ok:
-        squeezed = "".join(text.split())
+        squeezed = text.replace(" ", "").replace("\t", "").replace("\r", "").replace("\n", "")
         return ".package" in squeezed
     previous = None
     for tok in lexed.tokens:
