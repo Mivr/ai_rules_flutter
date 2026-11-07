@@ -28,7 +28,7 @@ load("//flutter/private:asset_keys.bzl", "library_asset_entries")
 load("//flutter/private:common.bzl", "collect_binding_contracts", "collect_native_libs")
 load("//flutter/private:flutter_desktop_plugin_info.bzl", "FlutterLinuxPluginInfo", "FlutterWindowsPluginInfo")
 load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_channels", "flutter_info", "flutter_native_channels", "flutter_plugin_libraries", "flutter_pub_channels")
-load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "flutter_analyzable_info")
+load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "check_asset_shader_conflict", "flutter_analyzable_info")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
 def build_plugin_struct(name, plugin_platforms):
@@ -265,7 +265,7 @@ def _extra_data_assets(ctx):
 
 def _plugin_pub_contributions(ctx):
     """Build this plugin's pub-package asset contributions (fonts/assets/shaders)."""
-    return build_pub_contributions(
+    fonts, assets, shaders = build_pub_contributions(
         ctx.attr.package_name,
         ctx.attr.fonts_json,
         ctx.attr.font_files,
@@ -275,6 +275,8 @@ def _plugin_pub_contributions(ctx):
         ctx.attr.pkg_asset_platforms,
         ctx.attr.pkg_asset_flavors,
     )
+    check_asset_shader_conflict(ctx.label, ctx.files.assets, assets, [], shaders)
+    return (fonts, assets, shaders)
 
 def _check_plugin_resources(ctx):
     """Reject Dart sources mis-filed under `resources` instead of `srcs`."""

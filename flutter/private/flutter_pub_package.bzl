@@ -1201,7 +1201,7 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
     pkg_assets_dict = build_pkg_assets_dict(expanded)
 
     # One pair of condition attrs carries asset and shader keys alike.
-    entries = pub_shader_condition_entries(package_name, expanded, shaders, asset_block.shaders)
+    entries = pub_shader_condition_entries(expanded, shaders, asset_block.shaders)
     pkg_asset_platforms, pkg_asset_flavors = _build_pkg_asset_conditions(entries, package_name)
     return struct(
         fonts_json_str = spoke_fonts.fonts_json_str,

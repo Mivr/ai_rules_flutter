@@ -14,9 +14,19 @@ tests pin the three parts of the fix:
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-load("//flutter:providers.bzl", "FlutterInfo")
-load("//flutter/private:common.bzl", "shader_sources")
-load("//flutter/private:flutter_library.bzl", "flutter_library")
+load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo")
+load(
+    "//flutter/private:common.bzl",
+    "flutter_app_shader_aspect",
+    "flutter_web_shader_aspect",
+    "shader_sources",
+)
+load("//flutter/private:flutter_application.bzl", "flutter_application")
+load(
+    "//flutter/private:flutter_library.bzl",
+    "flutter_library",
+    "pub_shader_matches_target",
+)
 load("//flutter/private:flutter_pub_assets.bzl", "asset_entry_problem_error")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
@@ -99,6 +109,8 @@ def _assert_shader_refusal(env, content, key, detail):
     message = asset_entry_problem_error("shader_pkg", problem)
     for want in ["shader_pkg", problem.path, key]:
         asserts.true(env, want in message, message)
+    asserts.equals(env, [], result.shaders[0].platforms)
+    asserts.equals(env, [], result.shaders[0].flavors)
     return result
 
 def _shader_scalar_platforms_refused_test_impl(ctx):
@@ -122,6 +134,27 @@ def _shader_unknown_platform_refused_test_impl(ctx):
         "platforms",
         "Invalid platform(s): \"tvos\"",
     )
+    return unittest.end(env)
+
+def _shader_predicate_flavors_and_legacy_spoke_test_impl(ctx):
+    """`pub_shader_matches_target` honors flavors, `tester`, and legacy spokes."""
+    env = unittest.begin(ctx)
+    legacy = struct(shader_path = "shaders/old.frag")
+    asserts.true(env, pub_shader_matches_target(legacy, "android"))
+    asserts.true(env, pub_shader_matches_target(legacy, "ios"))
+
+    flavored = struct(flavors = ("paid",), platforms = ())
+    asserts.false(env, pub_shader_matches_target(flavored, "android"))
+    asserts.false(env, pub_shader_matches_target(flavored, "tester"))
+    asserts.false(env, pub_shader_matches_target(flavored, "android", flavor = "free"))
+    asserts.true(env, pub_shader_matches_target(flavored, "android", flavor = "paid"))
+
+    web_only = struct(flavors = (), platforms = ("web",))
+    asserts.false(env, pub_shader_matches_target(web_only, "android"))
+    asserts.false(env, pub_shader_matches_target(web_only, "ios"))
+    asserts.true(env, pub_shader_matches_target(web_only, "web"))
+    asserts.true(env, pub_shader_matches_target(web_only, "tester"))
+    asserts.true(env, pub_shader_matches_target(web_only, None))
     return unittest.end(env)
 
 def _probe_contribution_test_impl(ctx):
@@ -178,6 +211,32 @@ def _shader_filter_test_impl(ctx):
     asserts.true(env, any_key in ios, "unconditional shader must stay on ios")
     return analysistest.end(env)
 
+def _aspect_shader_compile_test_impl(ctx):
+    """Only matching pub shaders produce compiled `.iplr` aspect outputs."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    shaders = target[FlutterCompiledShadersInfo].compiled_shaders.to_list()
+    for entry in shaders:
+        asserts.true(env, entry.file.basename.endswith(".iplr"), entry.file.short_path)
+    bundle_paths = sorted([s.bundle_path for s in shaders])
+    asserts.equals(env, sorted(ctx.attr.expected_bundle_paths), bundle_paths)
+    return analysistest.end(env)
+
+def _sksl_app_actions_test_impl(ctx):
+    """Non-web app bundle registers `FlutterShaderCompile` only for matching shaders."""
+    env = analysistest.begin(ctx)
+    compiles = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterShaderCompile"]
+    compiled_inputs = [
+        f.short_path
+        for a in compiles
+        for f in a.inputs.to_list()
+        if f.short_path.endswith(".frag")
+    ]
+    asserts.true(env, any([p.endswith("shaders/any.frag") for p in compiled_inputs]), str(compiled_inputs))
+    asserts.false(env, any([p.endswith("shaders/web_only.frag") for p in compiled_inputs]), str(compiled_inputs))
+    asserts.false(env, any([p.endswith("shaders/paid_only.frag") for p in compiled_inputs]), str(compiled_inputs))
+    return analysistest.end(env)
+
 def _expect_failure_test_impl(ctx):
     """Assert analysis failed with every expected substring."""
     env = analysistest.begin(ctx)
@@ -192,6 +251,26 @@ _shader_filter_test = analysistest.make(
     attrs = {"probe_dep": attr.label(mandatory = True)},
 )
 
+_app_aspect_compile_test = analysistest.make(
+    _aspect_shader_compile_test_impl,
+    extra_target_under_test_aspects = [flutter_app_shader_aspect],
+    attrs = {"expected_bundle_paths": attr.string_list(mandatory = True)},
+)
+
+_web_aspect_compile_test = analysistest.make(
+    _aspect_shader_compile_test_impl,
+    extra_target_under_test_aspects = [flutter_web_shader_aspect],
+    attrs = {"expected_bundle_paths": attr.string_list(mandatory = True)},
+)
+
+_sksl_app_actions_test = analysistest.make(
+    _sksl_app_actions_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        str(Label("//flutter:profile")): False,
+    },
+)
+
 _expect_failure_test = analysistest.make(
     _expect_failure_test_impl,
     expect_failure = True,
@@ -203,12 +282,13 @@ _t1_test = unittest.make(_shader_unconditional_default_test_impl)
 _t2_test = unittest.make(_shader_scalar_platforms_refused_test_impl)
 _t3_test = unittest.make(_shader_scalar_flavors_refused_test_impl)
 _t4_test = unittest.make(_shader_unknown_platform_refused_test_impl)
+_t5_test = unittest.make(_shader_predicate_flavors_and_legacy_spoke_test_impl)
 
-def shader_conditions_test_suite(name):
-    """Declares the shader condition parse, filter and conflict tests.
+def _declare_probe_tests(name):
+    """Declares the shader condition probe library and filter/aspect tests.
 
     Args:
-        name: Test name prefix; probe and case targets derive from it.
+        name: Test name prefix.
     """
     flutter_library(
         name = name + "_probe_lib",
@@ -228,6 +308,58 @@ def shader_conditions_test_suite(name):
         tags = ["manual"],
     )
 
+    _probe_contribution_test(
+        name = name + "_probe",
+        size = "small",
+        target_under_test = ":" + name + "_probe_lib",
+    )
+
+    _shader_filter_test(
+        name = name + "_filter",
+        size = "small",
+        target_under_test = ":" + name + "_probe_lib",
+        probe_dep = ":" + name + "_probe_lib",
+    )
+
+    _app_aspect_compile_test(
+        name = name + "_app_aspect",
+        size = "small",
+        target_under_test = ":" + name + "_probe_lib",
+        expected_bundle_paths = ["packages/shader_probe/shaders/any.frag"],
+    )
+
+    _web_aspect_compile_test(
+        name = name + "_web_aspect",
+        size = "small",
+        target_under_test = ":" + name + "_probe_lib",
+        expected_bundle_paths = [
+            "packages/shader_probe/shaders/any.frag",
+            "packages/shader_probe/shaders/web_only.frag",
+        ],
+    )
+
+    flutter_application(
+        name = name + "_sksl_app",
+        srcs = ["stub.dart"],
+        main = "stub.dart",
+        package_name = "shader_probe",
+        require_sksl_shaders = True,
+        tags = ["manual"],
+        deps = [":" + name + "_probe_lib"],
+    )
+
+    _sksl_app_actions_test(
+        name = name + "_sksl_app_actions",
+        size = "small",
+        target_under_test = ":" + name + "_sksl_app",
+    )
+
+def _declare_conflict_tests(name):
+    """Declares cross-channel asset-versus-shader conflict analysis tests.
+
+    Args:
+        name: Test name prefix.
+    """
     flutter_library(
         name = name + "_own_conflict",
         srcs = ["stub.dart"],
@@ -244,29 +376,43 @@ def shader_conditions_test_suite(name):
         tags = ["manual"],
     )
 
-    _probe_contribution_test(
-        name = name + "_probe",
-        target_under_test = ":" + name + "_probe_lib",
-    )
-
-    _shader_filter_test(
-        name = name + "_filter",
-        target_under_test = ":" + name + "_probe_lib",
-        probe_dep = ":" + name + "_probe_lib",
+    flutter_library(
+        name = name + "_mixed_conflict",
+        srcs = ["stub.dart"],
+        pkg_assets = {":shaders/x.frag": "shaders/x.frag"},
+        shaders = ["shaders/x.frag"],
+        tags = ["manual"],
     )
 
     _expect_failure_test(
         name = name + "_own_conflict_fails",
+        size = "small",
         target_under_test = ":" + name + "_own_conflict",
-        expected_substrings = ["`assets`", "`shaders`", "same file"],
+        expected_substrings = ["`assets`", "`shaders`", "shaders/x.frag", "same file"],
     )
 
     _expect_failure_test(
         name = name + "_pub_conflict_fails",
+        size = "small",
         target_under_test = ":" + name + "_pub_conflict",
-        expected_substrings = ["`pkg_assets`", "`pkg_shaders`", "same file"],
+        expected_substrings = ["`pkg_assets`", "`pkg_shaders`", "shaders/x.frag", "same file"],
     )
 
+    _expect_failure_test(
+        name = name + "_mixed_conflict_fails",
+        size = "small",
+        target_under_test = ":" + name + "_mixed_conflict",
+        expected_substrings = ["`pkg_assets`", "`shaders`", "shaders/x.frag", "same file"],
+    )
+
+def shader_conditions_test_suite(name):
+    """Declares the shader condition parse, filter and conflict tests.
+
+    Args:
+        name: Test name prefix; probe and case targets derive from it.
+    """
+    _declare_probe_tests(name)
+    _declare_conflict_tests(name)
     small_unittest_suite(
         name + "_unit",
         _t0_test,
@@ -274,4 +420,5 @@ def shader_conditions_test_suite(name):
         _t2_test,
         _t3_test,
         _t4_test,
+        _t5_test,
     )

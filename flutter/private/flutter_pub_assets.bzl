@@ -583,7 +583,7 @@ def ctx_package_lister(ctx, package_name, bound = PUB_ASSET_LIST_BOUND):
         bound,
     )
 
-def pub_shader_condition_entries(package_name, expanded, normalized_shaders, parsed_shaders):
+def pub_shader_condition_entries(expanded, normalized_shaders, parsed_shaders):
     """The asset entries plus the per-file condition entries for a spoke's `pkg_shaders`.
 
     A shader entry carries the same `platforms` / `flavors` conditions as an
@@ -595,18 +595,17 @@ def pub_shader_condition_entries(package_name, expanded, normalized_shaders, par
     function returns the asset entries followed by the shader entries so that
     call takes one list.
 
-    flutter_tools bundles an asset and a shader through different channels
-    with different keys, but a rules_flutter bundle stages the same file once
-    and would let one channel silently stand in for the other. Both channels
-    share the condition attrs, so one file in both also has no single set of
-    conditions. The fetch therefore fails naming the package, the file and
-    both sections: list it in one section only.
+    When a `flutter.assets` entry (such as a directory walk) already covers a
+    file that `flutter.shaders` also lists, both `pkg_assets` and `pkg_shaders`
+    on the generated spoke still receive the file so rule analysis fails in
+    `check_asset_shader_conflict`, naming both entries; skipping the duplicate
+    condition key here keeps condition merging from failing first on flavor
+    disagreement.
 
     Normalization keeps one entry per parsed entry in order, so the two
     shader lists pair by index.
 
     Args:
-        package_name: The pub package the entries come from.
         expanded: Per-file asset entries from `expand_pub_asset_entries`.
         normalized_shaders: `struct(path, key)` entries from
             `normalize_spoke_shaders`.
@@ -614,16 +613,10 @@ def pub_shader_condition_entries(package_name, expanded, normalized_shaders, par
             entries they came from, in the same order.
 
     Returns:
-        `expanded` followed by a `struct(path, flavors, platforms)` per shader.
+        `expanded` followed by a `struct(path, flavors, platforms)` per shader
+        whose path is not already in `expanded`.
     """
     asset_paths = {entry.path: True for entry in expanded}
-    for entry in normalized_shaders:
-        if entry.path in asset_paths:
-            fail((
-                "flutter.pub spoke for \"{pkg}\": pubspec.yaml lists {path} " +
-                "as both a `flutter.assets` file and a `flutter.shaders` " +
-                "entry; list it in one section only."
-            ).format(pkg = package_name, path = entry.path))
     return expanded + [
         struct(
             path = entry.path,
@@ -631,4 +624,5 @@ def pub_shader_condition_entries(package_name, expanded, normalized_shaders, par
             platforms = parsed_shaders[index].platforms,
         )
         for index, entry in enumerate(normalized_shaders)
+        if entry.path not in asset_paths
     ]

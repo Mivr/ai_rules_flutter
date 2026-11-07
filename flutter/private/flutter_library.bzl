@@ -35,7 +35,7 @@ def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None)
         return True
     return target_platform in platforms
 
-def pub_shader_matches_target(entry, target_platform):
+def pub_shader_matches_target(entry, target_platform, flavor = None):
     """Whether a pub shader contribution belongs in this target's bundle.
 
     Shader entries carry the same `platforms` / `flavors` conditions as
@@ -47,6 +47,7 @@ def pub_shader_matches_target(entry, target_platform):
     Args:
         entry: A `pub_shaders` contribution struct.
         target_platform: The bundle's platform, or None to skip filtering.
+        flavor: Active flavor string, or None when no flavor is selected.
 
     Returns:
         True when the shader belongs in the bundle.
@@ -57,6 +58,7 @@ def pub_shader_matches_target(entry, target_platform):
         getattr(entry, "flavors", []),
         getattr(entry, "platforms", []),
         target_platform,
+        flavor = flavor,
     )
 
 def dedupe_shader_jobs(ctx, jobs):
@@ -269,32 +271,40 @@ def build_pub_contributions(package_name, fonts_json, font_files_dict, pkg_asset
 
     return (extra_pub_fonts, extra_pub_assets, extra_pub_shaders)
 
-def check_asset_shader_conflict(label, assets, shaders):
+def check_asset_shader_conflict(label, own_assets, pub_assets, own_shaders, pub_shaders):
     """Fail analysis when one file is listed both as an asset and as a shader.
 
     An asset and a shader are different channels: the bundle stages the file
     once and the manifest and shader compiler each expect to own it. A pub
     asset directory can also cover a file that the same package's
-    `flutter.shaders` lists, so this check runs over both the target's own
+    `flutter.shaders` lists, so this check runs across both the target's own
     `assets` / `shaders` and its `pkg_assets` / `pkg_shaders` contributions.
     The message names both entries, so the fix is one editor jump away.
 
     Args:
-        label: The `flutter_library` label, for the failure.
-        assets: Structs with `file` and `entry` (the asset spelling to name).
-        shaders: Structs with `file` and `entry` (the shader spelling to
-            name).
+        label: The rule target's label, for the failure.
+        own_assets: Files from the target's `assets` attribute.
+        pub_assets: Contribution structs from `pkg_assets`.
+        own_shaders: Files from the target's `shaders` attribute.
+        pub_shaders: Contribution structs from `pkg_shaders`.
     """
     by_file = {}
-    for asset in assets:
-        by_file[asset.file] = asset
+    for f in own_assets:
+        by_file[f] = "`assets` entry \"%s\"" % f.short_path
+    for e in pub_assets:
+        if e.file not in by_file:
+            by_file[e.file] = "`pkg_assets` entry \"%s\"" % e.asset_path
+    shaders = (
+        [struct(file = f, entry = "`shaders` entry \"%s\"" % f.short_path) for f in own_shaders] +
+        [struct(file = e.file, entry = "`pkg_shaders` entry \"%s\"" % e.shader_path) for e in pub_shaders]
+    )
     for shader in shaders:
-        asset = by_file.get(shader.file)
-        if asset != None:
+        asset_entry = by_file.get(shader.file)
+        if asset_entry != None:
             fail((
                 "%s: %s and %s are the same file; list it as an asset or as " +
                 "a shader, not both."
-            ) % (label, asset.entry, shader.entry))
+            ) % (label, asset_entry, shader.entry))
 
 def _pub_family_origin(deps, entry):
     """The contribution's own label, else the first direct dep that carries it.
@@ -656,13 +666,10 @@ def _flutter_library_impl(ctx):
     # covers a declared shader alike.
     check_asset_shader_conflict(
         ctx.label,
-        [struct(file = f, entry = "`assets` entry \"%s\"" % f.short_path) for f in ctx.files.assets],
-        [struct(file = f, entry = "`shaders` entry \"%s\"" % f.short_path) for f in ctx.files.shaders],
-    )
-    check_asset_shader_conflict(
-        ctx.label,
-        [struct(file = e.file, entry = "`pkg_assets` entry \"%s\"" % e.asset_path) for e in extra_pub_assets],
-        [struct(file = e.file, entry = "`pkg_shaders` entry \"%s\"" % e.shader_path) for e in extra_pub_shaders],
+        ctx.files.assets,
+        extra_pub_assets,
+        ctx.files.shaders,
+        extra_pub_shaders,
     )
 
     # `resources` names the non-Dart remainder of `lib/`; a Dart source there
