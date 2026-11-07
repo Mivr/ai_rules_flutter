@@ -148,7 +148,7 @@ String? _repointRoot(String rootUri, {required String base}) {
 /// is the pairing that makes the repository tree the thing being named.
 String? _dropExecroot(String path) {
   final List<String> parts = p.split(path);
-  for (var i = 0; i + 2 < parts.length; i++) {
+  for (int i = parts.length - 3; i >= 0; i--) {
     if (parts[i] == 'execroot' && parts[i + 2] == 'external') {
       return p.joinAll([...parts.sublist(0, i), ...parts.sublist(i + 2)]);
     }
@@ -224,14 +224,30 @@ String? _walkPreservingRepoLink(String path) {
   return state.repoFloor == null ? null : p.joinAll(state.resolved);
 }
 
+String? _tryDropTrailingExecroot(List<String> resolved) {
+  final int len = resolved.length;
+  if (len < 5 ||
+      resolved[len - 4] != 'execroot' ||
+      resolved[len - 2] != 'external') {
+    return null;
+  }
+  final String dropped = p.joinAll([
+    ...resolved.sublist(0, len - 4),
+    'external',
+    resolved.last,
+  ]);
+  return FileSystemEntity.typeSync(dropped, followLinks: false) ==
+          FileSystemEntityType.notFound
+      ? null
+      : dropped;
+}
+
 /// Pins `<output_base>/external/<repo>` without following `<repo>`, rewriting
 /// an `execroot/<ws>/external/<repo>` forest path onto `<output_base>` first.
 bool _pinExternalRepoBoundary(_PathWalk state) {
-  if (state.repoFloor != null || !state.descendsIntoCurrent) return false;
-  final String? dropped = _dropExecroot(p.joinAll(state.resolved));
-  if (dropped != null &&
-      FileSystemEntity.typeSync(dropped, followLinks: false) !=
-          FileSystemEntityType.notFound) {
+  if (!state.descendsIntoCurrent) return false;
+  final String? dropped = _tryDropTrailingExecroot(state.resolved);
+  if (dropped != null) {
     state.resolved
       ..clear()
       ..addAll(p.split(dropped));
@@ -243,6 +259,15 @@ bool _pinExternalRepoBoundary(_PathWalk state) {
       FileSystemEntityType.directory) {
     return false;
   }
+  final FileSystemEntityType repoType = FileSystemEntity.typeSync(
+    p.joinAll(state.resolved),
+    followLinks: false,
+  );
+  final bool shouldPin =
+      dropped != null ||
+      repoType == FileSystemEntityType.link ||
+      (repoType == FileSystemEntityType.directory && state.repoFloor == null);
+  if (!shouldPin) return false;
   final String repo = state.resolved.last;
   final String outputBase = Directory(
     p.joinAll(state.resolved.sublist(0, len - 2)),
