@@ -295,24 +295,53 @@ bool _isAllowedFlutterDirective(
   return _isAllowedSchemeless(uri, from, fromKey, declared, declaredKeys);
 }
 
+/// Normalises dot segments in [rest] before and after the package name as
+/// `Uri.normalizePath` does, where an empty segment counts as a segment.
+/// Returns null if any segment decodes to a directory separator.
+List<String>? _normalizePackageSegments(String rest) {
+  final output = <String>[];
+  var appendSlash = false;
+  for (final String raw in rest.split('/')) {
+    appendSlash = false;
+    final String seg = decodeUriSegment(raw);
+    if (seg.contains('/') || seg.contains(r'\')) return null;
+    if (seg == '..') {
+      if (output.isNotEmpty) {
+        output.removeLast();
+        if (output.isEmpty) output.add('');
+      }
+      appendSlash = true;
+    } else if (seg == '.') {
+      appendSlash = true;
+    } else {
+      output.add(raw);
+    }
+  }
+  if (appendSlash) output.add('');
+  return output;
+}
+
 /// Whether the `package:` [uri] stays inside its package.
 ///
-/// Without an empty segment this is the shared check. With one, the shared
-/// check (at this module's floor version) refuses every spelling, so it is
-/// decided here: an empty segment directly after the package name makes the
-/// front end read the host path (`package:demo//x.dart` is `/x.dart`) and is
-/// refused, a package name holding a percent escape is refused, and any
-/// other empty segment is allowed unless the path climbs above the package
-/// root once empty segments are counted as segments.
+/// Decides on the URI the front end will read by removing dot segments before
+/// and after the package name as `Uri.normalizePath` does (an empty segment
+/// counts as a segment, so `src//../b.dart` still pops it). Refuses package
+/// names that are empty, `.`, or `..` after removal, package names holding
+/// percent escapes that are not dot segments, and an empty segment directly
+/// after the package name when something follows it. Any other empty segment
+/// is allowed unless the path climbs above the package root.
 bool _isAllowedPackage(String uri) {
-  if (!hasEmptyPathSegment(uri)) return !isEscapingPackageUri(uri);
   String rest = uri.substring('package:'.length).replaceAll(r'\', '/');
   final int cut = rest.indexOf(RegExp('[#?]'));
   if (cut >= 0) rest = rest.substring(0, cut);
-  final int slash = rest.indexOf('/');
-  if (slash <= 0 || rest.substring(0, slash).contains('%')) return false;
-  final List<String> segments = rest.substring(slash + 1).split('/');
-  if (segments.first.isEmpty) return false;
+  final List<String>? normalized = _normalizePackageSegments(rest);
+  if (normalized == null || normalized.isEmpty) return false;
+  final String pkg = normalized.first;
+  if (pkg.isEmpty || pkg == '.' || pkg == '..' || pkg.contains('%')) {
+    return false;
+  }
+  final List<String> segments = normalized.sublist(1);
+  if (segments.isNotEmpty && segments.first.isEmpty) return false;
   return _resolveSegments([], segments, refuseEscape: true) != null;
 }
 

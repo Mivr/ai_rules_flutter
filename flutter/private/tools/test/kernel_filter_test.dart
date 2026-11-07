@@ -182,29 +182,64 @@ void main() {}
         );
       });
 
-      test('refuses an empty segment right after the package name', () {
-        for (final uri in [
-          'package:demo//src/d.dart',
-          'package:demo///src/d.dart',
-        ]) {
-          expect(importsOf('demo/lib/m.dart', "import '$uri';"), hasLength(1));
+      const emptyAfterPkg =
+          'package:demo//src/d.dart package:demo///src/d.dart '
+          'package:demo/.//etc/passwd package:demo/%2e//etc/passwd '
+          'package:demo/%2E//etc/passwd package:demo/src/..//etc/passwd '
+          'package:demo/src/%2e%2e//etc/passwd package:./demo//etc/passwd '
+          'package:demo/src/%2E%2E//etc/passwd package:%2e/demo//etc/passwd '
+          'package:%2E/demo//etc/passwd package:../demo//etc/passwd '
+          'package:%2e%2e/demo//etc/passwd package:%2E%2E/demo//etc/passwd';
+
+      void checkRefused(
+        String uris, [
+        List<String> kinds = const ['import', 'export', 'part', 'part of'],
+      ]) {
+        for (final String uri in uris.split(' ')) {
+          for (final kind in kinds) {
+            expect(importsOf('demo/lib/m.dart', "$kind '$uri';"), hasLength(1));
+          }
         }
+      }
+
+      test('refuses an empty segment right after the package name', () {
+        checkRefused(emptyAfterPkg);
       });
 
       test('refuses a package URI that climbs above its package', () {
-        for (final uri in [
-          'package:demo/src//../../../x.dart',
-          'package:demo/a//../../../x.dart',
-        ]) {
-          expect(importsOf('demo/lib/m.dart', "import '$uri';"), hasLength(1));
-        }
-        expect(
-          importsOf(
-            'demo/lib/m.dart',
-            "import 'package:demo/src//../demo.dart';",
-          ),
-          isEmpty,
+        checkRefused(
+          'package:demo/src//../../../x.dart package:demo/a//../../../x.dart '
+          'package:demo//x package:demo///x package:demo%20/x.dart '
+          'package:demo%2e/x.dart package:demo/%2f/x.dart '
+          'package:demo/%5c/x.dart',
         );
+        const safe = 'package:demo/src//../demo.dart';
+        expect(importsOf('demo/lib/m.dart', "import '$safe';"), isEmpty);
+      });
+
+      test('refuses package names that are ., .. or empty', () {
+        checkRefused(
+          'package:. package:.. package: package:/ package:// '
+          'package:%2e package:%2E package:%2e%2e package:%2E%2E '
+          'package:./ package:../ package:%2e/ package:%2e%2e/ '
+          'package:demo/.. package:demo/../ package:demo/../x.dart',
+        );
+      });
+
+      test('matches Uri.normalizePath verdict for empty segment', () {
+        for (final String uri
+            in '$emptyAfterPkg '
+                    'package:demo//x package:demo///x package:demo/src//d.dart '
+                    'package:demo/a//b//c.dart package:demo/src//../d.dart '
+                    'package:demo/./src/d.dart package:demo/a/../src/d.dart'
+                .split(' ')) {
+          final List<String> segs = Uri.parse(uri).normalizePath().pathSegments;
+          expect(
+            importsOf('demo/lib/m.dart', "import '$uri';").isNotEmpty,
+            segs.length > 1 && segs[1].isEmpty,
+            reason: uri,
+          );
+        }
       });
 
       test('allows a relative empty segment that names a declared source', () {
