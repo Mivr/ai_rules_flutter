@@ -329,15 +329,34 @@ void main() {
   });
 
   group('DevConfig', () {
+    Map<String, dynamic> base({
+      String appEntrypoint = 'package:my_app/main.dart',
+    }) => {
+      'engineRevision': 'abc123',
+      'flutterVersion': '3.41.2',
+      'dartSdkRoot': '/ext/dart-sdk',
+      'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
+      'frontendServer': '/ext/host-tools/fs.snapshot',
+      'patchedSdkRoot': '/ext/patched-sdk/flutter_patched_sdk',
+      'appEntrypoint': appEntrypoint,
+    };
+
+    DevConfig configWithRegistrants(Map<String, String> registrants) =>
+        DevConfig(
+          engineRevision: 'abc',
+          flutterVersion: '3.41.2',
+          dartSdkRoot: '/sdk',
+          dartaotruntime: '/bin/dartaotruntime',
+          frontendServer: '/tools/fs.snapshot',
+          patchedSdkRoot: '/patched',
+          appEntrypoint: 'package:my_app/main.dart',
+          dartPluginRegistrants: registrants,
+        );
+
     test('fromJson parses all fields', () {
       final config = DevConfig.fromJson({
-        'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
-        'dartSdkRoot': '/ext/dart-sdk',
-        'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
+        ...base(),
         'frontendServer': '/ext/host-tools/frontend_server_aot.dart.snapshot',
-        'patchedSdkRoot': '/ext/patched-sdk/flutter_patched_sdk',
-        'appEntrypoint': 'package:my_app/main.dart',
       });
       expect(config.engineRevision, 'abc123');
       expect(config.flutterVersion, '3.41.2');
@@ -353,28 +372,13 @@ void main() {
 
     test('fromJson parses dartDefines', () {
       final config = DevConfig.fromJson({
-        'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
-        'dartSdkRoot': '/ext/dart-sdk',
-        'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
-        'frontendServer': '/ext/host-tools/frontend_server_aot.dart.snapshot',
-        'patchedSdkRoot': '/ext/patched-sdk/flutter_patched_sdk',
-        'appEntrypoint': 'package:my_app/main.dart',
+        ...base(),
         'dartDefines': ['A=1', 'B=x,y'],
       });
       expect(config.dartDefines, ['A=1', 'B=x,y']);
     });
 
     test('fromJson parses dartPluginRegistrants, defaults empty', () {
-      Map<String, dynamic> base() => {
-        'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
-        'dartSdkRoot': '/ext/dart-sdk',
-        'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
-        'frontendServer': '/ext/host-tools/fs.snapshot',
-        'patchedSdkRoot': '/ext/patched-sdk/flutter_patched_sdk',
-        'appEntrypoint': 'package:my_app/main.dart',
-      };
       expect(DevConfig.fromJson(base()).dartPluginRegistrants, isEmpty);
       expect(
         DevConfig.fromJson({
@@ -396,19 +400,10 @@ void main() {
       // can differ (an iOS run on a macOS host). The map is keyed by platform
       // so the dev tool feeds its frontend_server the registrant filtered for
       // the platform the app is actually running on — not the host's.
-      final config = DevConfig(
-        engineRevision: 'abc',
-        flutterVersion: '3.41.2',
-        dartSdkRoot: '/sdk',
-        dartaotruntime: '/bin/dartaotruntime',
-        frontendServer: '/tools/fs.snapshot',
-        patchedSdkRoot: '/patched',
-        appEntrypoint: 'package:my_app/main.dart',
-        dartPluginRegistrants: const {
-          'ios': '/exec/bin/app.dev_plugin_registrant.ios.dart',
-          'macos': '/exec/bin/app.dev_plugin_registrant.macos.dart',
-        },
-      );
+      final DevConfig config = configWithRegistrants(const {
+        'ios': '/exec/bin/app.dev_plugin_registrant.ios.dart',
+        'macos': '/exec/bin/app.dev_plugin_registrant.macos.dart',
+      });
       expect(
         config.registrantFor('ios'),
         '/exec/bin/app.dev_plugin_registrant.ios.dart',
@@ -419,16 +414,9 @@ void main() {
       // A missing key is rules/dev-tool version skew (or an unknown platform
       // string), not "no registrant" — guessing here is how the wrong plugin
       // set gets registered silently.
-      final config = DevConfig(
-        engineRevision: 'abc',
-        flutterVersion: '3.41.2',
-        dartSdkRoot: '/sdk',
-        dartaotruntime: '/bin/dartaotruntime',
-        frontendServer: '/tools/fs.snapshot',
-        patchedSdkRoot: '/patched',
-        appEntrypoint: 'package:my_app/main.dart',
-        dartPluginRegistrants: const {'macos': '/exec/bin/r.macos.dart'},
-      );
+      final DevConfig config = configWithRegistrants(const {
+        'macos': '/exec/bin/r.macos.dart',
+      });
       expect(
         () => config.registrantFor('ios'),
         throwsA(
@@ -444,45 +432,18 @@ void main() {
     test('registrantFor passes an empty entry through', () {
       // An empty value is an explicit statement: this platform has no Dart
       // plugins and no agent to register. Distinct from a missing key.
-      final config = DevConfig(
-        engineRevision: 'abc',
-        flutterVersion: '3.41.2',
-        dartSdkRoot: '/sdk',
-        dartaotruntime: '/bin/dartaotruntime',
-        frontendServer: '/tools/fs.snapshot',
-        patchedSdkRoot: '/patched',
-        appEntrypoint: 'package:my_app/main.dart',
-        dartPluginRegistrants: const {'ios': ''},
-      );
+      final DevConfig config = configWithRegistrants(const {'ios': ''});
       expect(config.registrantFor('ios'), isEmpty);
     });
 
     test('fromJson defaults dartDefines to empty when absent', () {
-      final config = DevConfig.fromJson({
-        'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
-        'dartSdkRoot': '/ext/dart-sdk',
-        'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
-        'frontendServer': '/ext/host-tools/frontend_server_aot.dart.snapshot',
-        'patchedSdkRoot': '/ext/patched-sdk/flutter_patched_sdk',
-        'appEntrypoint': 'package:my_app/main.dart',
-      });
-      expect(config.dartDefines, isEmpty);
+      expect(DevConfig.fromJson(base()).dartDefines, isEmpty);
     });
 
     test('fromJson parses enableExperiments, defaults empty', () {
       // Raw experiment names, no `--enable-experiment=` prefix — the same
       // shape the build emits for dartDefines. The compiler config is what
       // adds the flag spelling.
-      Map<String, dynamic> base() => {
-        'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
-        'dartSdkRoot': '/ext/dart-sdk',
-        'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
-        'frontendServer': '/ext/host-tools/fs.snapshot',
-        'patchedSdkRoot': '/ext/patched-sdk/flutter_patched_sdk',
-        'appEntrypoint': 'package:my_app/main.dart',
-      };
       expect(DevConfig.fromJson(base()).enableExperiments, isEmpty);
       expect(
         DevConfig.fromJson({
@@ -494,22 +455,16 @@ void main() {
     });
 
     test('fromJson parses appSources, defaults empty', () {
-      Map<String, dynamic> base() => {
-        'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
-        'dartSdkRoot': '/ext/dart-sdk',
-        'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
-        'frontendServer': '/ext/host-tools/fs.snapshot',
-        'patchedSdkRoot': '/ext/patched-sdk/flutter_patched_sdk',
-        'appEntrypoint': 'org-dartlang-app:///test_driver/app.dart',
-      };
-      expect(DevConfig.fromJson(base()).appSources, isEmpty);
+      final Map<String, dynamic> orgBase = base(
+        appEntrypoint: 'org-dartlang-app:///test_driver/app.dart',
+      );
+      expect(DevConfig.fromJson(orgBase).appSources, isEmpty);
       // Workspace-relative, and left that way: the resolver joins them onto
       // the workspace, where the edits happen — not the exec root the other
       // paths here are absolutized against.
       expect(
         DevConfig.fromJson({
-          ...base(),
+          ...orgBase,
           'appSources': [
             {
               'path': 'test_driver/app.dart',
@@ -530,15 +485,6 @@ void main() {
       // The build's attr default is true, so an absent key means true. A
       // build that turned it off has to reach the dev loop's bootstrap, or
       // the app runs with assertions the build said not to emit.
-      Map<String, dynamic> base() => {
-        'engineRevision': 'abc123',
-        'flutterVersion': '3.41.2',
-        'dartSdkRoot': '/ext/dart-sdk',
-        'dartaotruntime': '/ext/dart-sdk/bin/dartaotruntime',
-        'frontendServer': '/ext/host-tools/fs.snapshot',
-        'patchedSdkRoot': '/ext/patched-sdk/flutter_patched_sdk',
-        'appEntrypoint': 'package:my_app/main.dart',
-      };
       expect(DevConfig.fromJson(base()).nativeNullAssertions, isTrue);
       expect(
         DevConfig.fromJson({
@@ -599,22 +545,56 @@ void main() {
   });
 
   group('parseDevConfig', () {
+    ({String execRoot, DevConfig config}) writeAndParseExecConfig(
+      Map<String, Object?> overrides, {
+      bool createRuntime = false,
+    }) {
+      // Resolve tmpDir to handle /var → /private/var on macOS.
+      final Directory tmpDir = Directory.systemTemp.createTempSync(
+        'test_dev_cfg_',
+      );
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
+      final execRoot = '${tmpDir.resolveSymbolicLinksSync()}/execroot/_main';
+      final binDir = Directory('$execRoot/bazel-out/cfg/bin')
+        ..createSync(recursive: true);
+      if (createRuntime) {
+        final extDir = Directory('$execRoot/external/flutter/dart-sdk/bin')
+          ..createSync(recursive: true);
+        File('${extDir.path}/dartaotruntime').writeAsStringSync('');
+      }
+      final configFile = File('${binDir.path}/app_dev_config.json')
+        ..writeAsStringSync(
+          jsonEncode({
+            'engineRevision': 'abc',
+            'flutterVersion': '3.41.2',
+            'dartSdkRoot': '/sdk',
+            'dartaotruntime': '/bin/dartaotruntime',
+            'frontendServer': '/tools/fs.snapshot',
+            'patchedSdkRoot': '/patched',
+            'appEntrypoint': 'package:my_app/main.dart',
+            ...overrides,
+          }),
+        );
+      return (execRoot: execRoot, config: parseDevConfig(configFile.path));
+    }
+
     test('reads and parses a JSON file with absolute paths', () {
       final Directory tmpDir = Directory.systemTemp.createTempSync(
         'test_dev_config_',
       );
-      final configFile = File('${tmpDir.path}/test_dev_config.json');
-      configFile.writeAsStringSync(
-        jsonEncode({
-          'engineRevision': 'rev123',
-          'flutterVersion': '3.41.2',
-          'dartSdkRoot': '/sdk',
-          'dartaotruntime': '/bin/dartaotruntime',
-          'frontendServer': '/tools/fs.snapshot',
-          'patchedSdkRoot': '/patched',
-          'appEntrypoint': 'package:my_app/main.dart',
-        }),
-      );
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
+      final configFile = File('${tmpDir.path}/test_dev_config.json')
+        ..writeAsStringSync(
+          jsonEncode({
+            'engineRevision': 'rev123',
+            'flutterVersion': '3.41.2',
+            'dartSdkRoot': '/sdk',
+            'dartaotruntime': '/bin/dartaotruntime',
+            'frontendServer': '/tools/fs.snapshot',
+            'patchedSdkRoot': '/patched',
+            'appEntrypoint': 'package:my_app/main.dart',
+          }),
+        );
 
       final DevConfig config = parseDevConfig(configFile.path);
       expect(config.engineRevision, 'rev123');
@@ -623,42 +603,17 @@ void main() {
       expect(config.dartaotruntime, '/bin/dartaotruntime');
       // appEntrypoint is not a filesystem path — left as-is.
       expect(config.appEntrypoint, 'package:my_app/main.dart');
-
-      tmpDir.deleteSync(recursive: true);
     });
 
     test('resolves relative paths using execution root from file location', () {
       // Simulate a Bazel output tree: .../execroot/_main/bazel-out/cfg/bin/
-      final Directory tmpDir = Directory.systemTemp.createTempSync(
-        'test_exec_root_',
-      );
-      // Resolve tmpDir to handle /var → /private/var on macOS.
-      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
-      final execRoot = '$resolvedTmpDir/execroot/_main';
-      final binDir = Directory('$execRoot/bazel-out/cfg/bin');
-      binDir.createSync(recursive: true);
-
-      // Create the external tool so resolveSymbolicLinksSync succeeds.
-      final extDir = Directory('$execRoot/external/flutter/dart-sdk/bin');
-      extDir.createSync(recursive: true);
-      File('${extDir.path}/dartaotruntime').writeAsStringSync('');
-
-      final configFile = File('${binDir.path}/app_dev_config.json');
-      configFile.writeAsStringSync(
-        jsonEncode({
-          'engineRevision': 'abc',
-          'flutterVersion': '3.41.2',
-          'dartSdkRoot': 'external/flutter/dart-sdk',
-          'dartaotruntime': 'external/flutter/dart-sdk/bin/dartaotruntime',
-          'frontendServer': 'external/flutter/fs.snapshot',
-          'patchedSdkRoot': 'external/flutter/patched',
-          'appEntrypoint': 'package:my_app/main.dart',
-          'flutterBootstrapJs':
-              'bazel-out/cfg/bin/app_dev_flutter_bootstrap.js',
-        }),
-      );
-
-      final DevConfig config = parseDevConfig(configFile.path);
+      final (:String execRoot, :DevConfig config) = writeAndParseExecConfig({
+        'dartSdkRoot': 'external/flutter/dart-sdk',
+        'dartaotruntime': 'external/flutter/dart-sdk/bin/dartaotruntime',
+        'frontendServer': 'external/flutter/fs.snapshot',
+        'patchedSdkRoot': 'external/flutter/patched',
+        'flutterBootstrapJs': 'bazel-out/cfg/bin/app_dev_flutter_bootstrap.js',
+      }, createRuntime: true);
       // The bootstrap the dev server serves is a path like any other, and the
       // server opens it directly — a relative one would be opened against
       // whatever the tool's cwd happened to be.
@@ -685,8 +640,6 @@ void main() {
         p.split(config.patchedSdkRoot),
         p.split('$execRoot/external/flutter/patched'),
       );
-
-      tmpDir.deleteSync(recursive: true);
     });
 
     test('absolutizes both per-library maps on the same keys', () {
@@ -694,36 +647,15 @@ void main() {
       // looks a moved library's contract up by the key its sources came back
       // under. One map left relative found nothing there, and a hot reload
       // answered "Null check operator used on a null value".
-      final Directory tmpDir = Directory.systemTemp.createTempSync(
-        'test_dev_cfg_src_',
-      );
-      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
-      final execRoot = '$resolvedTmpDir/execroot/_main';
-      final binDir = Directory('$execRoot/bazel-out/cfg/bin');
-      binDir.createSync(recursive: true);
-      addTearDown(() => tmpDir.deleteSync(recursive: true));
-
-      final configFile = File('${binDir.path}/app_dev_config.json');
-      configFile.writeAsStringSync(
-        jsonEncode({
-          'engineRevision': 'abc',
-          'flutterVersion': '3.41.2',
-          'dartSdkRoot': '/sdk',
-          'dartaotruntime': '/bin/dartaotruntime',
-          'frontendServer': '/tools/fs.snapshot',
-          'patchedSdkRoot': '/patched',
-          'appEntrypoint': 'package:my_app/main.dart',
-          'nativeLibs': ['bazel-out/cfg/bin/libbridge.dylib'],
-          'nativeLibContracts': {
-            'bazel-out/cfg/bin/libbridge.dylib': ['bridge/codegen.ir'],
-          },
-          'nativeLibSources': {
-            'bazel-out/cfg/bin/libbridge.dylib': ['bridge/bridge.c'],
-          },
-        }),
-      );
-
-      final DevConfig config = parseDevConfig(configFile.path);
+      final (:String execRoot, :DevConfig config) = writeAndParseExecConfig({
+        'nativeLibs': ['bazel-out/cfg/bin/libbridge.dylib'],
+        'nativeLibContracts': {
+          'bazel-out/cfg/bin/libbridge.dylib': ['bridge/codegen.ir'],
+        },
+        'nativeLibSources': {
+          'bazel-out/cfg/bin/libbridge.dylib': ['bridge/bridge.c'],
+        },
+      });
       final library = '$execRoot/bazel-out/cfg/bin/libbridge.dylib';
       expect(config.nativeLibs.map(p.split), [p.split(library)]);
       expect(config.nativeLibContracts.keys.map(p.split), [p.split(library)]);
@@ -739,33 +671,12 @@ void main() {
       // the chosen one into a file:// URI for the frontend_server
       // --source/-D trio. Empty entries (a platform with no registrant)
       // stay empty rather than becoming a path to the exec root.
-      final Directory tmpDir = Directory.systemTemp.createTempSync(
-        'test_dev_cfg_reg_',
-      );
-      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
-      final execRoot = '$resolvedTmpDir/execroot/_main';
-      final binDir = Directory('$execRoot/bazel-out/cfg/bin');
-      binDir.createSync(recursive: true);
-      addTearDown(() => tmpDir.deleteSync(recursive: true));
-
-      final configFile = File('${binDir.path}/app_dev_config.json');
-      configFile.writeAsStringSync(
-        jsonEncode({
-          'engineRevision': 'abc',
-          'flutterVersion': '3.41.2',
-          'dartSdkRoot': '/sdk',
-          'dartaotruntime': '/bin/dartaotruntime',
-          'frontendServer': '/tools/fs.snapshot',
-          'patchedSdkRoot': '/patched',
-          'appEntrypoint': 'package:my_app/main.dart',
-          'dartPluginRegistrants': {
-            'ios': 'bazel-out/cfg/bin/app.dev_plugin_registrant.ios.dart',
-            'windows': '',
-          },
-        }),
-      );
-
-      final DevConfig config = parseDevConfig(configFile.path);
+      final (:String execRoot, :DevConfig config) = writeAndParseExecConfig({
+        'dartPluginRegistrants': {
+          'ios': 'bazel-out/cfg/bin/app.dev_plugin_registrant.ios.dart',
+          'windows': '',
+        },
+      });
       expect(
         p.split(config.registrantFor('ios')),
         p.split(
@@ -776,71 +687,30 @@ void main() {
     });
 
     test('does not absolutize dartDefines, even path-like values', () {
-      final Directory tmpDir = Directory.systemTemp.createTempSync(
-        'test_dev_cfg_dd_',
-      );
-      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
-      final execRoot = '$resolvedTmpDir/execroot/_main';
-      final binDir = Directory('$execRoot/bazel-out/cfg/bin');
-      binDir.createSync(recursive: true);
-      addTearDown(() => tmpDir.deleteSync(recursive: true));
-
-      final configFile = File('${binDir.path}/app_dev_config.json');
-      configFile.writeAsStringSync(
-        jsonEncode({
-          'engineRevision': 'abc',
-          'flutterVersion': '3.41.2',
-          'dartSdkRoot': '/sdk',
-          'dartaotruntime': '/bin/dartaotruntime',
-          'frontendServer': '/tools/fs.snapshot',
-          'patchedSdkRoot': '/patched',
-          'appEntrypoint': 'package:my_app/main.dart',
-          // Defines are KEY=VALUE strings, never paths — a value that merely
-          // looks exec-root-relative must pass through untouched.
-          'dartDefines': ['ASSET_DIR=external/foo', 'MSG=hello'],
-        }),
-      );
-
-      final DevConfig config = parseDevConfig(configFile.path);
+      // Defines are KEY=VALUE strings, never paths — a value that merely
+      // looks exec-root-relative must pass through untouched.
+      final (:DevConfig config, execRoot: _) = writeAndParseExecConfig({
+        'dartDefines': ['ASSET_DIR=external/foo', 'MSG=hello'],
+      });
       expect(config.dartDefines, ['ASSET_DIR=external/foo', 'MSG=hello']);
     });
 
     test('parses + absolutizes the codegen multi-root fields', () {
-      final Directory tmpDir = Directory.systemTemp.createTempSync(
-        'test_dev_cfg_mr_',
-      );
-      final String resolvedTmpDir = tmpDir.resolveSymbolicLinksSync();
-      final execRoot = '$resolvedTmpDir/execroot/_main';
-      final binDir = Directory('$execRoot/bazel-out/cfg/bin');
-      binDir.createSync(recursive: true);
-      Directory(
-        '$execRoot/external/flutter/dart-sdk/bin',
-      ).createSync(recursive: true);
-      File(
-        '$execRoot/external/flutter/dart-sdk/bin/dartaotruntime',
-      ).writeAsStringSync('');
-
-      final configFile = File('${binDir.path}/app_dev_config.json');
-      configFile.writeAsStringSync(
-        jsonEncode({
-          'engineRevision': 'abc',
-          'flutterVersion': '3.44.0',
-          'dartSdkRoot': 'external/flutter/dart-sdk',
-          'dartaotruntime': 'external/flutter/dart-sdk/bin/dartaotruntime',
-          'frontendServer': 'external/flutter/fs.snapshot',
-          'patchedSdkRoot': 'external/flutter/patched',
-          'appEntrypoint': 'package:codegen_e2e/main.dart',
-          'devPackageConfig': 'bazel-out/cfg/bin/app.dev_package_config.json',
-          'buildPackageConfig': 'bazel-out/cfg/bin/app.package_config.json',
-          'filesystemScheme': 'org-dartlang-app',
-          'filesystemRoots': ['', 'bazel-out/cfg/bin'],
-          'generatedSourcePaths': ['bazel-out/cfg/bin/lib/user.g.dart'],
-          'generatedSourceUris': ['package:codegen_e2e/user.g.dart'],
-          'nativeLibs': ['bazel-out/cfg/bin/libbridge.dylib'],
-        }),
-      );
-
-      final DevConfig config = parseDevConfig(configFile.path);
+      final (:String execRoot, :DevConfig config) = writeAndParseExecConfig({
+        'flutterVersion': '3.44.0',
+        'dartSdkRoot': 'external/flutter/dart-sdk',
+        'dartaotruntime': 'external/flutter/dart-sdk/bin/dartaotruntime',
+        'frontendServer': 'external/flutter/fs.snapshot',
+        'patchedSdkRoot': 'external/flutter/patched',
+        'appEntrypoint': 'package:codegen_e2e/main.dart',
+        'devPackageConfig': 'bazel-out/cfg/bin/app.dev_package_config.json',
+        'buildPackageConfig': 'bazel-out/cfg/bin/app.package_config.json',
+        'filesystemScheme': 'org-dartlang-app',
+        'filesystemRoots': ['', 'bazel-out/cfg/bin'],
+        'generatedSourcePaths': ['bazel-out/cfg/bin/lib/user.g.dart'],
+        'generatedSourceUris': ['package:codegen_e2e/user.g.dart'],
+        'nativeLibs': ['bazel-out/cfg/bin/libbridge.dylib'],
+      }, createRuntime: true);
       expect(config.filesystemScheme, 'org-dartlang-app');
       // devPackageConfig + filesystemRoots + generatedSourcePaths are
       // exec-relative paths → absolutized (incl. "" → the exec root itself).
@@ -883,11 +753,15 @@ void main() {
         config.generatedFileUris['package:codegen_e2e/user.g.dart'],
         isNotNull,
       );
-
-      tmpDir.deleteSync(recursive: true);
     });
   });
 
+  _defineDeclaredFilesTests();
+  _defineWebToolchainTests();
+  _defineWebOutputDirTests();
+}
+
+void _defineDeclaredFilesTests() {
   group('requireDeclaredFilesExist', () {
     test('names a native library the build declared and did not write', () {
       final Directory tmp = Directory.systemTemp.createTempSync(
@@ -924,39 +798,102 @@ void main() {
       );
     });
   });
+}
 
+DevConfig _webDevConfig() => DevConfig(
+  engineRevision: 'abc',
+  flutterVersion: '3.41.2',
+  dartSdkRoot: '/ext/dart-sdk',
+  dartaotruntime: '/bin/dartaotruntime',
+  frontendServer: '/tools/fs.snapshot',
+  patchedSdkRoot: '/patched',
+  appEntrypoint: 'package:test_app/main.dart',
+);
+
+typedef _WebTree = ({String outputBase, String dartLibraries});
+
+/// Lay out a fake output base whose `external/<web>` repo is a symlink into a
+/// separate contents-cache directory while `external/<dart>` is a sibling.
+_WebTree _createCachedWebOutputBase(Directory tmpDir) {
+  final String cacheWeb = p.join(tmpDir.path, 'cache', 'web_entry');
+  Directory(p.join(cacheWeb, 'web-sdk', 'kernel')).createSync(recursive: true);
+  File(p.join(cacheWeb, 'web-sdk', 'libraries.json')).writeAsStringSync('{}');
+  File(
+    p.join(cacheWeb, 'web-sdk', 'kernel', 'ddc_outline.dill'),
+  ).writeAsStringSync('dill');
+  File(
+    p.join(cacheWeb, 'web-sdk', 'kernel', 'dart_sdk.js'),
+  ).writeAsStringSync('sdk');
+
+  final String outputBase = p.join(tmpDir.path, 'ob');
+  final String externalDir = p.join(outputBase, 'external');
+  Directory(externalDir).createSync(recursive: true);
+  Link(p.join(externalDir, 'web_sdk')).createSync(cacheWeb);
+
+  final String dartSdk = p.join(externalDir, 'dart_sdk', 'dart-sdk', 'lib');
+  Directory(p.join(dartSdk, 'dev_compiler')).createSync(recursive: true);
+  final dartLibs = File(p.join(dartSdk, 'libraries.json'))
+    ..writeAsStringSync('{"dart":"sdk"}');
+  File(p.join(dartSdk, 'dev_compiler', 'loader.js')).writeAsStringSync('ldr');
+  File(p.join(dartSdk, 'dev_compiler', 'mapper.js')).writeAsStringSync('map');
+  return (outputBase: outputBase, dartLibraries: dartLibs.path);
+}
+
+List<String> _linkWebOutputs(String binDir, {required String externalPrefix}) {
+  Directory(binDir).createSync(recursive: true);
+  final targets = <String, String>{
+    'app_ddc_outline.dill':
+        '$externalPrefix/web_sdk/web-sdk/kernel/ddc_outline.dill',
+    'app_ddc_libraries.json': '$externalPrefix/web_sdk/web-sdk/libraries.json',
+    'app_ddc_dart_sdk.js': '$externalPrefix/web_sdk/web-sdk/kernel/dart_sdk.js',
+    'app_ddc_module_loader.js':
+        '$externalPrefix/dart_sdk/dart-sdk/lib/dev_compiler/loader.js',
+    'app_ddc_stack_trace_mapper.js':
+        '$externalPrefix/dart_sdk/dart-sdk/lib/dev_compiler/mapper.js',
+  };
+  return [
+    for (final MapEntry(:key, :value) in targets.entries)
+      (Link(p.join(binDir, key))..createSync(value)).path,
+  ];
+}
+
+void _assertReachesSiblingDartSdk(String librariesSpec, String expectedFile) {
+  expect(p.split(librariesSpec), contains('external'));
+  expect(p.split(librariesSpec), isNot(contains('cache')));
+  final String included = p.normalize(
+    p.join(
+      p.dirname(librariesSpec),
+      '../../dart_sdk/dart-sdk/lib/libraries.json',
+    ),
+  );
+  expect(
+    File(included).resolveSymbolicLinksSync(),
+    File(expectedFile).resolveSymbolicLinksSync(),
+  );
+}
+
+void _defineWebToolchainTests() {
   group('buildWebToolchainFromOutputs', () {
     test('constructs WebToolchainPaths from output file list', () {
       // Create temp files so resolveSymbolicLinksSync works.
       final Directory tmpDir = Directory.systemTemp.createTempSync(
         'test_web_outputs_',
       );
-      final files = <String>[];
-      for (final suffix in [
-        'app_ddc_outline.dill',
-        'app_ddc_libraries.json',
-        'app_ddc_dart_sdk.js',
-        'app_ddc_module_loader.js',
-        'app_ddc_stack_trace_mapper.js',
-      ]) {
-        final f = File('${tmpDir.path}/$suffix');
-        f.writeAsStringSync('dummy');
-        files.add(f.path);
-      }
-
-      final devConfig = DevConfig(
-        engineRevision: 'abc',
-        flutterVersion: '3.41.2',
-        dartSdkRoot: '/ext/dart-sdk',
-        dartaotruntime: '/bin/dartaotruntime',
-        frontendServer: '/tools/fs.snapshot',
-        patchedSdkRoot: '/patched',
-        appEntrypoint: 'package:test_app/main.dart',
-      );
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
+      final files = <String>[
+        for (final suffix in [
+          'app_ddc_outline.dill',
+          'app_ddc_libraries.json',
+          'app_ddc_dart_sdk.js',
+          'app_ddc_module_loader.js',
+          'app_ddc_stack_trace_mapper.js',
+        ])
+          (File('${tmpDir.path}/$suffix')..writeAsStringSync('dummy')).path,
+      ];
 
       final WebToolchainPaths result = buildWebToolchainFromOutputs(
         files,
-        devConfig,
+        _webDevConfig(),
       );
       expect(result.ddcOutlineDill, contains('app_ddc_outline.dill'));
       expect(result.librariesSpec, contains('app_ddc_libraries.json'));
@@ -967,43 +904,99 @@ void main() {
         contains('app_ddc_stack_trace_mapper.js'),
       );
       expect(result.dartSdkRoot, '/ext/dart-sdk');
-
-      tmpDir.deleteSync(recursive: true);
     });
 
     test('throws when DDC files missing', () {
-      final devConfig = DevConfig(
-        engineRevision: 'abc',
-        flutterVersion: '3.41.2',
-        dartSdkRoot: '/ext/dart-sdk',
-        dartaotruntime: '/bin/dartaotruntime',
-        frontendServer: '/tools/fs.snapshot',
-        patchedSdkRoot: '/patched',
-        appEntrypoint: 'package:test_app/main.dart',
-      );
-
       expect(
-        () => buildWebToolchainFromOutputs([], devConfig),
+        () => buildWebToolchainFromOutputs([], _webDevConfig()),
         throwsStateError,
       );
     });
+
+    test('throws FileSystemException when an output does not exist', () {
+      final Directory tmp = Directory.systemTemp.createTempSync('web_miss_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      expect(
+        () => buildWebToolchainFromOutputs(
+          [p.join(tmp.path, 'missing_ddc_libraries.json')],
+          _webDevConfig(),
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+    });
+
+    _defineWebExternalSymlinkTests();
+  });
+}
+
+void _defineWebExternalSymlinkTests() {
+  test('keeps external/<repo> unfollowed so ../../<dart> reaches sibling', () {
+    final Directory tmp = Directory.systemTemp.createTempSync('web_ext_');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final _WebTree tree = _createCachedWebOutputBase(tmp);
+    final List<String> outputs = _linkWebOutputs(
+      p.join(tmp.path, 'out'),
+      externalPrefix: p.join(tree.outputBase, 'external'),
+    );
+
+    final WebToolchainPaths result = buildWebToolchainFromOutputs(
+      outputs,
+      _webDevConfig(),
+    );
+    _assertReachesSiblingDartSdk(result.librariesSpec, tree.dartLibraries);
   });
 
+  test('drops execroot/<ws> when resolving through the execroot forest', () {
+    final Directory tmp = Directory.systemTemp.createTempSync('web_exec_');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final _WebTree tree = _createCachedWebOutputBase(tmp);
+    final String forest = p.join(
+      tree.outputBase,
+      'execroot',
+      '_main',
+      'external',
+    );
+    Directory(forest).createSync(recursive: true);
+    for (final repo in ['web_sdk', 'dart_sdk']) {
+      Link(p.join(forest, repo)).createSync(
+        p.join(tree.outputBase, 'external', repo),
+      );
+    }
+    final List<String> outputs = _linkWebOutputs(
+      p.join(
+        tree.outputBase,
+        'execroot',
+        '_main',
+        'bazel-out',
+        'k8-dbg',
+        'bin',
+      ),
+      externalPrefix: '../../../external',
+    );
+
+    final WebToolchainPaths result = buildWebToolchainFromOutputs(
+      outputs,
+      _webDevConfig(),
+    );
+    expect(p.split(result.librariesSpec), isNot(contains('execroot')));
+    _assertReachesSiblingDartSdk(result.librariesSpec, tree.dartLibraries);
+  });
+}
+
+void _defineWebOutputDirTests() {
   group('findWebOutputDir', () {
     test('finds directory ending with _web', () {
       final Directory tmpDir = Directory.systemTemp.createTempSync(
         'test_web_dir_',
       );
-      final webDir = Directory('${tmpDir.path}/app_web');
-      webDir.createSync();
+      addTearDown(() => tmpDir.deleteSync(recursive: true));
+      final webDir = Directory('${tmpDir.path}/app_web')..createSync();
 
       final String result = findWebOutputDir([
         '${tmpDir.path}/app_dev_config.json',
         webDir.path,
       ]);
       expect(result, webDir.path);
-
-      tmpDir.deleteSync(recursive: true);
     });
 
     test('throws when no _web directory found', () {
