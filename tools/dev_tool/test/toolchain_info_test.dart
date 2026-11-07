@@ -815,27 +815,24 @@ typedef _WebTree = ({String outputBase, String dartLibraries});
 /// Lay out a fake output base whose `external/<web>` repo is a symlink into a
 /// separate contents-cache directory while `external/<dart>` is a sibling.
 _WebTree _createCachedWebOutputBase(Directory tmpDir) {
-  final String cacheWeb = p.join(tmpDir.path, 'cache', 'web_entry');
-  Directory(p.join(cacheWeb, 'web-sdk', 'kernel')).createSync(recursive: true);
-  File(p.join(cacheWeb, 'web-sdk', 'libraries.json')).writeAsStringSync('{}');
-  File(
-    p.join(cacheWeb, 'web-sdk', 'kernel', 'ddc_outline.dill'),
-  ).writeAsStringSync('dill');
-  File(
-    p.join(cacheWeb, 'web-sdk', 'kernel', 'dart_sdk.js'),
-  ).writeAsStringSync('sdk');
+  final String cacheWeb = p.join(tmpDir.path, 'cache', 'web_entry', 'web-sdk');
+  Directory(p.join(cacheWeb, 'kernel')).createSync(recursive: true);
+  File(p.join(cacheWeb, 'libraries.json')).writeAsStringSync('{}');
+  File(p.join(cacheWeb, 'kernel', 'ddc_outline.dill')).writeAsStringSync('d');
+  File(p.join(cacheWeb, 'kernel', 'dart_sdk.js')).writeAsStringSync('sdk');
 
   final String outputBase = p.join(tmpDir.path, 'ob');
   final String externalDir = p.join(outputBase, 'external');
   Directory(externalDir).createSync(recursive: true);
-  Link(p.join(externalDir, 'web_sdk')).createSync(cacheWeb);
+  Link(p.join(externalDir, 'web_sdk')).createSync(p.dirname(cacheWeb));
 
-  final String dartSdk = p.join(externalDir, 'dart_sdk', 'dart-sdk', 'lib');
-  Directory(p.join(dartSdk, 'dev_compiler')).createSync(recursive: true);
-  final dartLibs = File(p.join(dartSdk, 'libraries.json'))
+  final String dartLib = p.join(externalDir, 'dart_sdk', 'dart-sdk', 'lib');
+  Directory(p.join(dartLib, 'dev_compiler')).createSync(recursive: true);
+  final dartLibs = File(p.join(dartLib, 'libraries.json'))
     ..writeAsStringSync('{"dart":"sdk"}');
-  File(p.join(dartSdk, 'dev_compiler', 'loader.js')).writeAsStringSync('ldr');
-  File(p.join(dartSdk, 'dev_compiler', 'mapper.js')).writeAsStringSync('map');
+  for (final js in ['loader.js', 'mapper.js']) {
+    File(p.join(dartLib, 'dev_compiler', js)).writeAsStringSync(js);
+  }
   return (outputBase: outputBase, dartLibraries: dartLibs.path);
 }
 
@@ -857,18 +854,18 @@ List<String> _linkWebOutputs(String binDir, {required String externalPrefix}) {
   ];
 }
 
-void _assertReachesSiblingDartSdk(String librariesSpec, String expectedFile) {
-  expect(p.split(librariesSpec), contains('external'));
-  expect(p.split(librariesSpec), isNot(contains('cache')));
-  final String included = p.normalize(
-    p.join(
-      p.dirname(librariesSpec),
-      '../../dart_sdk/dart-sdk/lib/libraries.json',
-    ),
+void _assertReachesSiblingDartSdk(String librariesSpec, _WebTree tree) {
+  final String ob = Directory(tree.outputBase).resolveSymbolicLinksSync();
+  expect(
+    p.relative(librariesSpec, from: ob),
+    p.join('external', 'web_sdk', 'web-sdk', 'libraries.json'),
   );
+  final String included = Uri.file(
+    librariesSpec,
+  ).resolve('../../dart_sdk/dart-sdk/lib/libraries.json').toFilePath();
   expect(
     File(included).resolveSymbolicLinksSync(),
-    File(expectedFile).resolveSymbolicLinksSync(),
+    File(tree.dartLibraries).resolveSymbolicLinksSync(),
   );
 }
 
@@ -931,7 +928,7 @@ void _defineWebToolchainTests() {
 
 void _defineWebExternalSymlinkTests() {
   test('keeps external/<repo> unfollowed so ../../<dart> reaches sibling', () {
-    final Directory tmp = Directory.systemTemp.createTempSync('web_ext_');
+    final Directory tmp = Directory.systemTemp.createTempSync('web_').absolute;
     addTearDown(() => tmp.deleteSync(recursive: true));
     final _WebTree tree = _createCachedWebOutputBase(tmp);
     final List<String> outputs = _linkWebOutputs(
@@ -943,19 +940,22 @@ void _defineWebExternalSymlinkTests() {
       outputs,
       _webDevConfig(),
     );
-    _assertReachesSiblingDartSdk(result.librariesSpec, tree.dartLibraries);
+    _assertReachesSiblingDartSdk(result.librariesSpec, tree);
   });
 
   test('drops execroot/<ws> when resolving through the execroot forest', () {
-    final Directory tmp = Directory.systemTemp.createTempSync('web_exec_');
+    final Directory tmp = Directory.systemTemp.createTempSync('exec_').absolute;
     addTearDown(() => tmp.deleteSync(recursive: true));
-    final _WebTree tree = _createCachedWebOutputBase(tmp);
-    final String forest = p.join(
+    final host = Directory(
+      p.join(tmp.path, 'cache', 'execroot', '_main', 'external', 'outer'),
+    )..createSync(recursive: true);
+    final _WebTree tree = _createCachedWebOutputBase(host);
+    final String forest = p.joinAll([
       tree.outputBase,
       'execroot',
       '_main',
       'external',
-    );
+    ]);
     Directory(forest).createSync(recursive: true);
     for (final repo in ['web_sdk', 'dart_sdk']) {
       Link(p.join(forest, repo)).createSync(
@@ -963,23 +963,15 @@ void _defineWebExternalSymlinkTests() {
       );
     }
     final List<String> outputs = _linkWebOutputs(
-      p.join(
-        tree.outputBase,
-        'execroot',
-        '_main',
-        'bazel-out',
-        'k8-dbg',
-        'bin',
-      ),
-      externalPrefix: '../../../external',
+      p.joinAll([tree.outputBase, 'execroot', '_main', 'bazel-out', 'bin']),
+      externalPrefix: '../../external',
     );
 
     final WebToolchainPaths result = buildWebToolchainFromOutputs(
       outputs,
       _webDevConfig(),
     );
-    expect(p.split(result.librariesSpec), isNot(contains('execroot')));
-    _assertReachesSiblingDartSdk(result.librariesSpec, tree.dartLibraries);
+    _assertReachesSiblingDartSdk(result.librariesSpec, tree);
   });
 }
 
