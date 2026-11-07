@@ -11389,7 +11389,7 @@
     },
     "@@ai_rules_flutter+//flutter:extensions.bzl%flutter": {
       "general": {
-        "bzlTransitiveDigest": "HAiZV5ZMLRRqjncS26s1Wf6pPPteOZgZcs74qjS++cg=",
+        "bzlTransitiveDigest": "AGdFAjoY3XmnSXtJP6Q6gncsGrw4RI3VqyY7e3sfB8w=",
         "usagesDigest": "moYvnLc9G3PrdRUTSyVVjrmdSE8rcxnFOAa2lYiQ0E8=",
         "recordedInputs": [
           "REPO_MAPPING:ai_rules_dart+,dart_pub_scanner ai_rules_dart++dart+dart_pub_scanner",

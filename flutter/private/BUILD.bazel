@@ -1024,12 +1024,12 @@ bzl_library(
     deps = [
         ":flutter_apple_plugin_defines",
         ":flutter_pub_apple",
+        ":flutter_pub_apple_byname",
         ":flutter_pub_apple_local_refusal",
         ":flutter_pub_apple_local_targets",
         ":flutter_pub_walk",
         ":podspec_read",
         ":podspec_read_xcconfig",
-        ":starlark_literal",
         ":swiftpm_manifest",
         ":swiftpm_manifest_lex",
         ":swiftpm_package",

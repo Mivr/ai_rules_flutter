@@ -478,6 +478,63 @@ def _xtool_appends_local_files_test_impl(ctx):
     asserts.true(env, "\":plugin_apple_ios__plugin_objc\"," in patched)
     return unittest.end(env)
 
+def _byname_local_manifest(deps, with_local = False):
+    """Build a plugin manifest whose primary target carries `deps`."""
+    extra = ""
+    if with_local:
+        extra = ',\n        .target(name: "image_picker_ios_objc", cSettings: [.headerSearchPath("include/image_picker_ios")])'
+    return """// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(
+    name: "image_picker_ios",
+    products: [.library(name: "image-picker-ios", targets: ["image_picker_ios"])],
+    dependencies: [.package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.1")],
+    targets: [
+        .target(name: "image_picker_ios", dependencies: [%s])%s
+    ]
+)
+""" % (deps, extra)
+
+def _parse_and_walk_local(deps, with_local = False):
+    """Parse `_byname_local_manifest` and run `plugin_local_targets`."""
+    parsed = parse_plugin_local_package("image_picker_ios", _byname_local_manifest(deps, with_local))
+    return plugin_local_targets(
+        "image_picker_ios",
+        parsed.model,
+        "ios/image_picker_ios",
+        _IMAGE_PICKER_PRIMARY,
+        "ios",
+    )
+
+def _byname_dependencies_test_impl(ctx):
+    """By-name external products are skipped while by-name local targets are followed."""
+    env = unittest.begin(ctx)
+    expected_only = _parse_and_walk_local('.product(name: "BigInt", package: "BigInt")')
+    byname_only = _parse_and_walk_local('"BigInt", .byName(name: "BigInt")')
+    asserts.true(env, expected_only.ok, expected_only.error)
+    asserts.true(env, byname_only.ok, byname_only.error)
+    asserts.equals(env, expected_only.targets, byname_only.targets)
+
+    expected = _parse_and_walk_local(
+        '.product(name: "BigInt", package: "BigInt"), .target(name: "image_picker_ios_objc")',
+        with_local = True,
+    )
+    byname = _parse_and_walk_local(
+        '"BigInt", .byName(name: "BigInt"), "image_picker_ios_objc"',
+        with_local = True,
+    )
+    case_local = _parse_and_walk_local(
+        '"bigint", .byName(name: "IMAGE_PICKER_IOS_OBJC")',
+        with_local = True,
+    )
+    asserts.true(env, expected.ok, expected.error)
+    asserts.true(env, byname.ok, byname.error)
+    asserts.equals(env, expected.targets, byname.targets)
+    asserts.equals(env, ["image_picker_ios_objc"], [t.name for t in byname.targets])
+    asserts.true(env, case_local.ok, case_local.error)
+    asserts.equals(env, ["image_picker_ios_objc"], [t.name for t in case_local.targets])
+    return unittest.end(env)
+
 _image_picker_shape_test = unittest.make(_image_picker_shape_test_impl)
 _primary_only_keeps_base_shape_test = unittest.make(_primary_only_keeps_base_shape_test_impl)
 _transitive_default_dirs_test = unittest.make(_transitive_default_dirs_test_impl)
@@ -487,6 +544,7 @@ _render_local_plugin_defines_test = unittest.make(_render_local_plugin_defines_t
 _primary_conditional_dep_test = unittest.make(_primary_conditional_dep_test_impl)
 _binary_dependency_refusal_test = unittest.make(_binary_dependency_refusal_test_impl)
 _xtool_appends_local_files_test = unittest.make(_xtool_appends_local_files_test_impl)
+_byname_dependencies_test = unittest.make(_byname_dependencies_test_impl)
 _firebase_core_shape_test = unittest.make(_firebase_core_shape_test_impl)
 _video_player_shape_test = unittest.make(_video_player_shape_test_impl)
 _missing_directory_test = unittest.make(_missing_directory_test_impl)
@@ -858,6 +916,7 @@ def swiftpm_plugin_local_test_suite(name):
         _primary_conditional_dep_test,
         _binary_dependency_refusal_test,
         _xtool_appends_local_files_test,
+        _byname_dependencies_test,
     )
     analysis_tests = _register_spm_plugin_analysis_tests(name)
     native.test_suite(

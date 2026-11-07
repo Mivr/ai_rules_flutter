@@ -8,6 +8,7 @@ load(
     "select_apple_swiftpm_deps",
     "with_apple_swiftpm_deps",
 )
+load("//flutter/private:flutter_pub_apple_local.bzl", "apply_apple_native_deps")
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
@@ -713,6 +714,65 @@ def _spaced_package_declaration_is_refused_when_unreadable_test_impl(ctx):
     asserts.equals(env, [], selected.labels)
     return unittest.end(env)
 
+def _fake_spoke_ctx(files, dirs):
+    """Build a fake spoke repository context backed by `files` and `dirs`."""
+
+    def _path(rel):
+        """Fake `ctx.path` entry for `rel`."""
+        key = str(rel)
+        children = [struct(basename = name, is_dir = is_d) for name, is_d in dirs.get(key, [])]
+        return struct(
+            exists = key in files or key in dirs,
+            is_dir = key in dirs,
+            basename = key[key.rfind("/") + 1:],
+            readdir = lambda: children,
+        )
+
+    return struct(
+        attr = struct(
+            plugin_native_deps = None,
+            podfile_lock = None,
+            package_resolved = "//:Package.resolved",
+            package_sha256 = "//:package_sha256.json",
+            ios_native_deps = None,
+            hub_name = "deps",
+            lock_packages = ["spm_bigint_plugin"],
+            pubspec_lock = "//:pubspec.lock",
+            scc_targets = {},
+            plugin_defines = [],
+        ),
+        path = _path,
+        read = lambda rel: files[str(rel)],
+    )
+
+def _apply_apple_native_deps_byname_product_test_impl(ctx):
+    """`apply_apple_native_deps` links a by-name product without a local-walk refusal."""
+    env = unittest.begin(ctx)
+    manifest = _BYNAME_MANIFEST.replace(
+        "    targets: [",
+        '    targets: [.target(name: "Helper"), ',
+    ).replace("DEPS", '"BigInt", .byName(name: "BigInt"), "Helper"')
+    fake = _fake_spoke_ctx(
+        files = {
+            "//:Package.resolved": _BIGINT_RESOLVED,
+            "//:package_sha256.json": '{"bigint": "%s"}' % _BIGINT_SHA,
+            "ios/spm_bigint_plugin/Package.swift": manifest,
+            "ios/spm_bigint_plugin/Sources/Helper/Helper.swift": "public enum Helper {}\n",
+        },
+        dirs = {
+            "ios/spm_bigint_plugin/Sources": [("spm_bigint_plugin", True), ("Helper", True)],
+            "ios/spm_bigint_plugin/Sources/Helper": [("Helper.swift", False)],
+        },
+    )
+    srcs = ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"]
+    apple = struct(macos_srcs = [], ios_srcs = srcs, macos_podspec = None, ios_podspec = None)
+    base = apple_plugin_targets("spm_bigint_plugin", srcs, [], "ios")
+    rendered = apply_apple_native_deps(fake, "spm_bigint_plugin", apple, base)
+    asserts.equals(env, 2, len(rendered.split("@deps__swiftpm-bigint//:BigInt")) - 1)
+    asserts.true(env, '":spm_bigint_plugin_apple_ios__Helper",' in rendered)
+    asserts.true(env, '"ios/spm_bigint_plugin/Sources/Helper/Helper.swift",' in rendered)
+    return unittest.end(env)
+
 _products_resolve_to_pinned_labels_test = unittest.make(_products_resolve_to_pinned_labels_test_impl)
 _mapped_product_resolves_without_pins_test = unittest.make(_mapped_product_resolves_without_pins_test_impl)
 _unmapped_product_without_resolved_keeps_refusal_test = unittest.make(
@@ -747,6 +807,7 @@ _spaced_package_declaration_is_refused_when_unreadable_test = unittest.make(_spa
 _manifests_without_links_resolve_empty_test = unittest.make(_manifests_without_links_resolve_empty_test_impl)
 _deps_render_on_both_backends_test = unittest.make(_deps_render_on_both_backends_test_impl)
 _plugin_defines_render_on_both_backends_test = unittest.make(_plugin_defines_render_on_both_backends_test_impl)
+_apply_apple_native_deps_byname_product_test = unittest.make(_apply_apple_native_deps_byname_product_test_impl)
 
 def flutter_pub_apple_test_suite(name):
     """Registers the Apple plugin spoke SwiftPM link unit tests."""
@@ -782,6 +843,7 @@ def flutter_pub_apple_test_suite(name):
         _manifests_without_links_resolve_empty_test,
         _deps_render_on_both_backends_test,
         _plugin_defines_render_on_both_backends_test,
+        _apply_apple_native_deps_byname_product_test,
     )
     native.test_suite(
         name = name,

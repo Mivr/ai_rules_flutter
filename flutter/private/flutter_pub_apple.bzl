@@ -11,7 +11,12 @@ SwiftPM product links a plugin's `Package.swift` declares. Split out of
 `flutter_pub_package.bzl` loads the pieces its pipeline still needs.
 """
 
-load(":flutter_pub_apple_byname.bzl", "apple_swiftpm_declares_package", "apple_swiftpm_resolve_byname")
+load(
+    ":flutter_pub_apple_byname.bzl",
+    "apple_swiftpm_declares_package",
+    "apple_swiftpm_names_product",
+    "apple_swiftpm_resolve_byname",
+)
 load(
     ":flutter_pub_apple_deps.bzl",
     _apple_swiftpm_synthetic_manifest = "apple_swiftpm_synthetic_manifest",
@@ -707,23 +712,9 @@ def apple_swiftpm_manifest_products(plugin_name, manifest_text, manifest_dir, sr
     products = [
         dep
         for dep in target.deps
-        if _apple_swiftpm_names_product(dep, local) and _apple_swiftpm_keeps_dep(dep, pkgs, platform)
+        if apple_swiftpm_names_product(dep, local) and _apple_swiftpm_keeps_dep(dep, pkgs, platform)
     ]
     return struct(ok = True, error = "", products = products, pkg_deps = parsed.model.pkg_deps, target = target)
-
-def _apple_swiftpm_names_product(dep, local):
-    """Whether a target dependency names a product rather than a local target.
-
-    Args:
-        dep: One dependency reference of the manifest target.
-        local: Lowercased names of the targets of the plugin's own manifest.
-
-    Returns:
-        True for `.product(...)` and for by-name references to no local target.
-    """
-    if dep.kind == "product":
-        return True
-    return getattr(dep, "by_name", False) and dep.name.lower() not in local
 
 def _apple_swiftpm_linked_dep(plugin_name, dep, pkg_deps, product_deps):
     """The product dependency one kept target dependency links.

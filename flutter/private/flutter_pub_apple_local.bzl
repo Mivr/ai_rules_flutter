@@ -22,6 +22,7 @@ load(
     "detect_apple_swiftpm_deps",
     "with_apple_swiftpm_deps",
 )
+load(":flutter_pub_apple_byname.bzl", "apple_swiftpm_names_product")
 load(":flutter_pub_apple_local_refusal.bzl", "local_manifest_decision")
 load(
     ":flutter_pub_apple_local_targets.bzl",
@@ -29,20 +30,15 @@ load(
     "local_missing_dir_error",
     "local_settings_bundle",
     _render_local_target_blocks = "render_local_target_blocks",
+    _with_apple_local_targets = "with_apple_local_targets",
 )
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
 load(":podspec_read.bzl", "apply_apple_podspec_link_settings")
 load(":podspec_read_xcconfig.bzl", "active_podspec_defines")
-load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_manifest.bzl", "parse_swiftpm_package")
 load(":swiftpm_manifest_lex.bzl", "lex_swiftpm_manifest", "swiftpm_first_content_line")
 load(":swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_files")
 load(":swiftpm_translate.bzl", "swiftpm_c99name")
-
-_LOCAL_OBJC_MACRO_LOAD = (
-    'load("@rules_flutter//flutter/private:flutter_apple_plugin_library.bzl", ' +
-    '"flutter_apple_plugin_objc_library", "flutter_apple_plugin_objc_settings")'
-)
 
 _LOCAL_SPECIAL_KINDS = ["executableTarget", "binaryTarget", "systemLibrary", "plugin", "macro"]
 
@@ -193,11 +189,14 @@ def _local_follow_dependencies(plugin, model, reached, stack, platform):
         "" or the refusal for an unknown or untranslatable target.
     """
     targets = getattr(model, "targets", [])
+    local = [getattr(other, "name", "").lower() for other in targets if getattr(other, "name", "")]
     for _ in range(len(targets) + 1):
         if not stack:
             break
         current = _local_target_by_name(targets, stack.pop())
         for dep in getattr(current, "deps", []):
+            if apple_swiftpm_names_product(dep, local):
+                continue
             if getattr(dep, "kind", "") != "same" or not _local_dep_applies(dep, platform):
                 continue
             name = getattr(dep, "name", "")
@@ -659,125 +658,6 @@ def apply_apple_native_deps(ctx, plugin, apple, content):
     content = with_apple_local_targets(content, plugin, "macos", local.macos)
     return with_apple_local_targets(content, plugin, "ios", local.ios)
 
-def _local_deps_block(labels):
-    """Render one `deps = [...]` block for the primary library.
-
-    Args:
-        labels: The local library labels.
-
-    Returns:
-        The attribute text, ending in a newline.
-    """
-    items = ["        %s," % starlark_string_literal(label) for label in labels]
-    return "    deps = [\n%s\n    ],\n" % "\n".join(items)
-
-def _local_target_block(content, plugin, platform, suffix):
-    """Split the rendered BUILD around one primary library target.
-
-    Args:
-        content: The rendered spoke BUILD content.
-        plugin: The pub plugin name.
-        platform: `"ios"` or `"macos"`.
-        suffix: `""` for the rules_apple library, `"_xtool"` for xtool.
-
-    Returns:
-        `struct(found, head, block, tail)`.
-    """
-    marker = '    name = "%s_apple_%s%s",\n' % (plugin, platform, suffix)
-    head, sep, tail = content.partition(marker)
-    block, vis_sep, vis_tail = tail.partition("\n    visibility = ")
-    if not sep or not vis_sep:
-        return struct(found = False, head = "", block = "", tail = "")
-    return struct(found = True, head = head + sep, block = block, tail = vis_sep + vis_tail)
-
-def _local_insert_into_list(block, attr, labels):
-    """Add labels to an existing Bazel list attribute in one target block.
-
-    Args:
-        block: The target's attribute text.
-        attr: The attribute name (`deps`, `srcs`).
-        labels: The item strings to add.
-
-    Returns:
-        `struct(found, block)`: `found` says whether the attribute existed, and `block` is the
-        target text with the labels added.
-    """
-    marker = "    %s = " % attr
-    start = block.find(marker)
-    if start < 0:
-        return struct(found = False, block = block)
-    value_start = start + len(marker)
-    rest = block[value_start:]
-    additions = "\n".join(["        %s," % item for item in labels])
-    if rest.startswith("[]"):
-        return struct(found = True, block = block[:value_start] + "[\n" + additions + "\n    ]" + rest[2:])
-    if rest.startswith("["):
-        close = rest.find("\n    ]")
-        if close < 0:
-            return struct(found = False, block = block)
-        patched_rest = rest[:close] + "\n" + additions + rest[close:]
-        return struct(found = True, block = block[:value_start] + patched_rest)
-    if rest.startswith("select("):
-        return struct(found = True, block = block[:value_start] + "[\n" + additions + "\n    ] + " + rest)
-    return struct(found = False, block = block)
-
-def _patch_device_deps(content, plugin, platform, labels):
-    """Add the local labels to the primary rules_apple library's deps.
-
-    Args:
-        content: The rendered spoke BUILD content.
-        plugin: The pub plugin name.
-        platform: `"ios"` or `"macos"`.
-        labels: The local library labels.
-
-    Returns:
-        The patched BUILD content.
-    """
-    parts = _local_target_block(content, plugin, platform, "")
-    if not parts.found:
-        fail("Flutter plugin %r: expected a `%s_apple_%s` library target for its local targets." % (plugin, plugin, platform))
-    items = [starlark_string_literal(label) for label in labels]
-    patched = _local_insert_into_list(parts.block, "deps", items)
-    block = patched.block if patched.found else parts.block + "\n" + _local_deps_block(labels)
-    return parts.head + block + parts.tail
-
-def _patch_xtool_srcs(content, plugin, platform, files):
-    """Append the local targets' files to the primary xtool library's srcs.
-
-    Args:
-        content: The rendered spoke BUILD content.
-        plugin: The pub plugin name.
-        platform: `"ios"` or `"macos"`.
-        files: The local target file paths.
-
-    Returns:
-        The patched BUILD content.
-    """
-    parts = _local_target_block(content, plugin, platform, "_xtool")
-    if not parts.found:
-        fail("Flutter plugin %r: expected a `%s_apple_%s_xtool` library target for its local targets." % (plugin, plugin, platform))
-    items = [starlark_string_literal(path) for path in files]
-    marker = "    srcs = "
-    start = parts.block.find(marker)
-    if start < 0:
-        fail("Flutter plugin %r: expected `srcs` on `%s_apple_%s_xtool`." % (plugin, plugin, platform))
-    value_start = start + len(marker)
-    rest = parts.block[value_start:]
-    additions = "\n".join(["        %s," % item for item in items])
-    is_glob = rest.startswith("glob(")
-    close_marker = "\n    )," if is_glob else "\n    ]"
-    close = rest.find(close_marker)
-    if close < 0:
-        fail("Flutter plugin %r: malformed `srcs` on `%s_apple_%s_xtool`." % (plugin, plugin, platform))
-    if is_glob:
-        split_pos = close + len("\n    )")
-        patched_rest = rest[:split_pos] + " + [\n" + additions + "\n    ]" + rest[split_pos:]
-    elif rest.startswith("["):
-        patched_rest = rest[:close] + "\n" + additions + rest[close:]
-    else:
-        fail("Flutter plugin %r: unsupported `srcs` on `%s_apple_%s_xtool`." % (plugin, plugin, platform))
-    return parts.head + parts.block[:value_start] + patched_rest + parts.tail
-
 def with_apple_local_targets(content, plugin, platform, rendered):
     """Splice one platform's local libraries into the rendered spoke BUILD.
 
@@ -790,12 +670,4 @@ def with_apple_local_targets(content, plugin, platform, rendered):
     Returns:
         The patched BUILD content.
     """
-    if not rendered.text:
-        return content
-    content = content + "\n" + rendered.text
-    content = _patch_device_deps(content, plugin, platform, rendered.labels)
-    if rendered.xtool_files:
-        content = _patch_xtool_srcs(content, plugin, platform, rendered.xtool_files)
-    if "flutter_apple_plugin_objc_library(" in rendered.text and _LOCAL_OBJC_MACRO_LOAD not in content:
-        content = _LOCAL_OBJC_MACRO_LOAD + "\n" + content
-    return content
+    return _with_apple_local_targets(content, plugin, platform, rendered)

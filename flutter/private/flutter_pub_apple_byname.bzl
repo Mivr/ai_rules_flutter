@@ -60,6 +60,20 @@ def apple_swiftpm_decl_reference(decl):
         return path[path.rfind("/") + 1:]
     return ""
 
+def apple_swiftpm_names_product(dep, local):
+    """Whether a target dependency names a product rather than a local target.
+
+    Args:
+        dep: One dependency reference of a manifest target.
+        local: Lowercased names of the targets of the plugin's own manifest.
+
+    Returns:
+        True for `.product(...)` and for by-name references to no local target.
+    """
+    if getattr(dep, "kind", "") == "product":
+        return True
+    return getattr(dep, "by_name", False) and getattr(dep, "name", "").lower() not in local
+
 def _byname_candidates(pkg_deps):
     """The declared packages a by-name dependency could belong to.
 

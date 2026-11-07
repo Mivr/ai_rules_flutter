@@ -1,7 +1,12 @@
 """Unit tests for the plugin-local walk refusing untranslatable manifests."""
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
-load("//flutter/private:flutter_pub_apple_local.bzl", "detect_apple_local_targets", "parse_plugin_local_package")
+load(
+    "//flutter/private:flutter_pub_apple_local.bzl",
+    "detect_apple_local_targets",
+    "parse_plugin_local_package",
+    "plugin_local_targets",
+)
 load("//flutter/private:flutter_pub_apple_local_refusal.bzl", "local_manifest_decision")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
@@ -108,6 +113,36 @@ def _mapped_skips_read_test_impl(ctx):
     asserts.equals(env, [], fake.reads)
     return unittest.end(env)
 
+def _demo_dep_manifest(deps):
+    """Build a single-target demo manifest with `deps` on `demo`."""
+    return """// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(
+    name: "demo",
+    platforms: [.iOS("13.0")],
+    products: [.library(name: "demo", targets: ["demo"])],
+    targets: [
+        .target(name: "demo", dependencies: [%s], path: "Sources/demo"),
+    ]
+)
+""" % deps
+
+def _unknown_same_target_refusal_test_impl(ctx):
+    """An explicit `.target(name:)` on an unknown target is still refused."""
+    env = unittest.begin(ctx)
+    explicit = parse_plugin_local_package("demo", _demo_dep_manifest('.target(name: "Missing")'))
+    asserts.true(env, explicit.ok, explicit.error)
+    refused = plugin_local_targets("demo", explicit.model, "ios/demo", "ios/demo/Sources/demo", "ios")
+    asserts.false(env, refused.ok)
+    asserts.equals(env, 'Flutter plugin "demo": target "demo" depends on unknown target "Missing".', refused.error)
+
+    byname = parse_plugin_local_package("demo", _demo_dep_manifest('"Missing", .byName(name: "Missing")'))
+    asserts.true(env, byname.ok, byname.error)
+    skipped = plugin_local_targets("demo", byname.model, "ios/demo", "ios/demo/Sources/demo", "ios")
+    asserts.true(env, skipped.ok, skipped.error)
+    asserts.equals(env, [], skipped.targets)
+    return unittest.end(env)
+
 _define_when_test = unittest.make(_define_when_test_impl)
 _unsafe_flags_test = unittest.make(_unsafe_flags_test_impl)
 _unknown_setting_test = unittest.make(_unknown_setting_test_impl)
@@ -115,6 +150,7 @@ _program_two_targets_test = unittest.make(_program_two_targets_test_impl)
 _program_sibling_dir_test = unittest.make(_program_sibling_dir_test_impl)
 _single_target_program_test = unittest.make(_single_target_program_test_impl)
 _mapped_skips_read_test = unittest.make(_mapped_skips_read_test_impl)
+_unknown_same_target_refusal_test = unittest.make(_unknown_same_target_refusal_test_impl)
 
 def swiftpm_local_refusal_test_suite(name):
     """Declares the local-refusal unit tests.
@@ -131,4 +167,5 @@ def swiftpm_local_refusal_test_suite(name):
         _program_sibling_dir_test,
         _single_target_program_test,
         _mapped_skips_read_test,
+        _unknown_same_target_refusal_test,
     )
