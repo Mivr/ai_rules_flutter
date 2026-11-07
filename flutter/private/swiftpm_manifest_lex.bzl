@@ -320,7 +320,16 @@ def parse_swiftpm_tools_line(line, line_no, identity):
     Returns:
         `struct(ok, error, major, minor, patch)`.
     """
-    bad = struct(ok = False, error = "SwiftPM package {identity} (Package.swift line {line}): the first line must read `// swift-tools-version:X[.Y[.Z]]`.".format(identity = repr(identity), line = line_no), major = 0, minor = 0, patch = 0)
+    bad = struct(
+        ok = False,
+        error = "SwiftPM package {identity} (Package.swift line {line}): the first line must read `// swift-tools-version:X[.Y[.Z]]`.".format(
+            identity = repr(identity),
+            line = line_no,
+        ),
+        major = 0,
+        minor = 0,
+        patch = 0,
+    )
     n = len(line)
     pos = _swiftpm_skip_blanks(line, 0, n)
     if line[pos:pos + 2] != "//":

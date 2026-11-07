@@ -920,11 +920,8 @@ def _apple_swiftpm_pins(ctx, resolved_label, checksums_label, hub_name):
             scc_targets = scc_targets,
         )
     label = str(resolved_label)
-    checksums_content = None
-    checksums_text = ""
-    if checksums_label != None:
-        checksums_content = ctx.read(checksums_label)
-        checksums_text = str(checksums_label)
+    checksums_content = ctx.read(checksums_label) if checksums_label != None else None
+    checksums_text = str(checksums_label) if checksums_label != None else ""
     built = apple_swiftpm_pins(
         ctx.read(resolved_label),
         checksums_content,
@@ -1062,30 +1059,28 @@ def detect_apple_swiftpm_deps(ctx, package_name, apple):
     if hasattr(ctx.attr, "podfile_lock") and ctx.attr.podfile_lock != None:
         return detect_apple_cocoapods_deps(ctx, package_name, apple, _detect_apple_swiftpm_platform)
 
-    resolved_label = ctx.attr.package_resolved
-    checksums_label = ctx.attr.package_sha256
-    native_deps_label = ctx.attr.ios_native_deps
-    hub_name = ctx.attr.hub_name
+    resolved, sha = ctx.attr.package_resolved, ctx.attr.package_sha256
+    ndeps, hub = ctx.attr.ios_native_deps, ctx.attr.hub_name
     return struct(
         macos = _detect_apple_swiftpm_platform(
             ctx,
             package_name,
             "macos",
             apple.macos_srcs,
-            resolved_label,
-            checksums_label,
-            native_deps_label,
-            hub_name,
+            resolved,
+            sha,
+            ndeps,
+            hub,
         ),
         ios = _detect_apple_swiftpm_platform(
             ctx,
             package_name,
             "ios",
             apple.ios_srcs,
-            resolved_label,
-            checksums_label,
-            native_deps_label,
-            hub_name,
+            resolved,
+            sha,
+            ndeps,
+            hub,
         ),
     )
 
@@ -1111,13 +1106,17 @@ def _with_apple_swiftpm_platform_deps(content, package_name, platform, labels):
         deps_block += "        " + starlark_string_literal(label) + ",\n"
     deps_block += "    ],\n"
     for suffix in ["", "_xtool"]:
-        marker = '    name = "{name}_apple_{platform}{suffix}",\n'.format(name = package_name, platform = platform, suffix = suffix)
+        target = "{name}_apple_{platform}{suffix}".format(name = package_name, platform = platform, suffix = suffix)
+        marker = '    name = "{target}",\n'.format(target = target)
         head, sep, tail = content.partition(marker)
-        if not sep:
-            fail("Flutter plugin {plugin}: expected a `{target}` library target to carry its SwiftPM dependencies.".format(plugin = repr(package_name), target = "{name}_apple_{platform}{suffix}".format(name = package_name, platform = platform, suffix = suffix)))
         vis_head, vis_sep, vis_tail = tail.partition("\n    visibility = ")
-        if not vis_sep:
-            fail("Flutter plugin {plugin}: expected a `{target}` library target to carry its SwiftPM dependencies.".format(plugin = repr(package_name), target = "{name}_apple_{platform}{suffix}".format(name = package_name, platform = platform, suffix = suffix)))
+        if not sep or not vis_sep:
+            fail(
+                "Flutter plugin {plugin}: expected a `{target}` library target to carry its SwiftPM dependencies.".format(
+                    plugin = repr(package_name),
+                    target = target,
+                ),
+            )
         content = head + sep + vis_head + "\n" + deps_block + vis_sep + vis_tail
     return content
 

@@ -378,7 +378,8 @@ def _swiftpm_json_literal(text, start):
             after = start + len(word)
             if after < len(text):
                 tail = text[after]
-                if ("a" <= tail and tail <= "z") or ("A" <= tail and tail <= "Z") or ("0" <= tail and tail <= "9") or tail == "_":
+                if (("a" <= tail and tail <= "z") or ("A" <= tail and tail <= "Z") or
+                    ("0" <= tail and tail <= "9") or tail == "_"):
                     continue
             return struct(ok = True, detail = "", next = after)
     return struct(ok = False, detail = "an unknown literal", next = start)
@@ -575,6 +576,10 @@ def read_swiftpm_pins(content, label):
         pins.append(struct(identity = identity, kind = kind, location = location, revision = revision))
     return struct(ok = True, error = "", pins = pins)
 
+def _swiftpm_sha256_failure(error):
+    """The `read_swiftpm_checksums` failure result."""
+    return struct(ok = False, error = error, sha256_by_identity = {})
+
 def read_swiftpm_checksums(content, label):
     """Read the hub's SwiftPM checksum table.
 
@@ -593,25 +598,17 @@ def read_swiftpm_checksums(content, label):
     """
     bad = swiftpm_check_json(content, label)
     if bad:
-        return struct(ok = False, error = bad, sha256_by_identity = {})
+        return _swiftpm_sha256_failure(bad)
     data = json.decode(content)
     if type(data) != "dict":
-        return struct(ok = False, error = "{label} must hold a JSON object.".format(label = label), sha256_by_identity = {})
+        return _swiftpm_sha256_failure("{label} must hold a JSON object.".format(label = label))
     sha256_by_identity = {}
     for identity in data.keys():
         digest = data[identity]
         if type(identity) != "string" or not is_swiftpm_identity(identity):
-            return struct(
-                ok = False,
-                error = "{label} holds an unusable package identity ({identity}): identities are lowercase letters, digits, `.`, `_` and `-`.".format(label = label, identity = repr(identity)),
-                sha256_by_identity = {},
-            )
+            return _swiftpm_sha256_failure("{label} holds an unusable package identity ({identity}): identities are lowercase letters, digits, `.`, `_` and `-`.".format(label = label, identity = repr(identity)))
         if type(digest) != "string" or not is_swiftpm_sha256(digest):
-            return struct(
-                ok = False,
-                error = "{label} holds an invalid checksum for {identity}: expected 64 lowercase hex characters.".format(label = label, identity = repr(identity)),
-                sha256_by_identity = {},
-            )
+            return _swiftpm_sha256_failure("{label} holds an invalid checksum for {identity}: expected 64 lowercase hex characters.".format(label = label, identity = repr(identity)))
         sha256_by_identity[identity] = digest
     return struct(ok = True, error = "", sha256_by_identity = sha256_by_identity)
 

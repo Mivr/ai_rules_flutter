@@ -64,7 +64,9 @@ def swiftpm_parse_when_condition(target_name, value_tokens):
         entries in manifest order.
     """
     who = _swiftpm_setting_target(target_name)
-    if len(value_tokens) < 4 or value_tokens[0].kind != "punct" or value_tokens[0].text != "." or value_tokens[1].kind != "word" or value_tokens[1].text != "when" or value_tokens[2].kind != "punct" or value_tokens[2].text != "(" or value_tokens[len(value_tokens) - 1].kind != "punct" or value_tokens[len(value_tokens) - 1].text != ")":
+    head = [(t.kind, t.text) for t in value_tokens[:3]]
+    last = (value_tokens[-1].kind, value_tokens[-1].text) if value_tokens else ()
+    if len(value_tokens) < 4 or head != [("punct", "."), ("word", "when"), ("punct", "(")] or last != ("punct", ")"):
         return struct(ok = False, detail = "{who}: expected a build condition (`.when(platforms: [...])`)".format(who = who), value = None)
     inner = value_tokens[3:len(value_tokens) - 1]
     parts = _swiftpm_setting_split_top(inner)
@@ -101,7 +103,9 @@ def _swiftpm_setting_platform_list(who, value_tokens):
         `struct(ok, detail, items)`: `items` holds `"ios"`/`"macos"` in
         manifest order.
     """
-    if not value_tokens or value_tokens[0].kind != "punct" or value_tokens[0].text != "[" or value_tokens[len(value_tokens) - 1].kind != "punct" or value_tokens[len(value_tokens) - 1].text != "]":
+    first = (value_tokens[0].kind, value_tokens[0].text) if value_tokens else ()
+    last = (value_tokens[-1].kind, value_tokens[-1].text) if value_tokens else ()
+    if first != ("punct", "[") or last != ("punct", "]"):
         return struct(ok = False, detail = "{who}: expected a build condition (`.when(platforms: [...])`)".format(who = who), items = [])
     parts = _swiftpm_setting_split_top(value_tokens[1:len(value_tokens) - 1])
     if parts == None:
@@ -158,7 +162,9 @@ def _swiftpm_setting_call(who, array_name, element):
         (`define`, `unsafeFlags`, ...) and `args` the tokens between the
         outer parens.
     """
-    if len(element) >= 4 and element[0].kind == "punct" and element[0].text == "." and element[1].kind == "word" and element[2].kind == "punct" and element[2].text == "(" and element[len(element) - 1].kind == "punct" and element[len(element) - 1].text == ")":
+    head = [(t.kind, t.text) for t in element[:3]]
+    last = (element[-1].kind, element[-1].text) if element else ()
+    if len(element) >= 4 and head[0] == ("punct", ".") and head[1][0] == "word" and head[2] == ("punct", "(") and last == ("punct", ")"):
         depth = 0
         balanced = True
         for i in range(2, len(element)):
@@ -228,24 +234,17 @@ def _swiftpm_setting_condition(who, target_name, args):
         `struct(ok, detail, value)`: `value` is None when the setting is
         unconditional, else `struct(platforms)`.
     """
-    positional_when = None
-    labeled_when = None
+    whens = []
     for arg in args:
-        if arg.key == "":
-            if len(arg.value) >= 2 and arg.value[0].kind == "punct" and arg.value[0].text == ".":
-                if positional_when != None:
-                    return struct(ok = False, detail = "{who}: duplicate build condition".format(who = who), value = None)
-                positional_when = arg.value
+        if arg.key == "" and len(arg.value) >= 2 and (arg.value[0].kind, arg.value[0].text) == ("punct", "."):
+            whens.append(arg.value)
         elif arg.key == "condition":
-            if labeled_when != None:
-                return struct(ok = False, detail = "{who}: duplicate build condition".format(who = who), value = None)
-            labeled_when = arg.value
-    if positional_when != None and labeled_when != None:
+            whens.append(arg.value)
+    if len(whens) > 1:
         return struct(ok = False, detail = "{who}: duplicate build condition".format(who = who), value = None)
-    raw = positional_when if positional_when != None else labeled_when
-    if raw == None:
+    if not whens:
         return struct(ok = True, detail = "", value = None)
-    return swiftpm_parse_when_condition(target_name, raw)
+    return swiftpm_parse_when_condition(target_name, whens[0])
 
 def swiftpm_parse_target_setting(target_name, array_name, element):
     """Parse one `cSettings`/`cxxSettings`/`swiftSettings`/`linkerSettings` element.
@@ -300,73 +299,59 @@ def _swiftpm_setting_named(who, target_name, category, array_name, dotted, args,
     """
     line = element[0].line if element else 0
     if dotted == "unsafeFlags":
-        return struct(ok = False, detail = "{who} uses `.unsafeFlags(...)` in `{array}`, which has no Bazel translation".format(who = who, array = array_name), setting = None)
+        return _swiftpm_setting_failure("{who} uses `.unsafeFlags(...)` in `{array}`, which has no Bazel translation".format(who = who, array = array_name))
     if category == "c" or category == "cxx":
-        return _swiftpm_setting_c(who, target_name, category, array_name, dotted, args, line)
-    if category == "swift":
-        return _swiftpm_setting_swift(who, target_name, array_name, dotted, args, line)
-    if category == "linker":
-        return _swiftpm_setting_linker(who, target_name, array_name, dotted, args, line)
-    return struct(ok = False, detail = "{who} uses `.{dotted}(...)` in `{array}`, which has no Bazel translation".format(who = who, dotted = dotted, array = array_name), setting = None)
+        if dotted == "headerSearchPath":
+            return _swiftpm_setting_pathed(who, target_name, category, array_name, dotted, args, line)
+        if dotted == "define":
+            return _swiftpm_setting_defined(who, target_name, category, array_name, dotted, args, line, True)
+    elif category == "swift":
+        if dotted == "define":
+            return _swiftpm_setting_defined(who, target_name, "swift", array_name, dotted, args, line, False)
+        if dotted == "enableUpcomingFeature" or dotted == "enableExperimentalFeature":
+            return _swiftpm_setting_pathed(who, target_name, "swift", array_name, dotted, args, line)
+    elif category == "linker":
+        if dotted == "linkedFramework" or dotted == "linkedLibrary":
+            return _swiftpm_setting_pathed(who, target_name, "linker", array_name, dotted, args, line)
+    return _swiftpm_setting_failure("{who} uses `.{dotted}(...)` in `{array}`, which has no Bazel translation".format(who = who, dotted = dotted, array = array_name))
 
-def _swiftpm_setting_c(who, target_name, category, array_name, dotted, args, line):
-    """Validate a `cSettings`/`cxxSettings` element.
-
-    Args:
-        who: The target prefix for messages.
-        target_name: The bare target name for the condition parser.
-        category: Which compile settings to select: `c` or `cxx`.
-        array_name: The setting array, for messages.
-        dotted: The dotted call name.
-        args: The parsed argument structs.
-        line: The element's line number.
-
-    Returns:
-        `struct(ok, detail, setting)`.
-    """
-    if dotted == "headerSearchPath":
-        return _swiftpm_setting_pathed(who, target_name, category, array_name, dotted, args, line)
-    if dotted == "define":
-        return _swiftpm_setting_defined(who, target_name, category, array_name, dotted, args, line, True)
-    return struct(ok = False, detail = "{who} uses `.{dotted}(...)` in `{array}`, which has no Bazel translation".format(who = who, dotted = dotted, array = array_name), setting = None)
-
-def _swiftpm_setting_swift(who, target_name, array_name, dotted, args, line):
-    """Validate a `swiftSettings` element.
+def _swiftpm_setting_failure(detail):
+    """Return an error setting result struct.
 
     Args:
-        who: The target prefix for messages.
-        target_name: The bare target name for the condition parser.
-        array_name: The setting array, for messages.
-        dotted: The dotted call name.
-        args: The parsed argument structs.
-        line: The element's line number.
+        detail: The failure detail string.
 
     Returns:
-        `struct(ok, detail, setting)`.
+        A failed setting result struct.
     """
-    if dotted == "define":
-        return _swiftpm_setting_defined(who, target_name, "swift", array_name, dotted, args, line, False)
-    if dotted == "enableUpcomingFeature" or dotted == "enableExperimentalFeature":
-        return _swiftpm_setting_pathed(who, target_name, "swift", array_name, dotted, args, line)
-    return struct(ok = False, detail = "{who} uses `.{dotted}(...)` in `{array}`, which has no Bazel translation".format(who = who, dotted = dotted, array = array_name), setting = None)
+    return struct(ok = False, detail = detail, setting = None)
 
-def _swiftpm_setting_linker(who, target_name, array_name, dotted, args, line):
-    """Validate a `linkerSettings` element.
+def _swiftpm_setting_ok(category, kind, name, value, condition, line):
+    """Return a successful setting struct.
 
     Args:
-        who: The target prefix for messages.
-        target_name: The bare target name for the condition parser.
-        array_name: The setting array, for messages.
-        dotted: The dotted call name.
-        args: The parsed argument structs.
-        line: The element's line number.
+        category: Setting category (`c`, `cxx`, `swift`, `linker`).
+        kind: Setting kind (`define`, `headerSearchPath`, ...).
+        name: Setting name text.
+        value: Setting value string.
+        condition: Condition platforms struct or None.
+        line: Source line number.
 
     Returns:
-        `struct(ok, detail, setting)`.
+        A setting result struct.
     """
-    if dotted == "linkedFramework" or dotted == "linkedLibrary":
-        return _swiftpm_setting_pathed(who, target_name, "linker", array_name, dotted, args, line)
-    return struct(ok = False, detail = "{who} uses `.{dotted}(...)` in `{array}`, which has no Bazel translation".format(who = who, dotted = dotted, array = array_name), setting = None)
+    return struct(
+        ok = True,
+        detail = "",
+        setting = struct(
+            category = category,
+            kind = kind,
+            name = name,
+            value = value,
+            condition = condition,
+            line = line,
+        ),
+    )
 
 def _swiftpm_setting_pathed(who, target_name, category, array_name, dotted, args, line):
     """Validate a single-string setting (search path, feature, library).
@@ -388,16 +373,16 @@ def _swiftpm_setting_pathed(who, target_name, category, array_name, dotted, args
     """
     for arg in args:
         if arg.key != "" and arg.key != "condition":
-            return struct(ok = False, detail = "{who}: unexpected `.{dotted}(...)` argument `{key}` in `{array}`".format(who = who, dotted = dotted, key = arg.key, array = array_name), setting = None)
+            return _swiftpm_setting_failure("{who}: unexpected `.{dotted}(...)` argument `{key}` in `{array}`".format(who = who, dotted = dotted, key = arg.key, array = array_name))
     name = _swiftpm_setting_string(args, 0)
     if not name.ok:
-        return struct(ok = False, detail = "{who}: `.{dotted}(...)` in `{array}` needs one string argument".format(who = who, dotted = dotted, array = array_name), setting = None)
+        return _swiftpm_setting_failure("{who}: `.{dotted}(...)` in `{array}` needs one string argument".format(who = who, dotted = dotted, array = array_name))
     if len([arg for arg in args if arg.key == ""]) > 2:
-        return struct(ok = False, detail = "{who}: malformed `.{dotted}(...)` in `{array}`".format(who = who, dotted = dotted, array = array_name), setting = None)
+        return _swiftpm_setting_failure("{who}: malformed `.{dotted}(...)` in `{array}`".format(who = who, dotted = dotted, array = array_name))
     condition = _swiftpm_setting_condition(who, target_name, args)
     if not condition.ok:
-        return struct(ok = False, detail = condition.detail, setting = None)
-    return struct(ok = True, detail = "", setting = struct(category = category, kind = dotted, name = name.text, value = "", condition = condition.value, line = line))
+        return _swiftpm_setting_failure(condition.detail)
+    return _swiftpm_setting_ok(category, dotted, name.text, "", condition.value, line)
 
 def _swiftpm_setting_defined(who, target_name, category, array_name, dotted, args, line, valued):
     """Validate a `.define(name)` / `.define(name, to: value)` setting.
@@ -418,24 +403,24 @@ def _swiftpm_setting_defined(who, target_name, category, array_name, dotted, arg
     """
     for arg in args:
         if arg.key != "" and arg.key != "condition" and arg.key != "to":
-            return struct(ok = False, detail = "{who}: unexpected `.define(...)` argument `{key}` in `{array}`".format(who = who, key = arg.key, array = array_name), setting = None)
+            return _swiftpm_setting_failure("{who}: unexpected `.define(...)` argument `{key}` in `{array}`".format(who = who, key = arg.key, array = array_name))
     name = _swiftpm_setting_string(args, 0)
     if not name.ok:
-        return struct(ok = False, detail = "{who}: `.define(...)` in `{array}` needs one string argument".format(who = who, array = array_name), setting = None)
+        return _swiftpm_setting_failure("{who}: `.define(...)` in `{array}` needs one string argument".format(who = who, array = array_name))
     value = ""
     for arg in args:
         if arg.key == "to":
             if not valued:
-                return struct(ok = False, detail = "{who}: unexpected `.define(...)` argument `to` in `{array}`".format(who = who, array = array_name), setting = None)
+                return _swiftpm_setting_failure("{who}: unexpected `.define(...)` argument `to` in `{array}`".format(who = who, array = array_name))
             if len(arg.value) != 1 or arg.value[0].kind != "str":
-                return struct(ok = False, detail = "{who}: `.define(..., to: ...)` in `{array}` needs one string value".format(who = who, array = array_name), setting = None)
+                return _swiftpm_setting_failure("{who}: `.define(..., to: ...)` in `{array}` needs one string value".format(who = who, array = array_name))
             value = arg.value[0].text
     if len([arg for arg in args if arg.key == ""]) > 2:
-        return struct(ok = False, detail = "{who}: malformed `.define(...)` in `{array}`".format(who = who, array = array_name), setting = None)
+        return _swiftpm_setting_failure("{who}: malformed `.define(...)` in `{array}`".format(who = who, array = array_name))
     condition = _swiftpm_setting_condition(who, target_name, args)
     if not condition.ok:
-        return struct(ok = False, detail = condition.detail, setting = None)
-    return struct(ok = True, detail = "", setting = struct(category = category, kind = dotted, name = name.text, value = value, condition = condition.value, line = line))
+        return _swiftpm_setting_failure(condition.detail)
+    return _swiftpm_setting_ok(category, dotted, name.text, value, condition.value, line)
 
 def _swiftpm_gated_platforms(setting):
     """The `.when(platforms:)` list for one parsed setting, or None.
@@ -504,11 +489,9 @@ def _swiftpm_fold_swift_list(target, settings, target_kind):
         if entry.error:
             return struct(ok = False, error = entry.error, copts = [])
         platforms = _swiftpm_gated_platforms(setting)
-        if setting.kind == "define":
-            copts.append(struct(text = "-D" + entry.text, platforms = platforms))
-        else:
-            for text in entry.texts:
-                copts.append(struct(text = text, platforms = platforms))
+        texts = ["-D" + entry.text] if setting.kind == "define" else entry.texts
+        for text in texts:
+            copts.append(struct(text = text, platforms = platforms))
     return struct(ok = True, error = "", copts = copts)
 
 def _swiftpm_fold_linker_list(settings):
@@ -563,19 +546,41 @@ def swiftpm_target_setting_entries(target, target_dir, target_kind):
         `platforms` None or `["ios"]`/`["macos"]` (or both, kept as one
         entry the renderer fans out).
     """
-    c_fold = _swiftpm_fold_clang_list(target, target_dir, getattr(target, "c_settings", []))
+    c_settings = getattr(target, "c_settings", [])
+    cxx_settings = getattr(target, "cxx_settings", [])
+    c_fold = _swiftpm_fold_clang_list(target, target_dir, c_settings)
     if not c_fold.ok:
-        return struct(ok = False, detail = c_fold.error, c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
-    cxx_fold = _swiftpm_fold_clang_list(target, target_dir, getattr(target, "cxx_settings", []))
+        return _swiftpm_target_settings_failure(c_fold.error)
+    cxx_fold = _swiftpm_fold_clang_list(target, target_dir, cxx_settings)
     if not cxx_fold.ok:
-        return struct(ok = False, detail = cxx_fold.error, c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
-    if (len(getattr(target, "c_settings", [])) + len(getattr(target, "cxx_settings", []))) > 0 and target_kind == "swift":
-        return struct(ok = False, detail = "{who} uses C-family settings on a Swift target, which has no Bazel translation".format(who = _swiftpm_setting_target(target.name)), c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
+        return _swiftpm_target_settings_failure(cxx_fold.error)
+    if (len(c_settings) + len(cxx_settings)) > 0 and target_kind == "swift":
+        msg = "{who} uses C-family settings on a Swift target, which has no Bazel translation".format(who = _swiftpm_setting_target(target.name))
+        return _swiftpm_target_settings_failure(msg)
     swift_fold = _swiftpm_fold_swift_list(target, getattr(target, "swift_settings", []), target_kind)
     if not swift_fold.ok:
-        return struct(ok = False, detail = swift_fold.error, c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
+        return _swiftpm_target_settings_failure(swift_fold.error)
     linkopts = _swiftpm_fold_linker_list(getattr(target, "linker_settings", []))
-    return struct(ok = True, detail = "", c_only = c_fold.flags, cxx = cxx_fold.flags, copts = swift_fold.copts, linkopts = linkopts, private_includes = c_fold.private_includes + cxx_fold.private_includes)
+    return struct(
+        ok = True,
+        detail = "",
+        c_only = c_fold.flags,
+        cxx = cxx_fold.flags,
+        copts = swift_fold.copts,
+        linkopts = linkopts,
+        private_includes = c_fold.private_includes + cxx_fold.private_includes,
+    )
+
+def _swiftpm_target_settings_failure(detail):
+    """Return an error struct for `swiftpm_target_setting_entries`.
+
+    Args:
+        detail: The failure detail string.
+
+    Returns:
+        A failed `swiftpm_target_setting_entries` result struct.
+    """
+    return struct(ok = False, detail = detail, c_only = [], cxx = [], copts = [], linkopts = [], private_includes = [])
 
 def _swiftpm_clang_entry(target, target_dir, setting):
     """Render one `cSettings`/`cxxSettings` entry as a flag or a search path.
@@ -596,16 +601,12 @@ def _swiftpm_clang_entry(target, target_dir, setting):
     if setting.kind == "headerSearchPath":
         normalized = swiftpm_normalize_relative_path(setting.name)
         if not normalized.ok:
-            return struct(
-                error = "{who} uses `.headerSearchPath({path})`, which escapes the target directory".format(who = who, path = repr(setting.name)),
-                text = "",
-                private_include = False,
-            )
+            err = "{who} uses `.headerSearchPath({path})`, which escapes the target directory".format(who = who, path = repr(setting.name))
+            return struct(error = err, text = "", private_include = False)
         path = swiftpm_join_path(target_dir, normalized.path)
         return struct(error = "", text = path, private_include = True)
-    if setting.value:
-        return struct(error = "", text = "-D" + setting.name + "=" + setting.value, private_include = False)
-    return struct(error = "", text = "-D" + setting.name, private_include = False)
+    text = "-D" + setting.name + ("=" + setting.value if setting.value else "")
+    return struct(error = "", text = text, private_include = False)
 
 def _swiftpm_swift_entry(target, setting, target_kind):
     """Render one `swiftSettings` entry as a define or feature flags.
@@ -623,10 +624,10 @@ def _swiftpm_swift_entry(target, setting, target_kind):
     if setting.kind == "define":
         return struct(error = "", text = setting.name, texts = [])
     if target_kind != "swift":
-        return struct(error = "{who} uses `.{kind}(...)` on a C-family target, which has no Bazel translation".format(who = who, kind = setting.kind), text = "", texts = [])
-    if setting.kind == "enableUpcomingFeature":
-        return struct(error = "", text = "", texts = ["-enable-upcoming-feature", setting.name])
-    return struct(error = "", text = "", texts = ["-enable-experimental-feature", setting.name])
+        err = "{who} uses `.{kind}(...)` on a C-family target, which has no Bazel translation".format(who = who, kind = setting.kind)
+        return struct(error = err, text = "", texts = [])
+    flag = "-enable-upcoming-feature" if setting.kind == "enableUpcomingFeature" else "-enable-experimental-feature"
+    return struct(error = "", text = "", texts = [flag, setting.name])
 
 def _swiftpm_linker_entry(setting):
     """Render one `linkerSettings` entry as link options.
@@ -680,16 +681,12 @@ def _swiftpm_render_select_lines(ios, macos):
         attribute list needs.
     """
     selects = ["    select({"]
-    if ios:
-        selects.append("        \"@platforms//os:ios\": [")
-        for text in ios:
-            selects.append("            {item},".format(item = repr(text)))
-        selects.append("        ],")
-    if macos:
-        selects.append("        \"@platforms//os:macos\": [")
-        for text in macos:
-            selects.append("            {item},".format(item = repr(text)))
-        selects.append("        ],")
+    for os_name, items in (("ios", ios), ("macos", macos)):
+        if items:
+            selects.append("        \"@platforms//os:" + os_name + "\": [")
+            for text in items:
+                selects.append("            {item},".format(item = repr(text)))
+            selects.append("        ],")
     selects.append("        \"//conditions:default\": [],")
     selects.append("    }),")
     return selects
@@ -719,9 +716,7 @@ def swiftpm_render_list_attr(attr, base, entries):
     for text in parts.plain:
         lines.append("        {item},".format(item = repr(text)))
     closing = "    ],"
-    selects = []
-    if parts.ios or parts.macos:
-        selects = _swiftpm_render_select_lines(parts.ios, parts.macos)
+    selects = _swiftpm_render_select_lines(parts.ios, parts.macos) if (parts.ios or parts.macos) else []
     if not selects:
         lines.append(closing)
         return "\n".join(lines)

@@ -33,13 +33,7 @@ def swiftpm_c99name(name):
     Returns:
         The `module_name` for the target's `swift_library`.
     """
-    out = []
-    for i in range(len(name)):
-        char = name[i]
-        if char in _SWIFTPM_C99_OK:
-            out.append(char)
-        else:
-            out.append("_")
+    out = [name[i] if name[i] in _SWIFTPM_C99_OK else "_" for i in range(len(name))]
     return "".join(out)
 
 def swiftpm_language_mode(tools_major, tools_minor, modes):
@@ -146,7 +140,11 @@ def swiftpm_locate_package_dep(identity, package, pkg_deps):
     for decl in pkg_deps:
         if decl.ref_kind == "url" and swiftpm_url_identity(decl.ref).lower() == lowered:
             return _swiftpm_decl_identity(identity, package, decl)
-    return struct(ok = False, error = "SwiftPM package {identity}: `.product(package: {package})` names no package declared in this manifest.".format(identity = repr(identity), package = repr(package)), dep_identity = "")
+    return _swiftpm_dep_identity_fail("SwiftPM package {identity}: `.product(package: {package})` names no package declared in this manifest.".format(identity = repr(identity), package = repr(package)))
+
+def _swiftpm_dep_identity_fail(error):
+    """Failure result for package dependency identity resolution."""
+    return struct(dep_identity = "", error = error, ok = False)
 
 def _swiftpm_decl_identity(identity, package, decl):
     """Read the pin identity out of one matched `.package(...)`.
@@ -160,14 +158,14 @@ def _swiftpm_decl_identity(identity, package, decl):
         `struct(ok, error, dep_identity)`.
     """
     if decl.ref == "":
-        return struct(ok = False, error = "SwiftPM package {identity}: `.product(package: {package})` matches a `.package(...)` declaring no url or id.".format(identity = repr(identity), package = repr(package)), dep_identity = "")
+        return _swiftpm_dep_identity_fail("SwiftPM package {identity}: `.product(package: {package})` matches a `.package(...)` declaring no url or id.".format(identity = repr(identity), package = repr(package)))
     if decl.ref_kind == "path":
-        return struct(ok = False, error = "SwiftPM package {identity}: `.product(package: {package})` matches a local path dependency, which has no fetchable identity.".format(identity = repr(identity), package = repr(package)), dep_identity = "")
+        return _swiftpm_dep_identity_fail("SwiftPM package {identity}: `.product(package: {package})` matches a local path dependency, which has no fetchable identity.".format(identity = repr(identity), package = repr(package)))
     if decl.ref_kind == "id":
         return struct(ok = True, error = "", dep_identity = decl.ref)
     found = swiftpm_url_identity(decl.ref)
     if not found:
-        return struct(ok = False, error = "SwiftPM package {identity}: `.product(package: {package})` matches a `.package(...)` whose url has no usable last path segment.".format(identity = repr(identity), package = repr(package)), dep_identity = "")
+        return _swiftpm_dep_identity_fail("SwiftPM package {identity}: `.product(package: {package})` matches a `.package(...)` whose url has no usable last path segment.".format(identity = repr(identity), package = repr(package)))
     return struct(ok = True, error = "", dep_identity = found)
 
 def _swiftpm_resolve_same_dep(identity, targets, by_name, target_name, dep):
@@ -193,7 +191,8 @@ def _swiftpm_resolve_same_dep(identity, targets, by_name, target_name, dep):
     for candidate in targets:
         if candidate.name and candidate.name.lower() == lowered:
             return struct(ok = True, error = "", target = candidate)
-    return struct(ok = False, error = "SwiftPM package {identity}: target {target} depends on unknown target {name}. A by-name dependency on a product of another package is not supported: write `.product(name: {name}, package: \"<package>\")`, or build the package with swift_package_build_files[{identity}].".format(identity = repr(identity), target = repr(target_name), name = repr(dep.name)), target = None)
+    msg = "SwiftPM package {identity}: target {target} depends on unknown target {name}. A by-name dependency on a product of another package is not supported: write `.product(name: {name}, package: \"<package>\")`, or build the package with swift_package_build_files[{identity}].".format(identity = repr(identity), name = repr(dep.name), target = repr(target_name))
+    return struct(error = msg, ok = False, target = None)
 
 def _swiftpm_check_product_targets(identity, model, by_name):
     """Refuse products naming unknown or test targets.
@@ -214,6 +213,10 @@ def _swiftpm_check_product_targets(identity, model, by_name):
                 return "SwiftPM package {identity}: product {product} names test target {name}, which is ignored.".format(identity = repr(identity), product = repr(product.name), name = repr(name))
     return ""
 
+def _swiftpm_label_fail(error):
+    """Failure result for product dependency label resolution."""
+    return struct(error = error, label = "", ok = False)
+
 def _swiftpm_product_dep_label(identity, hub_name, dep, pkg_deps, pin_identities):
     """Resolve one `.product(name:package:)` dep to a spoke label.
 
@@ -233,7 +236,7 @@ def _swiftpm_product_dep_label(identity, hub_name, dep, pkg_deps, pin_identities
     """
     located = swiftpm_locate_package_dep(identity, dep.package, pkg_deps)
     if not located.ok:
-        return struct(ok = False, error = located.error, label = "")
+        return _swiftpm_label_fail(located.error)
     if pin_identities == None:
         canonical = located.dep_identity.lower()
         return struct(ok = True, error = "", label = "@" + hub_name + "__swiftpm-" + canonical + "//:" + dep.name)
@@ -243,8 +246,17 @@ def _swiftpm_product_dep_label(identity, hub_name, dep, pkg_deps, pin_identities
             canonical = pin_id
             break
     if canonical == None:
-        return struct(ok = False, error = "SwiftPM package {identity}: `.product(package: {package})` matches package {dep} which is not pinned in Package.resolved.".format(identity = repr(identity), package = repr(dep.package), dep = repr(located.dep_identity)), label = "")
+        err = "SwiftPM package {identity}: `.product(package: {package})` matches package {dep} which is not pinned in Package.resolved.".format(
+            dep = repr(located.dep_identity),
+            identity = repr(identity),
+            package = repr(dep.package),
+        )
+        return _swiftpm_label_fail(err)
     return struct(ok = True, error = "", label = "@" + hub_name + "__swiftpm-" + canonical + "//:" + dep.name)
+
+def _swiftpm_target_edge_fail(error):
+    """Failure result for `_swiftpm_target_edge`."""
+    return struct(error = error, followed = [], labels = [], ok = False)
 
 def _swiftpm_target_edge(identity, model, target, by_name, pin_identities, hub_name):
     """Resolve one target's dependencies to Bazel labels.
@@ -279,16 +291,21 @@ def _swiftpm_target_edge(identity, model, target, by_name, pin_identities, hub_n
         if dep.kind == "same":
             resolved = _swiftpm_resolve_same_dep(identity, model.targets, by_name, target.name, dep)
             if not resolved.ok:
-                return struct(ok = False, error = resolved.error, labels = [], followed = [])
+                return _swiftpm_target_edge_fail(resolved.error)
             if resolved.target.kind == "testTarget":
-                return struct(ok = False, error = "SwiftPM package {identity}: target {target} depends on test target {name}, which is ignored.".format(identity = repr(identity), target = repr(target.name), name = repr(resolved.target.name)), labels = [], followed = [])
+                err = "SwiftPM package {identity}: target {target} depends on test target {name}, which is ignored.".format(
+                    identity = repr(identity),
+                    name = repr(resolved.target.name),
+                    target = repr(target.name),
+                )
+                return _swiftpm_target_edge_fail(err)
             labels.append(struct(text = ":" + resolved.target.name + "_lib", platforms = platforms))
             if platforms == None or platforms:
                 followed.append(resolved.target.name)
         else:
             located = _swiftpm_product_dep_label(identity, hub_name, dep, model.pkg_deps, pin_identities)
             if not located.ok:
-                return struct(ok = False, error = located.error, labels = [], followed = [])
+                return _swiftpm_target_edge_fail(located.error)
             labels.append(struct(text = located.label, platforms = platforms))
     return struct(ok = True, error = "", labels = labels, followed = followed)
 
@@ -334,7 +351,8 @@ def _swiftpm_collect_reached(identity, model, reached):
     for target in model.targets:
         if target.name and target.name in reached:
             if target.kind in ["executableTarget", "binaryTarget", "systemLibrary", "plugin", "macro"]:
-                return struct(ok = False, error = _swiftpm_special_kind_error(identity, target.kind, target.name), names = [])
+                err = _swiftpm_special_kind_error(identity, target.kind, target.name)
+                return struct(error = err, names = [], ok = False)
             names.append(target.name)
     return struct(ok = True, error = "", names = names)
 
@@ -365,10 +383,7 @@ def swiftpm_reachable_targets(identity, model, pin_identities, hub_name):
         same-package targets and `@<hub>__swiftpm-<id>//:<product>` for
         products, `platforms` None or the `.when(platforms:)` list).
     """
-    by_name = {}
-    for target in model.targets:
-        if target.name:
-            by_name[target.name] = target
+    by_name = {target.name: target for target in model.targets if target.name}
     invalid = _swiftpm_check_product_targets(identity, model, by_name)
     if invalid:
         return struct(ok = False, error = invalid, names = [], edges = {})
@@ -446,15 +461,23 @@ def _swiftpm_emit_swift_library(identity, model, target, edges, files, mode):
     else:
         lists = swiftpm_render_list_attr("copts", ["-swift-version", _swiftpm_copts_flag(mode)], settings.copts)
         lines.append(lists)
-    lists = swiftpm_render_list_attr("linkopts", [], settings.linkopts)
-    if lists:
-        lines.append(lists)
-    lists = swiftpm_render_list_attr("deps", [], edges.get(target.name, []))
-    if lists:
-        lines.append(lists)
+    for attr, values in [("linkopts", settings.linkopts), ("deps", edges.get(target.name, []))]:
+        lists = swiftpm_render_list_attr(attr, [], values)
+        if lists:
+            lines.append(lists)
     lines.append("    visibility = [\"//visibility:public\"],")
     lines.append(")")
     return struct(ok = True, error = "", text = "\n".join(lines))
+
+def _swiftpm_emit_fail(error):
+    """Failure result for C-family and target block emission."""
+    return struct(
+        error = error,
+        needs_hint = False,
+        ok = False,
+        rule = "",
+        text = "",
+    )
 
 def _swiftpm_emit_clang_library(identity, target, edges, files):
     """Emit one `cc_library`/`objc_library` for a reached C-family target.
@@ -484,14 +507,17 @@ def _swiftpm_emit_clang_library(identity, target, edges, files):
         `swift_interop_hint`.
     """
     module_name = swiftpm_c99name(target.name)
-    spec = swiftpm_clang_module_spec(target, module_name, files.dir, getattr(files, "c_srcs", []), getattr(files, "public_hdrs", []), getattr(files, "explicit_map", None))
+    c_srcs = getattr(files, "c_srcs", [])
+    hdrs = getattr(files, "public_hdrs", [])
+    raw_map = getattr(files, "explicit_map", None)
+    spec = swiftpm_clang_module_spec(target, module_name, files.dir, c_srcs, hdrs, raw_map)
     if not spec.ok:
-        return struct(ok = False, error = "SwiftPM package {identity}: {detail}.".format(identity = repr(identity), detail = spec.detail), text = "", rule = "", needs_hint = False)
+        return _swiftpm_emit_fail("SwiftPM package {identity}: {detail}.".format(detail = spec.detail, identity = repr(identity)))
     settings = swiftpm_target_setting_entries(target, files.dir, "clang")
     if not settings.ok:
-        return struct(ok = False, error = "SwiftPM package {identity}: {detail}.".format(identity = repr(identity), detail = settings.detail), text = "", rule = "", needs_hint = False)
-    rule = swiftpm_clang_rule(getattr(files, "c_srcs", []))
-    explicit_map = getattr(files, "explicit_map", None) != None
+        return _swiftpm_emit_fail("SwiftPM package {identity}: {detail}.".format(detail = settings.detail, identity = repr(identity)))
+    rule = swiftpm_clang_rule(c_srcs)
+    explicit_map = raw_map != None
     includes = []
     if explicit_map and getattr(files, "map_in_include", False):
         # The explicit map lives under the public-headers directory: the
@@ -562,15 +588,15 @@ def _swiftpm_emit_target_block(identity, model, by_name, target_name, edges, fil
     """
     c_srcs = getattr(files, "c_srcs", [])
     if files.srcs and c_srcs:
-        return struct(ok = False, error = "SwiftPM package {identity}: target {name} mixes Swift and C-family sources, which has no Bazel translation.".format(identity = repr(identity), name = repr(target_name)), text = "", rule = "", needs_hint = False)
+        return _swiftpm_emit_fail("SwiftPM package {identity}: target {name} mixes Swift and C-family sources, which has no Bazel translation.".format(identity = repr(identity), name = repr(target_name)))
     if c_srcs:
         emitted = _swiftpm_emit_clang_library(identity, by_name[target_name], edges, files)
         if not emitted.ok:
-            return struct(ok = False, error = emitted.error, text = "", rule = "", needs_hint = False)
+            return _swiftpm_emit_fail(emitted.error)
         return struct(ok = True, error = "", text = emitted.text, rule = emitted.rule, needs_hint = emitted.needs_hint)
     emitted = _swiftpm_emit_swift_library(identity, model, by_name[target_name], edges, files, mode)
     if not emitted.ok:
-        return struct(ok = False, error = emitted.error, text = "", rule = "", needs_hint = False)
+        return _swiftpm_emit_fail(emitted.error)
     return struct(ok = True, error = "", text = emitted.text, rule = "", needs_hint = False)
 
 def _swiftpm_emit_product_block(product):

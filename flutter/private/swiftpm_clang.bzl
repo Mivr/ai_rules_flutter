@@ -20,6 +20,16 @@ with its hub format). Every detail names the target.
 load(":swiftpm_paths.bzl", "swiftpm_join_path", "swiftpm_normalize_relative_path")
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr")
 
+def _swiftpm_module_spec_failure(detail):
+    """The `swiftpm_clang_module_spec` failure result."""
+    return struct(
+        ok = False,
+        detail = detail,
+        module_map = None,
+        include_dir = None,
+        umbrella_header = None,
+    )
+
 def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_headers, explicit_map):
     """Compute one C-family target's module spec.
 
@@ -60,18 +70,19 @@ def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_h
     who = "target " + repr(target.name)
     for source in sources:
         if _swiftpm_clang_language(source) == "asm":
-            return struct(ok = False, detail = "{who} has assembly source {file}, which has no Bazel translation".format(who = who, file = repr(source)), module_map = None, include_dir = None, umbrella_header = None)
+            return _swiftpm_module_spec_failure(
+                "{who} has assembly source {file}, which has no Bazel translation".format(
+                    who = who,
+                    file = repr(source),
+                ),
+            )
     if explicit_map != None:
         return struct(ok = True, detail = "", module_map = explicit_map, include_dir = None, umbrella_header = None)
     if target.public_headers_path != None:
         normalized = swiftpm_normalize_relative_path(target.public_headers_path)
         if not normalized.ok:
-            return struct(
-                ok = False,
-                detail = "{who} has a `publicHeadersPath:` escaping the target directory".format(who = who),
-                module_map = None,
-                include_dir = None,
-                umbrella_header = None,
+            return _swiftpm_module_spec_failure(
+                "{who} has a `publicHeadersPath:` escaping the target directory".format(who = who),
             )
         public_dir = swiftpm_join_path(target_dir, normalized.path)
     else:
@@ -83,7 +94,13 @@ def swiftpm_clang_module_spec(target, module_name, target_dir, sources, public_h
         umbrella_header = module_name + ".h"
     elif swiftpm_join_path(public_dir, module_name + "/" + module_name + ".h") in public_headers:
         umbrella_header = module_name + "/" + module_name + ".h"
-    return struct(ok = True, detail = "", module_map = swiftpm_join_path(public_dir, "module.modulemap"), include_dir = public_dir, umbrella_header = umbrella_header)
+    return struct(
+        ok = True,
+        detail = "",
+        module_map = swiftpm_join_path(public_dir, "module.modulemap"),
+        include_dir = public_dir,
+        umbrella_header = umbrella_header,
+    )
 
 def _swiftpm_clang_language(source):
     """Classify one source file by extension.

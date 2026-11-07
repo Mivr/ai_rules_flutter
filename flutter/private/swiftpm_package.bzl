@@ -130,9 +130,17 @@ def _swiftpm_manifest_filename(ctx, identity):
     """
     if not ctx.path("Package.swift").exists:
         return struct(ok = False, error = _swiftpm_repo_fail(identity, "no `Package.swift` manifest at the archive top level"), filename = "")
-    versioned = [child.basename for child in ctx.path(".").readdir() if not child.is_dir and child.basename.startswith("Package@swift-") and child.basename.endswith(".swift")]
+    versioned = [
+        child.basename
+        for child in ctx.path(".").readdir()
+        if not child.is_dir and child.basename.startswith("Package@swift-") and child.basename.endswith(".swift")
+    ]
     if versioned:
-        return struct(ok = False, error = _swiftpm_repo_fail(identity, "versioned manifest(s) ({names}) sit next to `Package.swift`: only the plain manifest is translated, so remove them or point at a hand-written BUILD file with swift_package_build_files[{identity}]".format(names = sorted(versioned), identity = repr(identity))), filename = "")
+        msg = "versioned manifest(s) ({names}) sit next to `Package.swift`: only the plain manifest is translated, so remove them or point at a hand-written BUILD file with swift_package_build_files[{identity}]".format(
+            names = sorted(versioned),
+            identity = repr(identity),
+        )
+        return struct(ok = False, error = _swiftpm_repo_fail(identity, msg), filename = "")
     return struct(ok = True, error = "", filename = "Package.swift")
 
 def _swiftpm_resolve_target_dir(ctx, identity, target):
@@ -158,14 +166,23 @@ def _swiftpm_resolve_target_dir(ctx, identity, target):
         rel_dir = checked.path
         node = ctx.path(rel_dir)
         if not node.exists or not node.is_dir:
-            return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} names a missing directory in `path:` ({dir})".format(target = repr(target.name), dir = repr(target.path))), rel_dir = "")
+            msg = "target {target} names a missing directory in `path:` ({dir})".format(
+                target = repr(target.name),
+                dir = repr(target.path),
+            )
+            return struct(ok = False, error = _swiftpm_repo_fail(identity, msg), rel_dir = "")
         return struct(ok = True, error = "", rel_dir = rel_dir)
     for base in _SWIFTPM_DEFAULT_DIRS:
         rel_dir = base + "/" + target.name
         node = ctx.path(rel_dir)
         if node.exists and node.is_dir:
             return struct(ok = True, error = "", rel_dir = rel_dir)
-    return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} has no `path:` and none of {dirs} exist".format(target = repr(target.name), dirs = [base + "/" + target.name for base in _SWIFTPM_DEFAULT_DIRS])), rel_dir = "")
+    dirs = [base + "/" + target.name for base in _SWIFTPM_DEFAULT_DIRS]
+    msg = "target {target} has no `path:` and none of {dirs} exist".format(
+        target = repr(target.name),
+        dirs = dirs,
+    )
+    return struct(ok = False, error = _swiftpm_repo_fail(identity, msg), rel_dir = "")
 
 # One table sorts every target file by its extension. The source and header
 # spellings are the union the selector and `swiftpm_is_code_file` used to keep
@@ -216,9 +233,7 @@ def _swiftpm_extension(basename):
         The extension without its dot, or "".
     """
     dot = basename.rfind(".")
-    if dot < 0:
-        return ""
-    return basename[dot + 1:]
+    return "" if dot < 0 else basename[dot + 1:]
 
 def _swiftpm_file_kind(basename):
     """Sort one basename into Swift, C-family, header, module map, resource or skip.
@@ -401,9 +416,28 @@ def _swiftpm_public_root(identity, target, rel_dir):
     if target.public_headers_path == None:
         return struct(ok = True, error = "", root = swiftpm_join_path(rel_dir, "include"))
     checked = _swiftpm_check_entry(identity, target.name, target.public_headers_path, "`publicHeadersPath:`")
-    if not checked.ok:
-        return struct(ok = False, error = checked.error, root = "")
-    return struct(ok = True, error = "", root = swiftpm_join_path(rel_dir, checked.path))
+    root = swiftpm_join_path(rel_dir, checked.path) if checked.ok else ""
+    return struct(ok = checked.ok, error = checked.error, root = root)
+
+def _swiftpm_target_files_failure(error):
+    """Return an error struct for `swiftpm_select_target_files`.
+
+    Args:
+        error: The failure error string.
+
+    Returns:
+        A failed `swiftpm_select_target_files` result struct.
+    """
+    return struct(
+        ok = False,
+        error = error,
+        srcs = [],
+        c_srcs = [],
+        public_hdrs = [],
+        private_hdrs = [],
+        explicit_map = None,
+        map_in_include = False,
+    )
 
 def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
     """Select one reached target's Swift and C-family files, purely.
@@ -437,31 +471,23 @@ def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
         explicit_map, map_in_include)`: the sorted repo-relative paths;
         `explicit_map` is None unless the target ships one.
     """
-    excluded = _swiftpm_keep_existing(identity, target.name, "`exclude:`", target.exclude, rel_dir, struct(files = files, dirs = dirs))
+    tree = struct(files = files, dirs = dirs)
+    excluded = _swiftpm_keep_existing(identity, target.name, "`exclude:`", target.exclude, rel_dir, tree)
     if not excluded.ok:
-        return struct(ok = False, error = excluded.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
+        return _swiftpm_target_files_failure(excluded.error)
     listed = None
     if target.sources != None:
-        narrowed = _swiftpm_keep_existing(identity, target.name, "`sources:`", target.sources, rel_dir, struct(files = files, dirs = dirs))
+        narrowed = _swiftpm_keep_existing(identity, target.name, "`sources:`", target.sources, rel_dir, tree)
         if not narrowed.ok:
-            return struct(ok = False, error = narrowed.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
+            return _swiftpm_target_files_failure(narrowed.error)
         listed = narrowed.kept
     resource_excludes = excluded.all
     resource_error = _swiftpm_find_resource_error(identity, target.name, rel_dir, resource_excludes, files, dirs)
     if resource_error:
-        return struct(
-            ok = False,
-            error = resource_error,
-            srcs = [],
-            c_srcs = [],
-            public_hdrs = [],
-            private_hdrs = [],
-            explicit_map = None,
-            map_in_include = False,
-        )
+        return _swiftpm_target_files_failure(resource_error)
     public_root = _swiftpm_public_root(identity, target, rel_dir)
     if not public_root.ok:
-        return struct(ok = False, error = public_root.error, srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
+        return _swiftpm_target_files_failure(public_root.error)
     srcs = []
     c_srcs = []
     headers = []
@@ -486,9 +512,24 @@ def swiftpm_select_target_files(identity, target, rel_dir, files, dirs):
         elif kind == "header":
             headers.append(full)
     if not srcs and not c_srcs:
-        return struct(ok = False, error = _swiftpm_repo_fail(identity, "target {target} reaches zero Swift files".format(target = repr(target.name))), srcs = [], c_srcs = [], public_hdrs = [], private_hdrs = [], explicit_map = None, map_in_include = False)
-    split = swiftpm_split_headers(public_root.root, rel_dir, struct(listed = headers, unlisted = unlisted_headers), files)
-    return struct(ok = True, error = "", srcs = sorted(srcs), c_srcs = sorted(c_srcs), public_hdrs = split.public_hdrs, private_hdrs = split.private_hdrs, explicit_map = split.explicit_map, map_in_include = split.map_in_include)
+        err = _swiftpm_repo_fail(identity, "target {target} reaches zero Swift files".format(target = repr(target.name)))
+        return _swiftpm_target_files_failure(err)
+    split = swiftpm_split_headers(
+        public_root.root,
+        rel_dir,
+        struct(listed = headers, unlisted = unlisted_headers),
+        files,
+    )
+    return struct(
+        ok = True,
+        error = "",
+        srcs = sorted(srcs),
+        c_srcs = sorted(c_srcs),
+        public_hdrs = split.public_hdrs,
+        private_hdrs = split.private_hdrs,
+        explicit_map = split.explicit_map,
+        map_in_include = split.map_in_include,
+    )
 
 def _swiftpm_list_target_tree(ctx, identity, rel_dir):
     """List every file and directory under one target directory, bounded.
@@ -516,7 +557,8 @@ def _swiftpm_list_target_tree(ctx, identity, rel_dir):
             else:
                 files[full] = True
     if stack:
-        return struct(ok = False, error = has_files_bound_error(identity, rel_dir, PUB_WALK_BOUND), files = {}, dirs = {})
+        err = has_files_bound_error(identity, rel_dir, PUB_WALK_BOUND)
+        return struct(ok = False, error = err, files = {}, dirs = {})
     return struct(ok = True, error = "", files = files, dirs = dirs)
 
 def _swiftpm_collect_sources(ctx, identity, target):
@@ -547,7 +589,16 @@ def _swiftpm_collect_sources(ctx, identity, target):
     selected = swiftpm_select_target_files(identity, target, resolved.rel_dir, files, listed.dirs)
     if not selected.ok:
         return struct(ok = False, error = selected.error, files = None)
-    return struct(ok = True, error = "", files = struct(dir = resolved.rel_dir, srcs = selected.srcs, c_srcs = selected.c_srcs, public_hdrs = selected.public_hdrs, private_hdrs = selected.private_hdrs, explicit_map = selected.explicit_map, map_in_include = selected.map_in_include))
+    collected = struct(
+        dir = resolved.rel_dir,
+        srcs = selected.srcs,
+        c_srcs = selected.c_srcs,
+        public_hdrs = selected.public_hdrs,
+        private_hdrs = selected.private_hdrs,
+        explicit_map = selected.explicit_map,
+        map_in_include = selected.map_in_include,
+    )
+    return struct(ok = True, error = "", files = collected)
 
 def _swiftpm_write_generated_map(identity, target, files):
     """Write one C-family target's generated umbrella module map, if any.
@@ -569,12 +620,19 @@ def _swiftpm_write_generated_map(identity, target, files):
     """
     if not files.c_srcs or files.explicit_map != None:
         return struct(ok = True, error = "", path = "", content = "")
-    spec = swiftpm_clang_module_spec(target, swiftpm_c99name(target.name), files.dir, files.c_srcs, files.public_hdrs, None)
+    c99 = swiftpm_c99name(target.name)
+    spec = swiftpm_clang_module_spec(target, c99, files.dir, files.c_srcs, files.public_hdrs, None)
     if not spec.ok:
         return struct(ok = False, error = _swiftpm_repo_fail(identity, spec.detail), path = "", content = "")
     if spec.module_map == None:
         return struct(ok = True, error = "", path = "", content = "")
-    return struct(ok = True, error = "", path = spec.module_map, content = swiftpm_generated_modulemap_content(swiftpm_c99name(target.name), spec.umbrella_header, spec.include_dir, files.public_hdrs))
+    content = swiftpm_generated_modulemap_content(
+        c99,
+        spec.umbrella_header,
+        spec.include_dir,
+        files.public_hdrs,
+    )
+    return struct(ok = True, error = "", path = spec.module_map, content = content)
 
 def _swiftpm_package_impl(ctx):
     identity = ctx.attr.identity
