@@ -155,3 +155,132 @@ String? _dropExecroot(String path) {
   }
   return null;
 }
+
+/// Maximum symlink dereferences before letting the OS resolver decide.
+const _maxSymlinkHops = 64;
+
+/// Resolve [path], stopping before the `<output_base>/external/<repo>` symlink
+/// when the path passes through a Bazel repository tree.
+///
+/// Reproducible repository rules turn `<output_base>/external/<repo>` into a
+/// symlink into Bazel's repo contents cache. Fully resolving a file inside the
+/// web SDK repo (`web-sdk/libraries.<platform>.json`) moves it into that cache
+/// entry, where its relative `../../<dart_sdk_repo>/dart-sdk/lib/libraries.json`
+/// include no longer reaches the sibling Dart SDK repo under `external/`.
+///
+/// Throws the [FileSystemException] from [File.resolveSymbolicLinksSync] when
+/// [path] does not resolve to an existing file. Paths that never enter an
+/// `external/<repo>/` directory return [File.resolveSymbolicLinksSync] verbatim.
+String resolveExternalPath(String path) {
+  final String? underExternal = _walkPreservingRepoLink(path);
+  if (underExternal != null) {
+    File(underExternal).resolveSymbolicLinksSync();
+    return underExternal;
+  }
+  return File(path).resolveSymbolicLinksSync();
+}
+
+class _PathWalk {
+  new(String absolutePath)
+    : resolved = [p.split(absolutePath).first],
+      pending = p.split(absolutePath).skip(1).toList().reversed.toList();
+
+  final List<String> resolved;
+  final List<String> pending;
+  int? repoFloor;
+  int hops = 0;
+
+  /// Whether the next significant segment enters the current directory rather
+  /// than ending at it or climbing back out with `..`.
+  bool get descendsIntoCurrent {
+    for (int i = pending.length - 1; i >= 0; i--) {
+      final String segment = pending[i];
+      if (segment.isEmpty || segment == '.') continue;
+      return segment != '..';
+    }
+    return false;
+  }
+}
+
+String? _walkPreservingRepoLink(String path) {
+  final String absolute = p.isAbsolute(path)
+      ? path
+      : p.join(Directory.current.path, path);
+  final state = _PathWalk(absolute);
+  while (state.pending.isNotEmpty) {
+    final String segment = state.pending.removeLast();
+    if (segment.isEmpty || segment == '.') continue;
+    if (segment == '..') {
+      if (state.resolved.length > 1) state.resolved.removeLast();
+      if (state.repoFloor != null && state.resolved.length < state.repoFloor!) {
+        state.repoFloor = null;
+      }
+      continue;
+    }
+    state.resolved.add(segment);
+    if (_pinExternalRepoBoundary(state)) continue;
+    if (!_followLinkIfNeeded(state)) return null;
+  }
+  return state.repoFloor == null ? null : p.joinAll(state.resolved);
+}
+
+/// Pins `<output_base>/external/<repo>` without following `<repo>`, rewriting
+/// an `execroot/<ws>/external/<repo>` forest path onto `<output_base>` first.
+bool _pinExternalRepoBoundary(_PathWalk state) {
+  if (state.repoFloor != null || !state.descendsIntoCurrent) return false;
+  final String? dropped = _dropExecroot(p.joinAll(state.resolved));
+  if (dropped != null &&
+      FileSystemEntity.typeSync(dropped, followLinks: false) !=
+          FileSystemEntityType.notFound) {
+    state.resolved
+      ..clear()
+      ..addAll(p.split(dropped));
+  }
+  final int len = state.resolved.length;
+  if (len < 3 || state.resolved[len - 2] != 'external') return false;
+  final String externalDir = p.joinAll(state.resolved.sublist(0, len - 1));
+  if (FileSystemEntity.typeSync(externalDir, followLinks: false) !=
+      FileSystemEntityType.directory) {
+    return false;
+  }
+  final String repo = state.resolved.last;
+  final String outputBase = Directory(
+    p.joinAll(state.resolved.sublist(0, len - 2)),
+  ).resolveSymbolicLinksSync();
+  state.resolved
+    ..clear()
+    ..addAll(p.split(outputBase))
+    ..add('external')
+    ..add(repo);
+  state.repoFloor = state.resolved.length;
+  return true;
+}
+
+/// Follows a symlink at the tip of `state.resolved`, returning false on loop.
+bool _followLinkIfNeeded(_PathWalk state) {
+  final String current = p.joinAll(state.resolved);
+  if (FileSystemEntity.typeSync(current, followLinks: false) !=
+      FileSystemEntityType.link) {
+    return true;
+  }
+  final String target = _stripWindowsDevicePrefix(Link(current).targetSync());
+  state.hops++;
+  if (state.hops > _maxSymlinkHops) return false;
+  state.resolved.removeLast();
+  if (p.isAbsolute(target)) {
+    final List<String> parts = p.split(target);
+    state.resolved
+      ..clear()
+      ..add(parts.first);
+    state.repoFloor = null;
+    state.pending.addAll(parts.skip(1).toList().reversed);
+  } else {
+    state.pending.addAll(target.split(RegExp(r'[\\/]')).reversed);
+  }
+  return true;
+}
+
+String _stripWindowsDevicePrefix(String target) =>
+    target.startsWith(r'\\?\') && !target.startsWith(r'\\?\UNC\')
+    ? target.substring(4)
+    : target;

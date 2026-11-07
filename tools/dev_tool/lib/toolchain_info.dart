@@ -14,6 +14,7 @@ import 'dart:ffi' show Abi;
 import 'dart:io';
 
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
+import 'package:flutter_bazel_dev_tool/package_roots.dart';
 import 'package:path/path.dart' as p;
 
 /// Toolchain paths resolved from Bazel.
@@ -815,10 +816,8 @@ String findWebOutputDir(List<String> outputFiles) {
 
 /// Resolve a build output to the path the DDC toolchain is handed.
 ///
-/// No catch: `resolveSymbolicLinksSync` throws exactly when the path does not
-/// resolve, and answering that with the unresolved path produces a file that
-/// fails at open time, several steps later, in whichever of `frontend_server`,
-/// DWDS or the browser got there first, naming none of this. Letting the
-/// [FileSystemException] out reports the missing file where the toolchain
-/// claimed to have found it.
-String _resolve(String path) => File(path).resolveSymbolicLinksSync();
+/// Stops before `<output_base>/external/<repo>` via [resolveExternalPath] so
+/// relative `../../<dart>` includes in `libraries.json` still reach sibling
+/// repositories. No catch: letting [FileSystemException] out reports a missing
+/// file where the toolchain claimed to have found it rather than at open time.
+String _resolve(String path) => resolveExternalPath(path);
