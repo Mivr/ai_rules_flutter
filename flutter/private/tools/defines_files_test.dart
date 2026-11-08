@@ -61,13 +61,13 @@ void main() {
         final File envFile = createFile(
           'config.env',
           '# This is a comment\n'
-          '   # Another indented comment\n'
-          '\n'
-          'HOST=  example.com  \n'
-          'PORT=8080\n'
-          'QUOTED="hello world"\n'
-          'EXTRA_EQ=foo=bar=baz\n'
-          'EMPTY_VAL=\n',
+              '   # Another indented comment\n'
+              '\n'
+              'HOST=  example.com  \n'
+              'PORT=8080\n'
+              'QUOTED="hello world"\n'
+              'EXTRA_EQ=foo=bar=baz\n'
+              'EMPTY_VAL=\n',
         );
         final outFile = File('${tempDir.path}/out.defines');
         final err = StringBuffer();
