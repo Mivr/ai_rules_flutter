@@ -642,6 +642,15 @@ _MEDIUM_TESTS = [
 # each test library under the file-size ceiling. They share the tool's sources
 # (and, for the worker, `test/incr_fkc_test_support.dart` via `_TOOL_SRCS`).
 dart_test(
+    name = "defines_files_test",
+    size = "small",
+    srcs = ["defines_files.dart"],
+    main = "defines_files_test.dart",
+    target_compatible_with = HOST_COMPATIBLE,
+    deps = ["@dev_tool_deps//:test"],
+)
+
+dart_test(
     name = "incr_fkc_define_flagfiles_test",
     size = "small",
     srcs = ["incr_fkc_worker.dart"] + _TOOL_SRCS["incr_fkc_worker.dart"],
