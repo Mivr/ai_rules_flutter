@@ -1763,9 +1763,18 @@ bzl_library(
 )
 
 bzl_library(
+    name = "plugin_federation",
+    srcs = ["plugin_federation.bzl"],
+    visibility = ["//visibility:public"],
+)
+
+bzl_library(
     name = "plugin_registrant",
     srcs = ["plugin_registrant.bzl"],
     visibility = ["//visibility:public"],
+    deps = [
+        ":plugin_federation",
+    ],
 )
 
 bzl_library(
