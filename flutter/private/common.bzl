@@ -22,6 +22,13 @@ load(
     "flutter_kernel_outputs",
     "flutter_kernel_sources",
 )
+load(
+    "//flutter/private:flutter_defines_files.bzl",
+    _DEFINES_FILES_APPLICATION_ATTRS = "DEFINES_FILES_APPLICATION_ATTRS",
+    _EXTRA_DART_DEFINES_ATTR = "EXTRA_DART_DEFINES_ATTR",
+    _collect_define_flagfiles = "collect_define_flagfiles",
+    _merge_dart_defines = "merge_dart_defines",
+)
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load(
     "//flutter/private:flutter_kernel_module.bzl",
@@ -32,12 +39,15 @@ load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "bu
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action", "shader_compile_tools")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
-load("//flutter/private:validation.bzl", "validate_dart_defines")
 
 COPY_TO_DIRECTORY_TOOLCHAINS = _COPY_TO_DIRECTORY_TOOLCHAINS
 resolve_exec_dart = _resolve_exec_dart
 resolve_exec_dart_vm = _resolve_exec_dart_vm
 resolve_flutter_sdk_info = _resolve_flutter_sdk_info
+DEFINES_FILES_APPLICATION_ATTRS = _DEFINES_FILES_APPLICATION_ATTRS
+EXTRA_DART_DEFINES_ATTR = _EXTRA_DART_DEFINES_ATTR
+collect_define_flagfiles = _collect_define_flagfiles
+merge_dart_defines = _merge_dart_defines
 
 def check_unreplaced_hooks(label, deps):
     """Returns an error naming pub packages whose build hook nothing replaces.
@@ -406,7 +416,7 @@ def _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, pla
     # that shares this helper compiles exactly as it did before. The files are
     # carried as File objects so the compile action can pass each as `@<path>`
     # and declare it as an input without reading its contents at analysis.
-    define_flagfiles = getattr(ctx.files, "define_flagfiles", [])
+    define_flagfiles = collect_define_flagfiles(ctx, user_defines)
     mode_defines = ["dart.vm.profile=true"] if mode == "profile" else ["dart.vm.product=true"] if aot else []
     all_defines.extend(mode_defines)
 
@@ -1532,29 +1542,6 @@ def flutter_build_mode(ctx):
         return "profile"
     return "debug" if compilation_mode == "dbg" else "release"
 
-EXTRA_DART_DEFINES_ATTR = {
-    "_extra_dart_defines": attr.label(
-        doc = "The //flutter:extra_dart_defines build setting, appended after the target's own `defines`.",
-        default = Label("//flutter:extra_dart_defines"),
-    ),
-}
-
-def merge_dart_defines(ctx):
-    """Merge a target's `defines` attr with the extra_dart_defines flag.
-
-    Flag values come after attr values, so on a duplicated key the command
-    line wins (the compilers take the last -D). The flag validates its own
-    value in its rule impl; only the attr is validated here.
-
-    Args:
-        ctx: Rule context with `defines` and `_extra_dart_defines` attrs.
-
-    Returns:
-        The merged list of KEY=VALUE define strings.
-    """
-    validate_dart_defines(ctx.attr.defines, "defines attribute of %s" % ctx.label)
-    return list(ctx.attr.defines) + list(ctx.attr._extra_dart_defines[BuildSettingInfo].value)
-
 # The attrs `flutter_compile_kernel` reads off its caller's `ctx`. Every rule
 # that calls it spreads this bundle wholesale rather than naming the members,
 # because naming them is what let the contract break: `flutter_compile_kernel`
@@ -1825,20 +1812,11 @@ FLUTTER_DEPS_DOC = (
 )
 
 # Shared attrs for all flutter application rules.
-FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
+FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | DEFINES_FILES_APPLICATION_ATTRS | {
     "deps": attr.label_list(
         doc = FLUTTER_DEPS_DOC,
         providers = [DartInfo],
         aspects = [flutter_app_shader_aspect],
-    ),
-    "define_flagfiles": attr.label_list(
-        doc = "Files of Dart environment defines, one already-spelled " +
-              "`-Dname=value` argument per line. Each file is passed to the " +
-              "kernel compile as `@<file>` and declared as an action input, so " +
-              "its values stay out of the action command line and `bazel " +
-              "aquery` while a change to its content changes the action key. " +
-              "Unset, every action is unchanged.",
-        allow_files = True,
     ),
     "assets": attr.label_list(
         doc = "Asset files to include in the bundle.",

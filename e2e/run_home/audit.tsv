@@ -17,6 +17,7 @@
 @rules_flutter//flutter/private/tools:compile_shader	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:const_finder	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:extract_library_tags	exec build tool (AOT); outputs only, no CLI spawn
+@rules_flutter//flutter/private/tools:defines_files	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:generate_asset_manifest	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:incr_fkc_worker	exec build tool (AOT persistent worker); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:kernel_filter	exec build tool (AOT); outputs only, no CLI spawn

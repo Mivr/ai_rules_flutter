@@ -1620,6 +1620,8 @@ flutter_application(
 | `fonts` | The app's font families, as `flutter_font_family` targets. Families and assets are bundled bare (`HelloSans`, `fonts/...`), in declaration order. See [Font families](#font-families). |
 | `native_deps` | Shared libraries to bundle for `dart:ffi`. |
 | `defines` | Dart environment defines, the `-D` flags. |
+| `defines_files` | Files of Dart environment defines in `.json` or `.env` format. Content is parsed in an action and never reaches the compile command line. |
+| `define_flagfiles` | Files holding compiler `-Dname=value` arguments, one per line. Passed to the compile as `@<path>`. |
 | `language_version` | The Dart language version, matching `pubspec.yaml`. |
 | `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
 | `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
@@ -1636,6 +1638,28 @@ flutter_application(
 **Obfuscated releases.** `obfuscate` renames Dart identifiers and forces `--strip`, so pair it with `split_debug_info` to keep the symbols for deobfuscation. `gen_snapshot` also writes an obfuscation map next to the snapshot; fetch it with `bazel build :my_app --output_groups=obfuscation_map` (or read `FlutterApplicationInfo.obfuscation_map`). `extra_gen_snapshot_options` is an allow-list: only flags that read or write no file and change neither the snapshot kind, outputs, target nor debugging info. `--save-obfuscation-map` and `--save-debugging-info` fail analysis — use `obfuscate` and `split_debug_info` instead — and `--no-strip` fails with `obfuscate`.
 
 **Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas. When a key is set both by the flag and by the `defines` attribute, the flag wins. Reserved defines (`dart.vm.*`, `dart.library.*`, `dart.tool.*`, `flutter.*`) are set by the build and SDK and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
+
+**Define flagfiles.** `flutter_application(define_flagfiles = [...])` passes files of Dart environment declarations, each line an already-spelled `-Dname=value` argument, as `@<file>` to the kernel compile. The file is an action input, so changes invalidate the compile while the values stay out of the command line and `bazel aquery`.
+
+**Defines files.** `flutter_application(defines_files = [...])` passes Dart environment defines from `.json` and `.env` files into the kernel compile without their values appearing on the command line or in `bazel aquery`. A `.json` file must define a top-level object whose values are strings, numbers, or booleans:
+
+```json
+{
+  "API_URL": "https://api.example.com",
+  "ENABLE_LOGGING": true,
+  "TIMEOUT_SECS": 30
+}
+```
+
+A `.env` file defines one `KEY=VALUE` per line (blank lines and lines starting with `#` are ignored, values are trimmed and quotes are not processed):
+
+```env
+# Environment configuration
+API_URL=https://api.example.com
+DEBUG=false
+```
+
+Precedence, lowest to highest: `defines_files` in list order, then `defines`, then `--@rules_flutter//flutter:extra_dart_defines`. A key set by a higher-precedence source overrides matching keys from earlier files. `defines_files` is accepted alongside `define_flagfiles` (the generated flagfile precedes user `define_flagfiles`), and is not read by a custom kernel pipeline.
 
 ### flutter_test
 

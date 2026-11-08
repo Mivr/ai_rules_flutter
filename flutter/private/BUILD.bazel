@@ -163,13 +163,13 @@ bzl_library(
         ":asset_uri",
         ":flutter_asset_bundle_action",
         ":flutter_compile",
+        ":flutter_defines_files",
         ":flutter_info",
         ":flutter_kernel_module",
         ":flutter_library",
         ":flutter_shader_compile",
         ":native_sources",
         ":plugin_registrant",
-        ":validation",
         "//flutter:providers",
         "@bazel_skylib//rules:common_settings",
         "@rules_dart//dart:providers",
@@ -459,6 +459,16 @@ bzl_library(
     deps = [
         ":flutter_info",
         "//flutter:providers",
+    ],
+)
+
+bzl_library(
+    name = "flutter_defines_files",
+    srcs = ["flutter_defines_files.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":validation",
+        "@bazel_skylib//rules:common_settings",
     ],
 )
 
