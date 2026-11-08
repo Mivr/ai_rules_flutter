@@ -261,13 +261,15 @@ def defines_files_test_suite(name):
 
     _defines_files_test(
         name = name + "_flagfile_generated_and_ordered",
-        target_under_test = ":_defines_files_application",
+        size = "small",
         target_compatible_with = HOST_COMPATIBLE,
+        target_under_test = ":_defines_files_application",
     )
     _no_defines_files_test(
         name = name + "_unchanged_without_defines_files",
-        target_under_test = ":_defines_files_baseline",
+        size = "small",
         target_compatible_with = HOST_COMPATIBLE,
+        target_under_test = ":_defines_files_baseline",
     )
 
     native.test_suite(
