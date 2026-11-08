@@ -19,6 +19,7 @@ exports_files(
         "compile_shader.dart",
         "crc32.dart",
         "directive_guard.dart",
+        "defines_files.dart",
         "kernel_filter.dart",
         "incr_fkc_guard_cache.dart",
         "incr_fkc_scratch.dart",
@@ -199,6 +200,15 @@ dart_binary(
     main = "const_finder.dart",
     target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
+)
+
+dart_binary(
+    name = "defines_files",
+    compile_mode = "exe",
+    main = "defines_files.dart",
+    modular_kernel = False,
+    target_compatible_with = HOST_COMPATIBLE,
+    visibility = ["//visibility:public"],
 )
 
 dart_binary(
