@@ -5,36 +5,12 @@ at application startup, and native registrant source files for method channel
 plugins (pluginClass) on desktop platforms.
 """
 
-def _dart_plugin_entry(plugin, info):
-    """Builds the registrant entry for one plugin's Dart class info."""
-    return struct(
-        package = plugin.name,
-        dart_plugin_class = info.get("dartPluginClass", ""),
-        dart_file_name = info.get("fileName", info.get("dartFileName", plugin.name + ".dart")),
-    )
-
-def _collect_platform_dart_plugins(plugins, target_platform):
-    """Collects `dartPluginClass` entries for one platform."""
-    dart_plugins = []
-    for plugin in plugins:
-        info = plugin.platforms.get(target_platform, {})
-        if not info:
-            continue
-        entry = _dart_plugin_entry(plugin, info)
-        if entry.dart_plugin_class:
-            dart_plugins.append(entry)
-    return dart_plugins
-
-def _collect_legacy_dart_plugins(plugins):
-    """Collects entries by first platform with a `dartPluginClass`."""
-    dart_plugins = []
-    for plugin in plugins:
-        for _platform, info in plugin.platforms.items():
-            entry = _dart_plugin_entry(plugin, info)
-            if entry.dart_plugin_class:
-                dart_plugins.append(entry)
-                break
-    return dart_plugins
+load(
+    "//flutter/private:plugin_federation.bzl",
+    "collect_legacy_dart_plugins",
+    "collect_platform_dart_plugins",
+    "resolve_federated_plugins",
+)
 
 def _render_plugin_registrant(dart_plugins, agent_import, native_agent_import):
     """Renders the `_PluginRegistrant` Dart source for collected entries."""
@@ -107,14 +83,14 @@ def make_registrant_content(plugins, target_platform = None, agent_import = None
         String of Dart source code, or empty string if there are no Dart
         plugins and no agent to register.
     """
-    if target_platform == "web":
-        return _make_web_registrant_content(plugins)
-
     if target_platform:
-        dart_plugins = _collect_platform_dart_plugins(plugins, target_platform)
+        resolved_plugins = resolve_federated_plugins(plugins, target_platform)
+        if target_platform == "web":
+            return _make_web_registrant_content(resolved_plugins)
+        dart_plugins = collect_platform_dart_plugins(resolved_plugins, target_platform)
     else:
         # Legacy: pick first platform with dartPluginClass.
-        dart_plugins = _collect_legacy_dart_plugins(plugins)
+        dart_plugins = collect_legacy_dart_plugins(plugins)
 
     if not dart_plugins and not agent_import and not native_agent_import:
         return ""
@@ -134,9 +110,10 @@ def _make_web_registrant_content(plugins):
     `dartPluginClass` is set, fall back to the same `null`-registrar
     convention used on mobile/desktop.
     """
+    resolved_plugins = resolve_federated_plugins(plugins, "web")
     web_plugins_with_registrar = []
     web_plugins_no_registrar = []
-    for plugin in plugins:
+    for plugin in resolved_plugins:
         info = plugin.platforms.get("web", {})
         if not info:
             continue
@@ -188,8 +165,9 @@ def _collect_native_plugins(plugins, target_platform):
     Returns:
         List of structs with name, plugin_class, and (for android) package fields.
     """
+    resolved_plugins = resolve_federated_plugins(plugins, target_platform)
     result = []
-    for plugin in plugins:
+    for plugin in resolved_plugins:
         info = plugin.platforms.get(target_platform, {})
         if info:
             plugin_class = info.get("pluginClass", "")
@@ -201,6 +179,21 @@ def _collect_native_plugins(plugins, target_platform):
                 ))
     return result
 
+def _ensure_native_plugins(plugins, target_platform):
+    """Ensure plugins are resolved and collected as native plugins.
+
+    Args:
+        plugins: List of plugin structs.
+        target_platform: Target platform string.
+
+    Returns:
+        List of collected native plugin structs.
+    """
+    resolved = resolve_federated_plugins(plugins, target_platform)
+    if resolved and hasattr(resolved[0], "platforms") and not hasattr(resolved[0], "plugin_class"):
+        return _collect_native_plugins(resolved, target_platform)
+    return resolved
+
 def make_linux_registrant_content(plugins):
     """Generate C++ source for Linux native plugin registration.
 
@@ -210,6 +203,7 @@ def make_linux_registrant_content(plugins):
     Returns:
         String of C++ source code for generated_plugin_registrant.cc.
     """
+    native_plugins = _ensure_native_plugins(plugins, "linux")
     lines = [
         "// GENERATED — do not edit.",
         "#include <flutter_linux/flutter_linux.h>",
@@ -220,7 +214,7 @@ def make_linux_registrant_content(plugins):
     # (standard Flutter Linux plugins wrap `<plugin>_register_with_registrar`
     # in `G_BEGIN_DECLS` / `extern "C"`) matches the definition; fall back to
     # a forward declaration for headerless plugins.
-    for p in plugins:
+    for p in native_plugins:
         fn_name = _to_snake_case(p.plugin_class)
         pkg_name = getattr(p, "name", "")
         if pkg_name:
@@ -240,7 +234,7 @@ def make_linux_registrant_content(plugins):
 
     lines.append("")
     lines.append("void fl_register_plugins(FlPluginRegistry* registry) {")
-    for p in plugins:
+    for p in native_plugins:
         fn_name = _to_snake_case(p.plugin_class)
         lines.append("  g_autoptr(FlPluginRegistrar) %s_registrar =" % fn_name)
         lines.append('      fl_plugin_registry_get_registrar_for_plugin(registry, "%s");' % p.plugin_class)
@@ -258,6 +252,7 @@ def make_windows_registrant_content(plugins):
     Returns:
         String of C++ source code for generated_plugin_registrant.cc.
     """
+    native_plugins = _ensure_native_plugins(plugins, "windows")
     lines = [
         "// GENERATED — do not edit.",
         "#include <flutter/plugin_registry.h>",
@@ -265,13 +260,13 @@ def make_windows_registrant_content(plugins):
     ]
 
     # Forward declarations (PascalCase with RegisterWithRegistrar suffix).
-    for p in plugins:
+    for p in native_plugins:
         lines.append("void %sRegisterWithRegistrar(" % p.plugin_class)
         lines.append("    flutter::PluginRegistrarWindows* registrar);")
 
     lines.append("")
     lines.append("void RegisterPlugins(flutter::PluginRegistry* registry) {")
-    for p in plugins:
+    for p in native_plugins:
         lines.append("  %sRegisterWithRegistrar(" % p.plugin_class)
         lines.append('      registry->GetRegistrarForPlugin("%s"));' % p.plugin_class)
     lines.append("}")
@@ -293,19 +288,20 @@ def make_macos_registrant_content(plugins):
     Returns:
         String of Swift source code for GeneratedPluginRegistrant.swift.
     """
+    native_plugins = _ensure_native_plugins(plugins, "macos")
     lines = [
         "// GENERATED — do not edit.",
         "import FlutterMacOS",
     ]
     seen_modules = {}
-    for p in plugins:
+    for p in native_plugins:
         module_name = p.name
         if module_name not in seen_modules:
             seen_modules[module_name] = True
             lines.append("import %s" % module_name)
     lines.append("")
     lines.append("func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {")
-    for p in plugins:
+    for p in native_plugins:
         lines.append('    %s.register(with: registry.registrar(forPlugin: "%s"))' % (p.plugin_class, p.plugin_class))
     lines.append("}")
     lines.append("")
@@ -330,6 +326,7 @@ def make_android_registrant_content(plugins, java_package = "io.flutter.plugins"
     Returns:
         String of Java source code for GeneratedPluginRegistrant.java.
     """
+    native_plugins = _ensure_native_plugins(plugins, "android")
     lines = [
         "// GENERATED — do not edit.",
         "package %s;" % java_package,
@@ -344,7 +341,7 @@ def make_android_registrant_content(plugins, java_package = "io.flutter.plugins"
         '  private static final String TAG = "GeneratedPluginRegistrant";',
         "  public static void registerWith(@NonNull FlutterEngine flutterEngine) {",
     ]
-    for p in plugins:
+    for p in native_plugins:
         # A guessed package names a class that does not exist, and the
         # registrant then fails to compile saying only that.
         java_pkg = getattr(p, "package", "")
@@ -380,12 +377,13 @@ def make_ios_registrant_content(plugins):
     Returns:
         String of Swift source code for GeneratedPluginRegistrant.swift.
     """
+    native_plugins = _ensure_native_plugins(plugins, "ios")
     lines = [
         "// GENERATED — do not edit.",
         "import Flutter",
     ]
     seen_modules = {}
-    for p in plugins:
+    for p in native_plugins:
         module_name = p.name
         if module_name not in seen_modules:
             seen_modules[module_name] = True
@@ -393,7 +391,7 @@ def make_ios_registrant_content(plugins):
     lines.append("")
     lines.append("@objc class GeneratedPluginRegistrant: NSObject {")
     lines.append("    @objc static func register(with registry: FlutterPluginRegistry) {")
-    for p in plugins:
+    for p in native_plugins:
         lines.append('        %s.register(with: registry.registrar(forPlugin: "%s")!)' % (p.plugin_class, p.plugin_class))
     lines.append("    }")
     lines.append("}")
@@ -459,6 +457,7 @@ def make_ios_objc_impl_content(native_plugins):
     Returns:
         String of ObjC source code for GeneratedPluginRegistrant.m.
     """
+    native_plugins = _ensure_native_plugins(native_plugins, "ios")
     lines = [
         "//",
         "//  Generated file. Do not edit.",

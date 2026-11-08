@@ -1095,12 +1095,7 @@ def _read_spoke_pubspec(ctx):
     asset blocks (absent-pubspec defaults when no pubspec was extracted).
     """
     raw_deps, bazel_deps, language_version = [], [], ""
-    plugin_block = struct(
-        present = False,
-        platforms = {},
-        implements = "",
-        ffi_plugin = False,
-    )
+    plugin_block = struct(present = False, platforms = {}, implements = "", ffi_plugin = False)
     asset_block = struct(
         fonts = [],
         assets = [],
@@ -1243,7 +1238,10 @@ def _build_plugin_spoke_content(ctx, pubspec, dep_labels, assets, unreplaced_hoo
     package_name = ctx.attr.package_name
     apple = _detect_apple_plugin_sources(ctx, package_name, pubspec.plugin_block)
     desktop = _detect_desktop_plugin_sources(ctx, package_name, pubspec.plugin_block)
-    plugin_platforms_json = json.encode(pubspec.plugin_block.platforms)
+    platforms_payload = dict(pubspec.plugin_block.platforms)
+    if pubspec.plugin_block.implements:
+        platforms_payload["__implements__"] = pubspec.plugin_block.implements
+    plugin_platforms_json = json.encode(platforms_payload)
     build_content = make_flutter_plugin_build_content(
         name = package_name,
         deps = dep_labels,

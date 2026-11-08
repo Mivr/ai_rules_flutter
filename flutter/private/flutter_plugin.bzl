@@ -31,17 +31,22 @@ load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_chan
 load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "check_asset_shader_conflict", "flutter_analyzable_info")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
-def build_plugin_struct(name, plugin_platforms):
+def build_plugin_struct(name, plugin_platforms, implements = ""):
     """Build a plugin metadata struct from per-platform metadata.
 
     Args:
         name: Plugin package name.
         plugin_platforms: Dict of platform -> {pluginClass, dartPluginClass, ...}.
+        implements: Umbrella package name this plugin implements, or "".
 
     Returns:
-        A struct with name and platforms dict.
+        A struct with name, platforms dict, and implements.
     """
-    return struct(name = name, platforms = plugin_platforms)
+    return struct(
+        name = name,
+        platforms = plugin_platforms,
+        implements = implements if implements != None else "",
+    )
 
 def _apple_plugin_platform(ctx):
     """Detect the Apple platform of a `swift_library` from its constraints."""
@@ -109,10 +114,24 @@ _apple_plugin_aspect = aspect(
     doc = "Collects Apple plugin info from the `swift_library` targets a plugin owns.",
 )
 
-def _plugin_platforms_metadata(ctx):
-    """Decode the plugin's per-platform metadata from its attrs."""
+def _plugin_platforms_and_implements(ctx):
+    """Decode the plugin's per-platform metadata and implements from its attrs.
+
+    Args:
+        ctx: Rule context.
+
+    Returns:
+        Tuple of (platforms_dict, implements_string).
+    """
     if ctx.attr.plugin_platforms_json:
-        return json.decode(ctx.attr.plugin_platforms_json)
+        data = json.decode(ctx.attr.plugin_platforms_json)
+        implements = ""
+        if type(data) == "dict":
+            if "__implements__" in data and type(data["__implements__"]) == "string":
+                implements = data.pop("__implements__")
+            elif "implements" in data and type(data["implements"]) == "string":
+                implements = data.pop("implements")
+        return data, implements
     plugin_platforms = {}
     for p in ctx.attr.platforms:
         info = {}
@@ -123,7 +142,7 @@ def _plugin_platforms_metadata(ctx):
         if p == "android" and ctx.attr.android_package:
             info["package"] = ctx.attr.android_package
         plugin_platforms[p] = info
-    return plugin_platforms
+    return plugin_platforms, ""
 
 def _collect_native_lib_sources(ctx):
     """Pair native libraries with the sources their bindings were generated from."""
@@ -353,9 +372,11 @@ def _flutter_plugin_impl(ctx):
     # Build plugin metadata.
     # If plugin_platforms_json is set, decode it directly.
     # Otherwise construct from scalar attrs (for manual BUILD files).
+    plugin_platforms, implements = _plugin_platforms_and_implements(ctx)
     plugin = build_plugin_struct(
         name = package_name,
-        plugin_platforms = _plugin_platforms_metadata(ctx),
+        plugin_platforms = plugin_platforms,
+        implements = implements,
     )
 
     # Collect native libs from native_deps.

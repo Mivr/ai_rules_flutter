@@ -165,8 +165,11 @@ byte-order mark moves no line. Accepted pubspecs parse exactly as before.
   `platforms` value that is not a map, or a platform entry flutter_tools
   rejects (for example an empty `android:` entry, or a non-identifier
   `pluginClass`) fails the fetch at the entry's line, as flutter_tools
-  does. `web` entries, unknown platforms, and `default_package` entries are
-  not validated, the way flutter_tools skips them.
+  does. `web` entries and unknown platforms are not validated, the way
+  flutter_tools skips them. A `default_package` entry specifies the platform
+  default implementation for federated plugins: an application choosing a
+  different package implementing the umbrella replaces the default for that
+  platform, while conflicting non-default implementations fail the build.
 - A `deferred-components` value that is not a list, an empty list
   (flutter_tools crashes reading one, so it cannot build), an element
   that is not a map, an element without a string `name`, a `libraries`

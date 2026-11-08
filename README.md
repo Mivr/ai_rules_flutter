@@ -230,6 +230,20 @@ A plugin's Gradle build is not read while the hub's spokes are fetched. Each And
 
 Permissions a plugin declares in its own manifest, such as `record_android`'s `RECORD_AUDIO`, reach the app's manifest as they do under Gradle. You don't need `--merge_android_manifest_permissions`.
 
+### Federated plugins
+
+Federated plugin resolution follows Flutter's `resolvePlatformImplementation` rules per target platform:
+
+- **App-chosen override**: An umbrella plugin whose entry for a platform specifies `default_package` is
+  replaced for that platform by an app-chosen implementation when another plugin in the list declares
+  `implements` equal to the umbrella's name and has an entry for that platform. The default implementation
+  is dropped for that platform, and the remaining plugin order is preserved.
+- **Default implementation**: With no non-default implementation for that platform, the default package
+  stays registered. A plugin with no `implements` and no `default_package` is untouched.
+- **Conflict refusal**: Two or more non-default implementations of one umbrella for the same platform
+  fail closed with an error naming all conflicting implementations and the default package. A plugin set
+  with multiple implementations is accepted on any platform where only one of them has an entry.
+
 ### Path dependencies
 
 A `path:` entry with `relative: true` in the lock is resolved against the lock file's own directory and linked into a `flutter_pub_path_package` spoke as a tree of symlinks, so the workspace never copies the package. The entry is accepted only when the lock's `relative` marker is true and its path is workspace-relative: any other marker (false, missing, empty) and any absolute path fail the extension evaluation naming the hub and the package. The spoke links only what its generator reads or exposes — `lib/`, the pubspec, hook scripts, declared assets, fonts, and shaders (plus each shader's own directory), and the plugin's declared platform directories — parsed from the package's own `pubspec.yaml` and mirrored one file at a time into real repository directories. `example/`, `build/`, `.dart_tool/`, dot-directories, undeclared files, and the package's own BUILD files stay unlinked (skipped subtrees are not even watched), so machine-local output such as `example/build/` or a `.plugin_symlinks` cycle can never affect the fetch; every directory in the spoke is real: each symlink is a single file, and a directory reaching the link step fails the fetch, so the generated BUILD files land in the spoke, never in the user's source tree. Every linked file and directory is watched, so adding, changing, or removing one refetches the spoke; without the watch, files added inside nested asset directories would stay invisible until something else retriggered the fetch. A source symlink resolving to the package or one of its ancestors fails the fetch naming the package and the link, and the package directory itself, any of its parent components, or any replicated symlink resolving outside the workspace's real root fails the fetch naming the package, the offending path, and its real path — host bytes can never enter the bundle. A path that escapes the workspace, or resolves to the workspace root itself, fails the extension evaluation rather than symlinking outside the workspace. The package's pubspec `name` and `version` must match the lock entry, since overlays and code assets are selected by lock name and version; a mismatch fails the fetch naming the hub, the lock key, and both values. Shader `shader_includes` cover only the declared shaders' own directories, so `example/build/` output can never become an include. A path plugin's `android/build.gradle*` is translated exactly as a hosted plugin's: `android_maven_deps` and `android_maven_ignore` from `flutter.pub` apply to it too.
@@ -2061,7 +2075,7 @@ A Flutter workspace's Dart toolchain is the Dart SDK bundled with its Flutter re
 | Field | Type | Description |
 |---|---|---|
 | `asset_dirs` | `depset[File]` | Directories containing assets. |
-| `plugins` | `list[struct]` | Plugin metadata, each with `name` and `platforms`. |
+| `plugins` | `list[struct]` | Plugin metadata, each with `name`, `platforms`, and `implements`. |
 | `transitive_native_libs` | `depset[File]` | Shared libraries from plugins' `native_deps`. |
 
 **`FlutterApplicationInfo`** is carried by `flutter_application` and consumed by the platform rules:
