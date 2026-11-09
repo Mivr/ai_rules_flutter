@@ -335,16 +335,10 @@ void main() {}
 
       test('allows a relative empty segment that stays inside the package', () {
         const srcLib = {'demo/lib/src/src/b.dart': lib};
-        expect(
-          importsOf('demo/lib/src/c.dart', "import 'src//../b.dart';", srcLib),
-          isEmpty,
-        );
-        expect(
-          importsOf('demo/lib/src/c.dart', "import '../src//b.dart';", {
-            'demo/lib/src/b.dart': lib,
-          }),
-          isEmpty,
-        );
+        const srcB = {'demo/lib/src/b.dart': lib};
+        const c = 'demo/lib/src/c.dart';
+        expect(importsOf(c, "import 'src//../b.dart';", srcLib), isEmpty);
+        expect(importsOf(c, "import '../src//b.dart';", srcB), isEmpty);
         const sub = 'demo/lib/src/sub/c.dart';
         expect(importsOf(sub, "import '..//src/b.dart';", srcLib), isEmpty);
       });
