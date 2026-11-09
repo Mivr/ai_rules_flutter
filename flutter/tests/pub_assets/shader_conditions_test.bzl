@@ -66,6 +66,27 @@ flutter:
       platforms: [tvos]
 """
 
+_SHADER_TRANSFORMERS_PUBSPEC = """\
+name: shader_transformers
+flutter:
+  shaders:
+    - path: shaders/distort.frag
+      transformers:
+        - package: weave
+"""
+
+_SHADER_NULL_TRANSFORMERS_PUBSPEC = """\
+name: shader_null_transformers
+flutter:
+  assets:
+    - path: assets/image.png
+      transformers:
+        - package: weave
+  shaders:
+    - path: shaders/distort.frag
+      transformers: null
+"""
+
 def _shader_conditions_survive_parse_test_impl(ctx):
     """A shader map entry keeps its `platforms` and `flavors` lists."""
     env = unittest.begin(ctx)
@@ -134,6 +155,36 @@ def _shader_unknown_platform_refused_test_impl(ctx):
         "platforms",
         "Invalid platform(s): \"tvos\"",
     )
+    return unittest.end(env)
+
+def _shader_transformers_refused_test_impl(ctx):
+    """A shader entry with `transformers:` yields one refusal with key `transformers`."""
+    env = unittest.begin(ctx)
+    result = parse_flutter_assets_block(_SHADER_TRANSFORMERS_PUBSPEC)
+    asserts.equals(env, 1, len(result.asset_errors))
+    problem = result.asset_errors[0]
+    asserts.equals(env, "transformers", problem.key)
+    asserts.equals(env, "shaders/distort.frag", problem.path)
+    asserts.equals(env, 5, problem.line)
+    asserts.true(env, "asset transformers are not supported by rules_flutter." in problem.detail, problem.detail)
+    message = asset_entry_problem_error("shader_pkg", problem)
+    for want in ["shader_pkg", "shaders/distort.frag", "transformers"]:
+        asserts.true(env, want in message, message)
+    return unittest.end(env)
+
+def _shader_null_transformers_accepted_test_impl(ctx):
+    """A shader entry with `transformers: null` yields none while asset entry still refuses."""
+    env = unittest.begin(ctx)
+    result = parse_flutter_assets_block(_SHADER_NULL_TRANSFORMERS_PUBSPEC)
+    asserts.equals(env, 1, len(result.asset_errors))
+    problem = result.asset_errors[0]
+    asserts.equals(env, "transformers", problem.key)
+    asserts.equals(env, "assets/image.png", problem.path)
+    asserts.equals(env, 5, problem.line)
+    asserts.equals(env, 1, len(result.shaders))
+    asserts.equals(env, "shaders/distort.frag", result.shaders[0].path)
+    asserts.equals(env, [], result.shaders[0].platforms)
+    asserts.equals(env, [], result.shaders[0].flavors)
     return unittest.end(env)
 
 def _shader_predicate_flavors_and_legacy_spoke_test_impl(ctx):
@@ -283,6 +334,8 @@ _t2_test = unittest.make(_shader_scalar_platforms_refused_test_impl)
 _t3_test = unittest.make(_shader_scalar_flavors_refused_test_impl)
 _t4_test = unittest.make(_shader_unknown_platform_refused_test_impl)
 _t5_test = unittest.make(_shader_predicate_flavors_and_legacy_spoke_test_impl)
+_t6_test = unittest.make(_shader_transformers_refused_test_impl)
+_t7_test = unittest.make(_shader_null_transformers_accepted_test_impl)
 
 def _declare_probe_tests(name):
     """Declares the shader condition probe library and filter/aspect tests.
@@ -421,4 +474,6 @@ def shader_conditions_test_suite(name):
         _t3_test,
         _t4_test,
         _t5_test,
+        _t6_test,
+        _t7_test,
     )

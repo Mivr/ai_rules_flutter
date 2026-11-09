@@ -649,6 +649,13 @@ def _entry_condition_problems(path, item, lines, elocator):
     (platforms, platform_problems) = _condition_problems(path, item, "platforms", lines, elocator)
     return (flavors, platforms, flavor_problems + platform_problems)
 
+def _entry_transformer_problems(path, item, lines, elocator):
+    """Collect shape problems when an entry carries unsupported transformers."""
+    if item.get("transformers") == None:
+        return []
+    loc = flutter_line_of(lines, elocator + ["transformers"])
+    return [_shape_problem(path, "transformers", "asset transformers are not supported by rules_flutter.", loc)]
+
 def _parse_assets(raw, lines, locator, shown):
     """Parse the raw `flutter.assets` list, collecting malformed entries.
 
@@ -695,18 +702,10 @@ def _parse_assets(raw, lines, locator, shown):
         problems.extend(shape_problems)
         if path == None:
             continue
-        if type(item) == "string":
-            entries.append(struct(path = path, is_map = False, flavors = [], platforms = []))
-            continue
-        (flavors, platforms, condition_problems) = _entry_condition_problems(path, item, lines, elocator)
-        problems.extend(condition_problems)
-        if "transformers" in item and item.get("transformers") != None:
-            problems.append(_shape_problem(
-                path,
-                "transformers",
-                "asset transformers are not supported by rules_flutter.",
-                flutter_line_of(lines, elocator + ["transformers"]),
-            ))
+        flavors, platforms = [], []
+        if type(item) == "dict":
+            (flavors, platforms, condition_problems) = _entry_condition_problems(path, item, lines, elocator)
+            problems.extend(condition_problems + _entry_transformer_problems(path, item, lines, elocator))
         entries.append(struct(path = path, is_map = is_map, flavors = flavors, platforms = platforms))
     return (entries, problems)
 
@@ -750,9 +749,10 @@ def _parse_shaders(raw, lines, locator):
     whose `path` is not a string are each a refusal; an empty map is
     silently no entry, exactly as flutter_tools reads it. A map entry's
     `flavors` / `platforms` run the same condition checks an asset entry's
-    do (`_entry_condition_problems`), with the same messages, and travel
-    with the entry so the bundler can filter it like an asset. A `path`
-    entry that reads keeps its conditions; the fetch still fails on the
+    do (`_entry_condition_problems`), with the same messages, and `transformers`
+    is refused like an asset entry's (`_entry_transformer_problems`).
+    Conditions travel with the entry so the bundler can filter it like an asset.
+    A `path` entry that reads keeps its conditions; the fetch still fails on the
     problems first.
 
     Args:
@@ -778,12 +778,11 @@ def _parse_shaders(raw, lines, locator):
         problems.extend(shape_problems)
         if path == None:
             continue
+        flavors, platforms = [], []
         if type(entry) == "dict":
             (flavors, platforms, condition_problems) = _entry_condition_problems(path, entry, lines, elocator)
-            problems.extend(condition_problems)
-            out.append(struct(path = path, is_map = is_map, flavors = flavors, platforms = platforms))
-        else:
-            out.append(struct(path = path, is_map = is_map, flavors = [], platforms = []))
+            problems.extend(condition_problems + _entry_transformer_problems(path, entry, lines, elocator))
+        out.append(struct(path = path, is_map = is_map, flavors = flavors, platforms = platforms))
     return (out, problems)
 
 def _deferred_assets_check(lines):
