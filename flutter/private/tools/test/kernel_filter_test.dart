@@ -77,14 +77,11 @@ void main() {
       addTearDown(() => work.deleteSync(recursive: true));
       Directory.current = work.path;
       File('${work.path}/lib/main.dart').createSync(recursive: true);
-      expect(
-        dependencyExecPath('+file://${work.path}/lib/main.dart'),
-        'lib/main.dart',
+      final String? p = dependencyExecPath(
+        '+file://${work.path}/lib/main.dart',
       );
-      expect(
-        dependencyExecPath('+file://${work.path}/lib/main.dart'),
-        isNot(startsWith('/')),
-      );
+      expect(p, 'lib/main.dart');
+      expect(p, isNot(startsWith('/')));
     });
 
     test('decodes percent escapes the way the front end spells them', () {
@@ -93,14 +90,11 @@ void main() {
       );
       addTearDown(() => work.deleteSync(recursive: true));
       Directory.current = work.path;
-      expect(
-        dependencyExecPath('+file://${work.path}/lib/my%20lib.dart'),
-        'lib/my lib.dart',
+      final String? p = dependencyExecPath(
+        '+file://${work.path}/lib/my%20lib.dart',
       );
-      expect(
-        dependencyExecPath('+file://${work.path}/lib/my%20lib.dart'),
-        isNot(contains('%')),
-      );
+      expect(p, 'lib/my lib.dart');
+      expect(p, isNot(contains('%')));
     });
 
     test('rejects reads outside the working directory', () {
@@ -273,6 +267,88 @@ void main() {}
         );
       });
 
+      test(
+        'refuses relative empty-segment overshoots past package root (table)',
+        () {
+          const decoys = {
+            'demo/lib/x.dart': lib,
+            'demo/x.dart': lib,
+            'x.dart': lib,
+          };
+          for (final (from, tgt) in const [
+            ('demo/lib/c.dart', 'c.dart'),
+            ('demo/lib/src/c.dart', 'src/c.dart'),
+          ]) {
+            for (final kind in const ['import', 'part']) {
+              for (var extra = 0; extra <= 3; extra++) {
+                final ref = '${'../' * extra}..//x.dart';
+                final directive = "$kind '$ref';";
+                final Uri base = Uri.parse('package:demo/$tgt');
+                final List<String> segs = base.resolve(ref).pathSegments;
+                expect(
+                  importsOf(from, directive, decoys).isNotEmpty,
+                  segs.length > 1 && segs[1].isEmpty,
+                  reason: '$directive from $from',
+                );
+              }
+            }
+          }
+        },
+      );
+
+      test(
+        'refuses relative empty-segment overshoots at every depth and kind',
+        () {
+          const decoys = {
+            'demo/lib/x.dart': lib,
+            'demo/x.dart': lib,
+            'x.dart': lib,
+            'demo/lib/y.dart': lib,
+            'demo/y.dart': lib,
+            'y.dart': lib,
+          };
+          for (final (from, refs) in [
+            ('demo/lib/c.dart', ['..//x.dart']),
+            (
+              'demo/lib/src/c.dart',
+              '..//x.dart ../..//x.dart ../../..//x.dart ../..//y.dart ../../..//y.dart'
+                  .split(' '),
+            ),
+          ]) {
+            for (final ref in refs) {
+              for (final k in const ['import', 'export', 'part']) {
+                expect(importsOf(from, "$k '$ref';", decoys), hasLength(1));
+              }
+              final d = from.contains('src') ? 'd.dart' : 'demo.dart';
+              expect(
+                importsOf(
+                  from,
+                  "import '$d' if (dart.library.io) '$ref';",
+                  decoys,
+                ),
+                hasLength(1),
+              );
+            }
+          }
+        },
+      );
+
+      test('allows a relative empty segment that stays inside the package', () {
+        const srcLib = {'demo/lib/src/src/b.dart': lib};
+        expect(
+          importsOf('demo/lib/src/c.dart', "import 'src//../b.dart';", srcLib),
+          isEmpty,
+        );
+        expect(
+          importsOf('demo/lib/src/c.dart', "import '../src//b.dart';", {
+            'demo/lib/src/b.dart': lib,
+          }),
+          isEmpty,
+        );
+        const sub = 'demo/lib/src/sub/c.dart';
+        expect(importsOf(sub, "import '..//src/b.dart';", srcLib), isEmpty);
+      });
+
       test('allows a leading slash that names a declared source in lib', () {
         expect(
           importsOf('demo/lib/demo.dart', "export '/src/d.dart';"),
@@ -320,10 +396,7 @@ void main() {}
 
     test('refuses a file: import of a host path outside the workspace', () {
       final _Errors errors = check({
-        'lib/main.dart': """
-import 'file:///etc/hostname';
-void main() {}
-""",
+        'lib/main.dart': "import 'file:///etc/hostname';\nvoid main() {}\n",
       });
       expect(errors, hasLength(1));
       expect(errors.single, contains('is not a declared input'));
@@ -385,10 +458,7 @@ void main() {}
       // so only the guard can stop it.
       write('secret.dart', 'const secret = 1;\n');
       final _Errors errors = check({
-        'lib/main.dart': """
-import '../secret.dart';
-void main() {}
-""",
+        'lib/main.dart': "import '../secret.dart';\nvoid main() {}\n",
       });
       expect(errors, hasLength(1));
       expect(errors.single, contains('lib/main.dart'));
@@ -397,20 +467,15 @@ void main() {}
 
     test('refuses an absolute path import', () {
       final _Errors errors = check({
-        'lib/main.dart': """
-import '/etc/hostname';
-void main() {}
-""",
+        'lib/main.dart': "import '/etc/hostname';\nvoid main() {}\n",
       });
       expect(errors, hasLength(1));
     });
 
     test('refuses a package: URI climbing above its package', () {
       final _Errors errors = check({
-        'lib/main.dart': """
-import 'package:foo/../../secret.dart';
-void main() {}
-""",
+        'lib/main.dart':
+            "import 'package:foo/../../secret.dart';\nvoid main() {}\n",
       });
       expect(errors, hasLength(1));
     });
@@ -431,10 +496,7 @@ void main() {}
 
     test('refuses file: exports and parts', () {
       final _Errors exportErrors = check({
-        'lib/main.dart': """
-export 'file:///etc/hostname';
-void main() {}
-""",
+        'lib/main.dart': "export 'file:///etc/hostname';\nvoid main() {}\n",
       });
       expect(exportErrors, hasLength(1));
       final _Errors partErrors = check({
@@ -1321,125 +1383,67 @@ void main() {}
   });
 
   group('resolveFlutterKeyRelativeTarget', () {
+    String? r(String u, String f) => resolveFlutterKeyRelativeTarget(u, f);
     test('resolves a sibling against the importing file', () {
-      expect(
-        resolveFlutterKeyRelativeTarget('b.dart', 'app/lib/main.dart'),
-        'app/lib/b.dart',
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('c.dart', 'app/lib/main.dart'),
-        'app/lib/c.dart',
-      );
+      expect(r('b.dart', 'app/lib/main.dart'), 'app/lib/b.dart');
+      expect(r('c.dart', 'app/lib/main.dart'), 'app/lib/c.dart');
     });
 
     test('an empty reference names the importing file itself', () {
-      expect(
-        resolveFlutterKeyRelativeTarget('', 'app/lib/main.dart'),
-        'app/lib/main.dart',
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('', 'main.dart'),
-        'main.dart',
-      );
+      expect(r('', 'app/lib/main.dart'), 'app/lib/main.dart');
+      expect(r('', 'main.dart'), 'main.dart');
     });
 
     test('a query resolves its path part', () {
+      expect(r('b.dart?x=1', 'app/lib/main.dart'), 'app/lib/b.dart');
       expect(
-        resolveFlutterKeyRelativeTarget('b.dart?x=1', 'app/lib/main.dart'),
-        'app/lib/b.dart',
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('b.dart', 'app/lib/main.dart'),
-        resolveFlutterKeyRelativeTarget('b.dart?x=1', 'app/lib/main.dart'),
+        r('b.dart', 'app/lib/main.dart'),
+        r('b.dart?x=1', 'app/lib/main.dart'),
       );
     });
 
     test('dot segments stay inside the key root', () {
-      expect(
-        resolveFlutterKeyRelativeTarget('sub/./b.dart', 'app/main.dart'),
-        'app/sub/b.dart',
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('../x.dart', 'app/lib/main.dart'),
-        'app/x.dart',
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('../../x.dart', 'main.dart'),
-        'x.dart',
-      );
+      expect(r('sub/./b.dart', 'app/main.dart'), 'app/sub/b.dart');
+      expect(r('../x.dart', 'app/lib/main.dart'), 'app/x.dart');
+      expect(r('../../x.dart', 'main.dart'), 'x.dart');
     });
 
     test('backslashes separate like slashes', () {
-      expect(
-        resolveFlutterKeyRelativeTarget(r'sub\b.dart', 'app/main.dart'),
-        'app/sub/b.dart',
-      );
+      expect(r(r'sub\b.dart', 'app/main.dart'), 'app/sub/b.dart');
     });
 
     test('percent escapes decode once', () {
-      expect(
-        resolveFlutterKeyRelativeTarget('my%20lib.dart', 'app/main.dart'),
-        'app/my lib.dart',
-      );
+      expect(r('my%20lib.dart', 'app/main.dart'), 'app/my lib.dart');
     });
 
     test('refuses non-relative spellings', () {
-      expect(
-        resolveFlutterKeyRelativeTarget('dart:async', 'app/main.dart'),
-        isNull,
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('package:a/b.dart', 'app/main.dart'),
-        isNull,
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('//x/y.dart', 'app/main.dart'),
-        isNull,
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('/x.dart', 'app/main.dart'),
-        isNull,
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('a.dart#frag', 'app/main.dart'),
-        isNull,
-      );
+      expect(r('dart:async', 'app/main.dart'), isNull);
+      expect(r('package:a/b.dart', 'app/main.dart'), isNull);
+      expect(r('//x/y.dart', 'app/main.dart'), isNull);
+      expect(r('/x.dart', 'app/main.dart'), isNull);
+      expect(r('a.dart#frag', 'app/main.dart'), isNull);
     });
 
     test('counts an empty path segment as a segment, then drops it', () {
-      expect(
-        resolveFlutterKeyRelativeTarget('a//b.dart', 'app/main.dart'),
-        'app/a/b.dart',
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('src//../b.dart', 'app/main.dart'),
-        'app/src/b.dart',
-      );
-      expect(
-        resolveFlutterKeyRelativeTarget('../lib/src//d.dart', 'app/t/m.dart'),
-        'app/lib/src/d.dart',
-      );
+      expect(r('a//b.dart', 'app/main.dart'), 'app/a/b.dart');
+      expect(r('src//../b.dart', 'app/main.dart'), 'app/src/b.dart');
+      expect(r('../lib/src//d.dart', 'app/t/m.dart'), 'app/lib/src/d.dart');
     });
 
     test('refuses a directory, a leading slash and a fragment', () {
       for (final uri in ['a//', 'a//b.dart/', '/a/b.dart', '//a/b.dart']) {
-        expect(resolveFlutterKeyRelativeTarget(uri, 'app/main.dart'), isNull);
+        expect(r(uri, 'app/main.dart'), isNull);
       }
-      expect(
-        resolveFlutterKeyRelativeTarget('a//b.dart#x', 'app/main.dart'),
-        isNull,
-      );
+      expect(r('a//b.dart#x', 'app/main.dart'), isNull);
     });
 
     test('refuses an escape that decodes to a slash', () {
-      expect(
-        resolveFlutterKeyRelativeTarget('a%2Fb.dart', 'app/main.dart'),
-        isNull,
-      );
+      expect(r('a%2Fb.dart', 'app/main.dart'), isNull);
     });
   });
 
   group('flutterSourceKey', () {
+    String k(String p, List<String> r) => flutterSourceKey(p, r);
     late Directory savedCwd;
 
     setUp(() => savedCwd = Directory.current);
@@ -1451,33 +1455,30 @@ void main() {}
       );
       addTearDown(() => work.deleteSync(recursive: true));
       Directory.current = work.path;
-      expect(
-        flutterSourceKey('${work.path}/app/lib/main.dart', []),
-        'app/lib/main.dart',
-      );
+      expect(k('${work.path}/app/lib/main.dart', []), 'app/lib/main.dart');
     });
 
     test('strips the longest filesystem root', () {
       expect(
-        flutterSourceKey('out.stage/app/lib/main.dart', ['out.stage']),
+        k('out.stage/app/lib/main.dart', ['out.stage']),
         'app/lib/main.dart',
       );
-      expect(flutterSourceKey('a/b/c.dart', ['a', 'a/b']), 'c.dart');
+      expect(k('a/b/c.dart', ['a', 'a/b']), 'c.dart');
     });
 
     test('strips the bazel-out bin prefix', () {
       expect(
-        flutterSourceKey('bazel-out/k8-fastbuild/bin/app/lib/main.dart', []),
+        k('bazel-out/k8-fastbuild/bin/app/lib/main.dart', []),
         'app/lib/main.dart',
       );
     });
 
     test('a bare root without the slash is not a prefix', () {
-      expect(flutterSourceKey('ab/c.dart', ['a']), 'ab/c.dart');
+      expect(k('ab/c.dart', ['a']), 'ab/c.dart');
     });
 
     test('dot roots never strip', () {
-      expect(flutterSourceKey('a/b.dart', ['.', '']), 'a/b.dart');
+      expect(k('a/b.dart', ['.', '']), 'a/b.dart');
     });
   });
 
