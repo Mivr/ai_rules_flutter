@@ -371,8 +371,47 @@ bool _isAllowedSchemeless(
   return keyTarget != null && declaredKeys.contains(keyTarget);
 }
 
+/// The path of [filePath] under its containing `lib` directory, or null when
+/// the file is not in a `lib` directory.
+String? _libRelativePath(String filePath) {
+  final List<String> segments = filePath.replaceAll(r'\', '/').split('/');
+  if (segments.length < 2) return null;
+  final List<String> dirs = segments.sublist(0, segments.length - 1);
+  final int libIndex = dirs.lastIndexOf('lib');
+  if (libIndex < 0) return null;
+  final List<String> rest = [
+    for (final s in segments.sublist(libIndex + 1))
+      if (s.isNotEmpty) s,
+  ];
+  return rest.isEmpty ? null : rest.join('/');
+}
+
+/// Whether the schemeless [uri] with an empty path segment escapes from a
+/// library under `lib/`.
+///
+/// The front end resolves a `lib/` source's relative reference against its
+/// `package:` URI: a `..` above the package name is dropped, then an empty
+/// segment directly after the package name escapes.
+bool _escapesLibPackage(String uri, String from, String fromKey) {
+  final String? rel = _libRelativePath(fromKey) ?? _libRelativePath(from);
+  if (rel == null) return false;
+  final String text = uri.contains(r'\') ? uri.replaceAll(r'\', '/') : uri;
+  try {
+    final Uri base = Uri.parse('package:p/$rel');
+    final List<String> segs = base.resolve(text).pathSegments;
+    return segs.length > 1 && segs[1].isEmpty;
+  } on FormatException {
+    // Malformed URI cannot name a declared input.
+    return true;
+  }
+}
+
 /// Whether the schemeless [uri] with an empty path segment names a declared
 /// source or key by its RFC 3986 resolution, empty segments counted.
+///
+/// For a source under `lib/`, the reference resolves against the library's
+/// `package:` URI: a `..` above the package name is dropped, then an empty
+/// segment directly after the package name escapes.
 ///
 /// The staged-path resolution of the shared check skips empty segments, so
 /// `src//../b.dart` would name `b.dart` there but `src/b.dart` in the front
@@ -385,6 +424,7 @@ bool _isAllowedEmptySegment(
   Set<String> declared,
   Set<String> declaredKeys,
 ) {
+  if (_escapesLibPackage(uri, from, fromKey)) return false;
   final String? keyTarget = resolveFlutterKeyRelativeTarget(uri, fromKey);
   if (keyTarget != null && declaredKeys.contains(keyTarget)) return true;
   final String? path = _relativePathPart(uri);
