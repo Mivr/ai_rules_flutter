@@ -47,11 +47,11 @@ def fit_exponent(sizes, costs):
     ys = [math.log(cost) for cost in costs]
     mean_x = math.fsum(xs) / len(xs)
     mean_y = math.fsum(ys) / len(ys)
-    denom = math.fsum((x - mean_x) ** 2 for x in xs)
-    if denom == 0:
+    denominator = math.fsum((x - mean_x) ** 2 for x in xs)
+    if denominator == 0:
         raise ValueError("a growth exponent needs two different sizes")
-    numer = math.fsum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
-    return round(numer / denom, EXPONENT_DIGITS)
+    numerator = math.fsum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    return round(numerator / denominator, EXPONENT_DIGITS)
 
 
 def flow_failure(flow):
