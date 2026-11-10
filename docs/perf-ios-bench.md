@@ -574,3 +574,34 @@ Everything except the Bazel invocation, the replay execution, and the
   --ios_multi_cpus=arm64` completes analysis on Linux (only execution
   needs the Apple SDK). The full `//app:app_ios` analysis fails on Linux
   at Apple toolchain resolution, which is expected — macOS builds it.
+
+## Scale bench (packages and plugins)
+
+`gen_monorepo.py generate --packages=N` writes exactly N Dart packages
+(N >= 2): it picks `layers` and `fanout` so that `layers * fanout >= N`
+and reuses the layered DAG builder; `--target-loc` is then optional (it
+defaults to `N * files-per-package * 125`, and the line-count window is
+not enforced because the package count is the fixed quantity).
+`--plugins=M` (default 0) adds M native plugins under `plugins/` in a
+seeded mix of the three kinds the public rules support: iOS source
+plugins (Swift or Objective-C plus a podspec), SwiftPM plugins whose
+dependencies are pinned in a recorded `Package.resolved` with
+`swift_package_sha256`, and Android plugins (Kotlin or Java) whose Maven
+coordinates are mapped with `android_maven_deps` and listed with their
+sha256 in `plugins/maven_pins.json` (checked against the workspace's
+`rules_android_maven_install.json`). The app depends on all of them.
+`--packages` with `--layers` or `--fanout`, a non-positive `--packages`
+and a negative `--plugins` exit 2. Without the new flags the output is
+byte-for-byte the same as before.
+
+`scale_report.py --point PACKAGES,PLUGINS,SOL_JSON ...` (two or more
+points) writes `scale.json`: per flow the cost, analysis-only time, action
+count and actions per plugin at every size, and the fitted growth
+exponent (least-squares slope of log cost against log size) over
+packages and over plugins. The plugin axis counts the app as one unit
+(size = plugins + 1) when a 0-plugin point is present. It exits 1, after
+writing `scale.json`, when an exponent exceeds its ceiling in
+`tools/perf/scale_ceilings.json`, a flow failed or a flow has no ceiling.
+The nightly `perf-scale-linux.yaml` (Android) and `perf-scale-ios.yaml`
+workflows measure 200 and 2,000 packages and 0 and 30 plugins, then run
+the report.
