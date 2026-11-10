@@ -14,6 +14,8 @@ from run_rep import CONFIG_ORDER
 from run_rep import SCENARIOS
 from floor_summary import has_floor
 from floor_summary import summarize_floor
+from attribution import ATTRIBUTED_FLOWS
+from attribution import attribute_flow
 from summarize import summarize_values
 import warm_server
 
@@ -67,6 +69,16 @@ def load_sol_records(results_dir, config, scenario):
         with open(path, encoding="utf-8") as fh:
             records.append(json.load(fh))
     return records
+
+
+def rep_dirs(results_dir, config, scenario):
+    """Repeat directories (those holding a record) of one scenario."""
+    scenario_dir = os.path.join(results_dir, "sol", config, scenario)
+    if not os.path.isdir(scenario_dir):
+        return []
+    return [os.path.join(scenario_dir, rep)
+            for rep in sorted(os.listdir(scenario_dir), key=rep_sort_key)
+            if os.path.isfile(os.path.join(scenario_dir, rep, _RECORD))]
 
 
 def pick_unit(collected):
@@ -302,6 +314,10 @@ def summarize_configs(results_dir, meta, configs):
             flow = flow_id(config, scenario)
             if flow in collected:
                 flows[flow] = summarize_flow(collected[flow], unit)
+                if flow in ATTRIBUTED_FLOWS:
+                    flows[flow]["attribution"] = attribute_flow(
+                        rep_dirs(results_dir, config, scenario),
+                        flows[flow]["bazel"])
             else:
                 flows[flow] = {"error": "missing repeats"}
     flags = meta.get("bazel_flags", [])
@@ -353,3 +369,15 @@ def summarize_sol(results_dir, meta, configs=None):
     summary = summarize_configs(results_dir, meta, configs)
     write_platform_summaries(results_dir, meta, configs)
     return summary
+
+
+def print_flow_lines(summary):
+    """One stdout line per flow of a summary (error or headline numbers)."""
+    for flow in sorted(summary["flows"]):
+        entry = summary["flows"][flow]
+        if "error" in entry:
+            print("flow=%s error=%s" % (flow, entry["error"]))
+            continue
+        print("flow=%s unit=%s bazel=%s sol=%s identical=%s reason=%s" % (
+            flow, summary["unit"], entry["bazel"], entry["sol"],
+            entry["identical"], entry.get("reason")))

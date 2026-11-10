@@ -191,7 +191,10 @@ rules it uses: the opt-in incremental kernel worker
 (`--@rules_flutter//flutter:incremental_kernel`, a persistent worker
 whose effect only the warm-server edit flows of sol mode can show), or
 `--host_compilation_mode=fastbuild` on the debug clean build, where the
-exec-configuration C++ build of the Swift worker dominates. Never use
+host-tool builds may dominate (they are an exec-configuration C++ build of
+the Swift worker, among others; the share is measured, not assumed:
+`flows.<flow>.attribution.parts.host_tools` in `ios-sol.json` splits that
+CPU by mnemonic and by repository, see "CPU attribution" below). Never use
 flagged runs as main dashboard points.
 
 Validation (`tools/perf/bench_flags.py`, before anything is generated
@@ -650,3 +653,23 @@ writing `scale.json`, when an exponent exceeds its ceiling in
 The nightly `perf-scale-linux.yaml` (Android) and `perf-scale-ios.yaml`
 workflows measure 200 and 2,000 packages and 0 and 30 plugins, then run
 the report.
+
+## CPU attribution (clean and cold flows)
+
+`python3 tools/perf/sol.py summarize` adds `flows.<flow>.attribution`
+(a sibling of `profile`) to `ios-debug-clean`, `ios-debug-body`,
+`android-debug-body` and `android-release-noop`. It reads each repeat's
+saved `trace.json.gz` and `execlog.json.gz`, so no extra Bazel run is
+needed, and reports the median over repeats, in CPU seconds:
+`parts.fetch_extract`, `module_resolution`, `loading_analysis`,
+`host_tools` (`total`, `by_mnemonic`, `by_repo`: ten largest, then
+`other`), `target_actions` (execution-log `userTime` + `systemTime` of
+non-host spawns), `sandbox`, and `unattributed`. Trace-derived parts are
+thread time of the profile's events by category (nested events count
+once); a Linux sandbox runner reports no spawn CPU, which shows up in
+`unattributed`. `total_s` is the flow's `bazel` median and `gap_s` is
+`total_s` minus parts one to six, equal to `unattributed` with its sign
+(never clamped). `ok` is `abs(gap_s) <= 0.05 * total_s`; a repeat
+directory missing either file gives `{"ok": false, "error": ...}`.
+`--strict-attribution` makes `summarize` exit non-zero when a flow's
+`ok` is false (default off).

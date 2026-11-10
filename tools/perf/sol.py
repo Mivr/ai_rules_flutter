@@ -111,6 +111,8 @@ import warm_server  # noqa: E402
 from floor_flow import floor_fields  # noqa: E402
 from sol_errors import error_record  # noqa: E402,F401
 from sol_errors import write_error_records  # noqa: E402
+from attribution import strict_attribution_exit  # noqa: E402
+from sol_summary import print_flow_lines  # noqa: E402
 from floor_flow import snapshot_sources  # noqa: E402
 from sol_summary import (  # noqa: E402
     BATCH_METHOD,
@@ -1383,15 +1385,8 @@ def main_summarize(cmd):
     if primary is None:
         primary = summaries.get("ios", summary)
     write_summary(cmd.out, primary)
-    for flow in sorted(summary["flows"]):
-        entry = summary["flows"][flow]
-        if "error" in entry:
-            print("flow=%s error=%s" % (flow, entry["error"]))
-            continue
-        print("flow=%s unit=%s bazel=%s sol=%s identical=%s reason=%s" % (
-            flow, summary["unit"], entry["bazel"], entry["sol"],
-            entry["identical"], entry.get("reason")))
-    return 0
+    print_flow_lines(summary)
+    return strict_attribution_exit(summaries, cmd.strict_attribution)
 
 
 def build_parser():
@@ -1441,6 +1436,9 @@ def build_parser():
                       "for this run (recorded in meta)")
     summ.add_argument("--lockfile", default="none",
                       help="none or committed (recorded in meta)")
+    summ.add_argument("--strict-attribution", action="store_true",
+                      help="exit non-zero when a flow's attribution.ok "
+                           "is false (default off)")
     summ.add_argument("--out", required=True,
                       help="platform sol json path")
     return parser
