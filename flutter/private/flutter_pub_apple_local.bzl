@@ -19,11 +19,26 @@ the generated libraries exactly as they do for a hub SwiftPM package.
 load(":flutter_apple_plugin_defines.bzl", "dedupe_plugin_defines")
 load(
     ":flutter_pub_apple.bzl",
+    "apple_swiftpm_keeps_dep",
+    "apple_swiftpm_labels_for_products",
+    "apple_swiftpm_read_pins",
+    "apple_swiftpm_read_product_deps",
     "detect_apple_swiftpm_deps",
     "with_apple_swiftpm_deps",
 )
 load(":flutter_pub_apple_byname.bzl", "apple_swiftpm_names_product")
-load(":flutter_pub_apple_local_refusal.bzl", "local_manifest_decision")
+load(
+    ":flutter_pub_apple_local_refusal.bzl",
+    "local_append_reached",
+    "local_dep_applies",
+    "local_manifest_decision",
+    "local_primary_target",
+    "local_seed_products",
+    "local_special_error",
+    "local_target_by_name",
+    "local_target_dir",
+    _parse_plugin_local_package = "parse_plugin_local_package",
+)
 load(
     ":flutter_pub_apple_local_targets.bzl",
     "local_library_name",
@@ -32,8 +47,6 @@ load(
     _render_local_target_blocks = "render_local_target_blocks",
     _with_apple_local_targets = "with_apple_local_targets",
 )
-load(":flutter_pub_apple_localdeps.bzl", "apple_local_product_links")
-load(":flutter_pub_apple_localparse.bzl", _parse_plugin_local_package = "parse_plugin_local_package")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
 load(":podspec_read.bzl", "apply_apple_podspec_link_settings")
 load(":podspec_read_xcconfig.bzl", "active_podspec_defines")
@@ -41,139 +54,6 @@ load(":swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_file
 load(":swiftpm_translate.bzl", "swiftpm_c99name")
 
 parse_plugin_local_package = _parse_plugin_local_package
-
-_LOCAL_SPECIAL_KINDS = ["executableTarget", "binaryTarget", "systemLibrary", "plugin", "macro"]
-
-def _local_special_error(plugin, target):
-    """Refuse reached targets whose kind rules_apple cannot build.
-
-    Args:
-        plugin: The pub plugin name, for messages.
-        target: The reached target struct.
-
-    Returns:
-        The refusal string.
-    """
-    kind = getattr(target, "kind", "target")
-    if kind == "binaryTarget":
-        return "binary targets in plugin manifests land in POD-10"
-    msg = "Flutter plugin %r: target %r has unsupported kind `%s`."
-    return msg % (plugin, getattr(target, "name", ""), kind)
-
-def _local_target_dir(manifest_dir, target):
-    """The package-relative directory one manifest target lives in.
-
-    Args:
-        manifest_dir: The manifest's package-relative directory.
-        target: The parsed target struct (`path`, `name`).
-
-    Returns:
-        The target directory.
-    """
-    path = getattr(target, "path", "")
-    suffix = path if path else "Sources/" + getattr(target, "name", "")
-    return manifest_dir + "/" + suffix
-
-def _local_target_by_name(targets, name):
-    """Find one target in the parsed manifest by its case-insensitive name.
-
-    Args:
-        targets: The parsed target list.
-        name: The target name to search for.
-
-    Returns:
-        The target struct, or None when missing.
-    """
-    lower = name.lower()
-    for target in targets:
-        target_name = getattr(target, "name", "")
-        if target_name == name or target_name.lower() == lower:
-            return target
-    return None
-
-def _local_primary_target(model, manifest_dir, primary_dir):
-    """Pick the manifest target matching the primary globbed directory.
-
-    Args:
-        model: The parsed plugin manifest model.
-        manifest_dir: The manifest's package-relative directory.
-        primary_dir: The package-relative directory the spoke globs.
-
-    Returns:
-        The primary target struct, or None when nothing matches.
-    """
-    for target in getattr(model, "targets", []):
-        if getattr(target, "kind", "target") != "target":
-            continue
-        if _local_target_dir(manifest_dir, target) == primary_dir:
-            return target
-    return None
-
-def _local_append_reached(plugin, target, reached, stack):
-    """Mark one target reached and queue it for the same-dependency walk.
-
-    Args:
-        plugin: The pub plugin name, for messages.
-        target: The target struct to visit.
-        reached: The reached-name dict (mutated in place).
-        stack: The pending-name list (mutated in place).
-
-    Returns:
-        "" or the refusal naming an untranslatable special target.
-    """
-    name = getattr(target, "name", "")
-    if not name:
-        return "Flutter plugin %r: a manifest target has no name." % plugin
-    if name in reached:
-        return ""
-    kind = getattr(target, "kind", "target")
-    if kind in _LOCAL_SPECIAL_KINDS:
-        return _local_special_error(plugin, target)
-    if kind == "testTarget":
-        return "Flutter plugin %r: target %r depends on test target %r, which is ignored." % (plugin, plugin, name)
-    reached[name] = name
-    reached[name.lower()] = name
-    stack.append(name)
-    return ""
-
-def _local_seed_products(plugin, model, reached, stack):
-    """Seed reachability from every `.library` product's targets.
-
-    Args:
-        plugin: The pub plugin name, for messages.
-        model: The parsed plugin manifest model.
-        reached: The reached-name dict (mutated in place).
-        stack: The pending-name list (mutated in place).
-
-    Returns:
-        "" or the refusal for an unknown or untranslatable target.
-    """
-    for product in getattr(model, "products", []):
-        if getattr(product, "kind", "") != "library":
-            continue
-        for name in getattr(product, "targets", []):
-            target = _local_target_by_name(getattr(model, "targets", []), name)
-            if target == None:
-                return "Flutter plugin %r: product %r names unknown target %r." % (plugin, getattr(product, "name", ""), name)
-            refused = _local_append_reached(plugin, target, reached, stack)
-            if refused:
-                return refused
-    return ""
-
-def _local_dep_applies(dep, platform):
-    """Whether one same-package dependency applies on a platform.
-
-    Args:
-        dep: The parsed dependency reference.
-        platform: `"ios"` or `"macos"`.
-
-    Returns:
-        True when the dependency is built on the platform.
-    """
-    condition = getattr(dep, "condition", None)
-    if condition == None:
-        return True
-    return platform in getattr(condition, "platforms", [])
 
 def _local_follow_dependencies(plugin, model, reached, stack, platform):
     """Follow the queued targets' same-package dependencies.
@@ -193,17 +73,17 @@ def _local_follow_dependencies(plugin, model, reached, stack, platform):
     for _ in range(len(targets) + 1):
         if not stack:
             break
-        current = _local_target_by_name(targets, stack.pop())
+        current = local_target_by_name(targets, stack.pop())
         for dep in getattr(current, "deps", []):
             if apple_swiftpm_names_product(dep, local):
                 continue
-            if getattr(dep, "kind", "") != "same" or not _local_dep_applies(dep, platform):
+            if getattr(dep, "kind", "") != "same" or not local_dep_applies(dep, platform):
                 continue
             name = getattr(dep, "name", "")
-            target = _local_target_by_name(targets, name)
+            target = local_target_by_name(targets, name)
             if target == None:
                 return "Flutter plugin %r: target %r depends on unknown target %r." % (plugin, getattr(current, "name", ""), name)
-            refused = _local_append_reached(plugin, target, reached, stack)
+            refused = local_append_reached(plugin, target, reached, stack)
             if refused:
                 return refused
     return ""
@@ -222,10 +102,10 @@ def _local_walk_reachable(plugin, model, primary, platform):
     """
     reached = {}
     stack = []
-    error = _local_seed_products(plugin, model, reached, stack)
+    error = local_seed_products(plugin, model, reached, stack)
     if error:
         return struct(ok = False, error = error, reached = {})
-    refused = _local_append_reached(plugin, primary, reached, stack)
+    refused = local_append_reached(plugin, primary, reached, stack)
     if refused:
         return struct(ok = False, error = refused, reached = {})
     error = _local_follow_dependencies(plugin, model, reached, stack, platform)
@@ -278,7 +158,7 @@ def plugin_local_targets(plugin, model, manifest_dir, primary_dir, platform):
         `struct(ok, error, targets, primary)`: `targets` holds the
         reached sibling targets in manifest order.
     """
-    primary = _local_primary_target(model, manifest_dir, primary_dir)
+    primary = local_primary_target(model, manifest_dir, primary_dir)
     if primary == None:
         return struct(ok = True, error = "", targets = [], primary = None)
     primary_name = getattr(primary, "name", "")
@@ -290,11 +170,11 @@ def plugin_local_targets(plugin, model, manifest_dir, primary_dir, platform):
         name = getattr(target, "name", "")
         if walked.reached.get(name) == None or name == primary_name:
             continue
-        target_dir = _local_target_dir(manifest_dir, target)
+        target_dir = local_target_dir(manifest_dir, target)
         if getattr(target, "kind", "target") != "target":
             return struct(
                 ok = False,
-                error = _local_special_error(plugin, target),
+                error = local_special_error(plugin, target),
                 targets = [],
                 primary = primary,
             )
@@ -437,6 +317,80 @@ def _local_other_source_dirs(ctx, manifest_dir, primary_dir):
     primary = str(ctx.path(primary_dir))
     return [str(e) for e in sources.readdir() if e.is_dir and str(e) != primary]
 
+def _with_edges(target, labels):
+    """Copy a local target struct with product labels added to its edges.
+
+    Args:
+        target: The `plugin_local_targets(...).targets` entry.
+        labels: The product labels the target links.
+
+    Returns:
+        The same struct with one unconditional edge per label.
+    """
+    return struct(
+        name = target.name,
+        dir = target.dir,
+        directory = target.directory,
+        path = target.path,
+        module_name = target.module_name,
+        kind = target.kind,
+        target = target.target,
+        settings = target.settings,
+        clang_settings = target.clang_settings,
+        swift_settings = target.swift_settings,
+        edges = target.edges + [struct(text = label, platforms = None) for label in labels],
+    )
+
+def _apple_local_product_links(ctx, plugin, platform, manifest_dir, model, targets):
+    """Link the product dependencies of the reached non-primary targets.
+
+    Args:
+        ctx: The spoke's repository context, carrying the hub's resolved
+            label, checksum-file label, native-deps label and name.
+        plugin: The pub plugin name.
+        platform: `"ios"` or `"macos"`.
+        manifest_dir: The manifest's package-relative directory.
+        model: The parsed plugin manifest model.
+        targets: The `plugin_local_targets(...).targets` list.
+
+    Returns:
+        `struct(ok, error, targets, labels)`: `targets` carry the product
+        labels in their edges; `labels` lists every linked label once, for
+        the primary library (the xtool backend compiles all targets as one).
+    """
+    local = [other.name.lower() for other in model.targets if other.name]
+    pins = None
+    product_deps = None
+    out = []
+    labels = []
+    for target in targets:
+        products = [
+            dep
+            for dep in target.target.deps
+            if apple_swiftpm_names_product(dep, local) and apple_swiftpm_keeps_dep(dep, model.pkg_deps, platform)
+        ]
+        if not products:
+            out.append(target)
+            continue
+        if pins == None:
+            pins = apple_swiftpm_read_pins(ctx, ctx.attr.package_resolved, ctx.attr.package_sha256, ctx.attr.hub_name)
+            product_deps = apple_swiftpm_read_product_deps(ctx, ctx.attr.ios_native_deps, ctx.attr.hub_name)
+        prepared = struct(products = products, pkg_deps = model.pkg_deps, target = target.target)
+        selected = apple_swiftpm_labels_for_products(
+            plugin,
+            manifest_dir,
+            [target.dir],
+            platform,
+            pins,
+            prepared,
+            product_deps,
+        )
+        if not selected.ok:
+            return struct(ok = False, error = selected.error, targets = [], labels = [])
+        out.append(_with_edges(target, selected.labels))
+        labels.extend([label for label in selected.labels if label not in labels])
+    return struct(ok = True, error = "", targets = out, labels = labels)
+
 def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs, podspec_defines):
     """Read and render one platform's plugin-local targets.
 
@@ -477,7 +431,7 @@ def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs, podspec_def
             fail(locals.error)
         if not locals.targets:
             continue
-        linked = apple_local_product_links(ctx, plugin, platform, manifest_dir, parsed.model, locals.targets)
+        linked = _apple_local_product_links(ctx, plugin, platform, manifest_dir, parsed.model, locals.targets)
         if not linked.ok:
             fail(linked.error)
         files = local_target_files(ctx, plugin, linked.targets)

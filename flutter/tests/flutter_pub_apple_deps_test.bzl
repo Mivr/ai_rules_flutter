@@ -447,6 +447,7 @@ def _helper_byname_ctx(manifest = _HELPER_BYNAME_MANIFEST):
     }
 
     def _path(rel):
+        """Returns a fake repository path struct for `rel`."""
         key = str(rel)
         children = [struct(basename = name, is_dir = is_d) for name, is_d in dirs.get(key, [])]
         return struct(
