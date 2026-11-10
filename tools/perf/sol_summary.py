@@ -12,6 +12,8 @@ import subprocess
 
 from run_rep import CONFIG_ORDER
 from run_rep import SCENARIOS
+from floor_summary import has_floor
+from floor_summary import summarize_floor
 from summarize import summarize_values
 import warm_server
 
@@ -233,6 +235,10 @@ def summarize_flow(records, unit):
             "spread": {"n": len(records),
                        "bazel": [bazel["min"], bazel["max"]],
                        "sol": [sol["min"], sol["max"]] if identical else None}}
+    if has_floor(records):
+        floor, flow["spread"]["toolchain_floor"] = summarize_floor(
+            records, bazel["median"])
+        flow.update(floor)
     if method == WARM_METHOD:
         flow["bazel_parts"] = summarize_bazel_parts(records)
     return flow

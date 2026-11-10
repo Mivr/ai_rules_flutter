@@ -108,6 +108,10 @@ from run_rep import (  # noqa: E402
 )
 from traceprofile import parse_jvm_profile  # noqa: E402
 import warm_server  # noqa: E402
+from floor_flow import floor_fields  # noqa: E402
+from sol_errors import error_record  # noqa: E402,F401
+from sol_errors import write_error_records  # noqa: E402
+from floor_flow import snapshot_sources  # noqa: E402
 from sol_summary import (  # noqa: E402
     BATCH_METHOD,
     WARM_METHOD,
@@ -1139,6 +1143,7 @@ def measure_scenario_build(args, config, scenario, batch,
     """
     spec = CONFIGS[config]
     edit = _EDITS[scenario]
+    swap = snapshot_sources(args, config, scenario)
     if edit is not None:
         apply_edit(args.run, args.tools, args.work, edit)
     log_path = os.path.join(args.work, "execlog-sol-%s.json" % scenario)
@@ -1169,7 +1174,7 @@ def measure_scenario_build(args, config, scenario, batch,
     return argparse.Namespace(
         bazel_cost=bazel_cost, log_path=log_path,
         profile_path=profile_path, execroot=execroot, bazel_out=bazel_out,
-        plan=plan, record_dir=record_dir,
+        plan=plan, record_dir=record_dir, swap=swap,
         report_path=os.path.join(record_dir, _CHAIN_REPORT))
 
 
@@ -1262,51 +1267,11 @@ def run_sol_scenario(args, config, scenario, batch,
               "profile": profile}
     if not batch:
         record["bazel_parts"] = built.bazel_cost["parts"]
+    record.update(floor_fields(args, config, scenario, built, built.swap))
     with open(os.path.join(built.record_dir, _RECORD), "w", encoding="utf-8",
               newline="\n") as fh:
         fh.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
     return record
-
-
-def error_record(config, scenario, reason):
-    """Flow record for a scenario an unexpected error kept from running."""
-    return {"flow": flow_id(config, scenario), "config": config,
-            "scenario": scenario,
-            "method": (BATCH_METHOD if scenario == "clean"
-                       else WARM_METHOD),
-            "bazel": {"cpu_s": None, "real_s": None},
-            "sol": None,
-            "identical": False,
-            "reason": reason,
-            "n_sol_actions": 0,
-            "worker_steps": {},
-            "verify": {"before": {}, "after": {}},
-            "profile": {"jvm": {"total": None, "phases": {}},
-                        "host_tools": {"total": None, "by_mnemonic": {},
-                                       "top_targets": [], "failed": []},
-                        "sol_cpu_s": None, "sol_source": "none",
-                        "residual": None},
-            "chain": {"steps": {}, "skipped": {}, "failed": [],
-                      "ordering_failed": None,
-                      "verify_differ": {"n": 0, "differ": []},
-                      "output_drift": {"n": 0, "paths": []},
-                      "sol_cpu_s": None, "status": "error"}}
-
-
-def write_error_records(args, config, scenarios, reason):
-    """Records remaining flows as failed-with-reason, loudly but alive."""
-    records = {}
-    short = reason if len(reason) <= 300 else reason[:297] + "..."
-    for scenario in scenarios:
-        record = error_record(config, scenario, short)
-        record_dir = os.path.join(args.results, "sol", config, scenario,
-                                  "rep%d" % args.rep)
-        os.makedirs(record_dir, exist_ok=True)
-        with open(os.path.join(record_dir, _RECORD), "w", encoding="utf-8",
-                  newline="\n") as fh:
-            fh.write(json.dumps(record, indent=2, sort_keys=True) + "\n")
-        records[scenario] = record
-    return records
 
 
 def run_sol_rep(args, rep, configs):
@@ -1454,6 +1419,9 @@ def build_parser():
     run.add_argument("--time-bin", default=TIME_BIN,
                      help="accepted for compatibility; ignored: measurement "
                      "is whole-tree rusage on every host")
+    run.add_argument("--floor", choices=("on", "off"), default="on",
+                     help="also measure the toolchain floor of the mobile "
+                     "edit flows (off: the output is the base's)")
     chain = sub.add_parser("chain", help="run one SOL chain (measured child)")
     chain.add_argument("--log", required=True, help="execution log path")
     chain.add_argument("--execroot", required=True,
