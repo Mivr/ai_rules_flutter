@@ -66,6 +66,7 @@ load(
 load(
     "//flutter/private:flutter_integration_android_app.bzl",
     "ANDROID_APP_KWARG_KEYS",
+    "android_integration_app_kernel",
     "make_android_integration_manifest_lines",
     "sanitize_android_package_segment",
 )
@@ -82,7 +83,6 @@ load(
     "integration_test_common_setup",
     "integration_test_dart_sources",
     "integration_test_env",
-    "integration_test_kernel",
     "integration_test_native_assets",
     "integration_test_native_libs",
     "integration_test_providers",
@@ -197,7 +197,7 @@ def _flutter_android_integration_app_impl(ctx):
     setup = _android_integration_app_setup(ctx)
     native_assets = integration_test_native_assets(ctx, setup.sdk, "android")
     sources = _android_integration_app_sources(ctx, setup)
-    kernel_dill = integration_test_kernel(ctx, setup.sdk, sources, native_assets, setup.aot, setup.mode)
+    kernel_dill = android_integration_app_kernel(ctx, setup, sources, native_assets)
     aot_output = integration_test_aot(ctx, setup.sdk, kernel_dill, setup.is_debug, setup.strip)
     assets = integration_test_assets(
         ctx,

@@ -556,7 +556,10 @@ bzl_library(
     srcs = ["flutter_integration_android_app.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":common",
         ":constants",
+        ":flutter_compile",
+        ":flutter_integration_test_common",
     ],
 )
 
