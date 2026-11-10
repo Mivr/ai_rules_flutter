@@ -582,17 +582,20 @@ class IOSDevice extends Device {
         'install.json',
       );
 
-      final ProcessResult installResult = await runProcess('xcrun', [
-        'devicectl',
+      final ProcessResult installResult = await timeIosInstall(
         'device',
-        'install',
-        'app',
-        '--device',
-        info.udid,
-        '--json-output',
-        installJsonPath,
-        installPath,
-      ]);
+        () => runProcess('xcrun', [
+          'devicectl',
+          'device',
+          'install',
+          'app',
+          '--device',
+          info.udid,
+          '--json-output',
+          installJsonPath,
+          installPath,
+        ]),
+      );
       if (installResult.exitCode != 0) {
         throw StateError('devicectl install failed: ${installResult.stderr}');
       }

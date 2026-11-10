@@ -273,12 +273,10 @@ class IOSSimulatorDevice extends Device {
     await _runProcess('xcrun', ['simctl', 'boot', udid]);
 
     // Install.
-    final ProcessResult installResult = await _runProcess('xcrun', [
-      'simctl',
-      'install',
-      udid,
-      installPath,
-    ]);
+    final ProcessResult installResult = await timeIosInstall(
+      'simulator',
+      () => _runProcess('xcrun', ['simctl', 'install', udid, installPath]),
+    );
     if (installResult.exitCode != 0) {
       throw StateError('simctl install failed: ${installResult.stderr}');
     }
