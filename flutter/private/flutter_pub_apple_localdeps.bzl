@@ -78,7 +78,15 @@ def apple_local_product_links(ctx, plugin, platform, manifest_dir, model, target
             pins = apple_swiftpm_read_pins(ctx, ctx.attr.package_resolved, ctx.attr.package_sha256, ctx.attr.hub_name)
             product_deps = apple_swiftpm_read_product_deps(ctx, ctx.attr.ios_native_deps, ctx.attr.hub_name)
         prepared = struct(products = products, pkg_deps = model.pkg_deps, target = target.target)
-        selected = apple_swiftpm_labels_for_products(plugin, manifest_dir, [target.dir], platform, pins, prepared, product_deps)
+        selected = apple_swiftpm_labels_for_products(
+            plugin,
+            manifest_dir,
+            [target.dir],
+            platform,
+            pins,
+            prepared,
+            product_deps,
+        )
         if not selected.ok:
             return struct(ok = False, error = selected.error, targets = [], labels = [])
         out.append(_with_edges(target, selected.labels))
