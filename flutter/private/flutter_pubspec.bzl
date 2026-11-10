@@ -650,7 +650,17 @@ def _entry_condition_problems(path, item, lines, elocator):
     return (flavors, platforms, flavor_problems + platform_problems)
 
 def _entry_transformer_problems(path, item, lines, elocator):
-    """Collect shape problems when an entry carries unsupported transformers."""
+    """Refuse a map entry that carries a non-null `transformers` value.
+
+    Args:
+        path: The entry's `path`, named in the refusal.
+        item: The entry's map.
+        lines: The pubspec lines, for the key's line number.
+        elocator: The entry's locator in the pubspec.
+
+    Returns:
+        A list with one shape problem, or empty when `transformers` is absent or null.
+    """
     if item.get("transformers") == None:
         return []
     loc = flutter_line_of(lines, elocator + ["transformers"])

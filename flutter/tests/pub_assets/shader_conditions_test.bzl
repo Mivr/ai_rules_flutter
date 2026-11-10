@@ -85,6 +85,7 @@ flutter:
   shaders:
     - path: shaders/distort.frag
       transformers: null
+    - shaders/plain.frag
 """
 
 def _shader_conditions_survive_parse_test_impl(ctx):
@@ -166,7 +167,7 @@ def _shader_transformers_refused_test_impl(ctx):
     asserts.equals(env, "transformers", problem.key)
     asserts.equals(env, "shaders/distort.frag", problem.path)
     asserts.equals(env, 5, problem.line)
-    asserts.true(env, "asset transformers are not supported by rules_flutter." in problem.detail, problem.detail)
+    asserts.equals(env, "asset transformers are not supported by rules_flutter.", problem.detail)
     message = asset_entry_problem_error("shader_pkg", problem)
     for want in ["shader_pkg", "shaders/distort.frag", "transformers"]:
         asserts.true(env, want in message, message)
@@ -181,10 +182,13 @@ def _shader_null_transformers_accepted_test_impl(ctx):
     asserts.equals(env, "transformers", problem.key)
     asserts.equals(env, "assets/image.png", problem.path)
     asserts.equals(env, 5, problem.line)
-    asserts.equals(env, 1, len(result.shaders))
+    asserts.equals(env, 2, len(result.shaders))
     asserts.equals(env, "shaders/distort.frag", result.shaders[0].path)
     asserts.equals(env, [], result.shaders[0].platforms)
     asserts.equals(env, [], result.shaders[0].flavors)
+    asserts.equals(env, "shaders/plain.frag", result.shaders[1].path)
+    asserts.equals(env, [], result.shaders[1].platforms)
+    asserts.equals(env, [], result.shaders[1].flavors)
     return unittest.end(env)
 
 def _shader_predicate_flavors_and_legacy_spoke_test_impl(ctx):
