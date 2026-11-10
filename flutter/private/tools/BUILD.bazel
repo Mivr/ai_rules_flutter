@@ -208,7 +208,7 @@ dart_binary(
     main = "defines_files.dart",
     modular_kernel = False,
     target_compatible_with = HOST_COMPATIBLE,
-    visibility = ["//visibility:public"],
+    visibility = ["//flutter:__subpackages__"],
 )
 
 dart_binary(

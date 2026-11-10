@@ -1,7 +1,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_gen_l10n", "flutter_integration_test")
+load("@rules_flutter//flutter:defs.bzl", "flutter_gen_l10n", "flutter_integration_test")
 
 exports_files(["pubspec.lock"])
 
@@ -44,24 +44,6 @@ cc_shared_library(
     name = "cov13_asset",
     visibility = ["//native_asset_plugin:__pkg__"],
     deps = [":cov13_asset_cc"],
-)
-
-flutter_application(
-    name = "app",
-    package_name = "integration_android",
-    srcs = ["lib/main.dart"],
-    assets = ["assets/logo.png"],
-    defines_files = ["//defines:app_defines.json"],
-    main = "lib/main.dart",
-    deps = [
-        "//android_greeting_plugin",
-        "//libs/cov13font",
-        "//native_asset_plugin",
-        "@deps//:flutter",
-        "@deps//:flutter_localizations",
-        "@deps//:intl",
-        "@rules_flutter//flutter:material_icons",
-    ],
 )
 
 flutter_integration_test(
