@@ -1,6 +1,6 @@
 """Unit tests for the pub plugin spoke's SwiftPM product links."""
 
-load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load(
     "//flutter/private:flutter_pub_apple.bzl",
     "apple_plugin_targets",
@@ -773,6 +773,96 @@ def _apply_apple_native_deps_byname_product_test_impl(ctx):
     asserts.true(env, '"ios/spm_bigint_plugin/Sources/Helper/Helper.swift",' in rendered)
     return unittest.end(env)
 
+def _helper_spoke(primary_deps, helper_deps, extra_targets = ""):
+    """Run `apply_apple_native_deps` on a manifest whose `Helper` target has deps."""
+    manifest = _BYNAME_MANIFEST.replace(
+        "    targets: [",
+        '    targets: [.target(name: "Helper", dependencies: [%s]), %s' % (helper_deps, extra_targets),
+    ).replace("DEPS", primary_deps)
+    fake = _fake_spoke_ctx(
+        files = {
+            "//:Package.resolved": _BIGINT_RESOLVED,
+            "//:package_sha256.json": '{"bigint": "%s"}' % _BIGINT_SHA,
+            "ios/spm_bigint_plugin/Package.swift": manifest,
+            "ios/spm_bigint_plugin/Sources/Helper/Helper.swift": "public enum Helper {}\n",
+            "ios/spm_bigint_plugin/Sources/Other/Other.swift": "public enum Other {}\n",
+        },
+        dirs = {
+            "ios/spm_bigint_plugin/Sources": [("spm_bigint_plugin", True), ("Helper", True), ("Other", True)],
+            "ios/spm_bigint_plugin/Sources/Helper": [("Helper.swift", False)],
+            "ios/spm_bigint_plugin/Sources/Other": [("Other.swift", False)],
+        },
+    )
+    srcs = ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"]
+    apple = struct(macos_srcs = [], ios_srcs = srcs, macos_podspec = None, ios_podspec = None)
+    base = apple_plugin_targets("spm_bigint_plugin", srcs, [], "ios")
+    return apply_apple_native_deps(fake, "spm_bigint_plugin", apple, base)
+
+def _helper_spoke_impl(ctx):
+    """Rule body: runs the spoke wiring so its `fail` surfaces at analysis."""
+    _helper_spoke(ctx.attr.primary_deps, ctx.attr.helper_deps)
+    return [DefaultInfo()]
+
+_helper_spoke_rule = rule(
+    implementation = _helper_spoke_impl,
+    attrs = {
+        "helper_deps": attr.string(),
+        "primary_deps": attr.string(),
+    },
+)
+
+def _expect_refusal_test_impl(ctx):
+    """The spoke fetch fails with every expected substring."""
+    env = analysistest.begin(ctx)
+    for expected in ctx.attr.expected_substrings:
+        asserts.expect_failure(env, expected)
+    return analysistest.end(env)
+
+_expect_refusal_test = analysistest.make(
+    _expect_refusal_test_impl,
+    expect_failure = True,
+    attrs = {"expected_substrings": attr.string_list(mandatory = True)},
+)
+
+def _refusal_tests(name):
+    """Registers the refused-sibling-product analysis tests; returns their labels."""
+    labels = []
+    for index, spelling in enumerate(['"BigInt"', '.product(name: "BigInt", package: "BigInt")']):
+        spoke = "%s_spoke_%d" % (name, index)
+        _helper_spoke_rule(name = spoke, primary_deps = '"Helper"', helper_deps = spelling, tags = ["manual"])
+        _expect_refusal_test(
+            name = "%s_refused_%d" % (name, index),
+            target_under_test = ":" + spoke,
+            expected_substrings = [
+                'Flutter plugin "spm_bigint_plugin"',
+                'of target "Helper"',
+                '"BigInt"',
+                '`.product(name: "BigInt", package: "<package>")` on the primary target, or link it there',
+            ],
+        )
+        labels.append(":%s_refused_%d" % (name, index))
+    return labels
+
+def _linked_sibling_product_renders_as_base_test_impl(ctx):
+    """A product the primary also links is not refused and links once."""
+    env = unittest.begin(ctx)
+    for primary in ['.product(name: "BigInt", package: "BigInt"), "Helper"', '"BigInt", "Helper"']:
+        rendered = _helper_spoke(primary, '"BigInt"')
+        asserts.equals(env, _helper_spoke(primary, ""), rendered)
+        asserts.equals(env, 2, len(rendered.split("@deps__swiftpm-bigint//:BigInt")) - 1)
+        asserts.true(env, '":spm_bigint_plugin_apple_ios__Helper",' in rendered)
+    return unittest.end(env)
+
+def _sibling_local_and_conditioned_deps_not_refused_test_impl(ctx):
+    """A by-name local target, a conditioned-out product and FlutterFramework pass."""
+    env = unittest.begin(ctx)
+    helper = '"Other", .product(name: "BigInt", package: "BigInt", condition: .when(platforms: [.macOS])), ' + \
+             '.product(name: "FlutterFramework", package: "FlutterFramework")'
+    rendered = _helper_spoke('"Helper"', helper, '.target(name: "Other"), ')
+    asserts.true(env, '":spm_bigint_plugin_apple_ios__Helper",' in rendered)
+    asserts.equals(env, 0, len(rendered.split("@deps__swiftpm-bigint//:BigInt")) - 1)
+    return unittest.end(env)
+
 _products_resolve_to_pinned_labels_test = unittest.make(_products_resolve_to_pinned_labels_test_impl)
 _mapped_product_resolves_without_pins_test = unittest.make(_mapped_product_resolves_without_pins_test_impl)
 _unmapped_product_without_resolved_keeps_refusal_test = unittest.make(
@@ -808,6 +898,8 @@ _manifests_without_links_resolve_empty_test = unittest.make(_manifests_without_l
 _deps_render_on_both_backends_test = unittest.make(_deps_render_on_both_backends_test_impl)
 _plugin_defines_render_on_both_backends_test = unittest.make(_plugin_defines_render_on_both_backends_test_impl)
 _apply_apple_native_deps_byname_product_test = unittest.make(_apply_apple_native_deps_byname_product_test_impl)
+_linked_sibling_product_renders_as_base_test = unittest.make(_linked_sibling_product_renders_as_base_test_impl)
+_sibling_local_and_conditioned_deps_not_refused_test = unittest.make(_sibling_local_and_conditioned_deps_not_refused_test_impl)
 
 def flutter_pub_apple_test_suite(name):
     """Registers the Apple plugin spoke SwiftPM link unit tests."""
@@ -844,8 +936,10 @@ def flutter_pub_apple_test_suite(name):
         _deps_render_on_both_backends_test,
         _plugin_defines_render_on_both_backends_test,
         _apply_apple_native_deps_byname_product_test,
+        _linked_sibling_product_renders_as_base_test,
+        _sibling_local_and_conditioned_deps_not_refused_test,
     )
     native.test_suite(
         name = name,
-        tests = [":" + name + "_unit"],
+        tests = [":" + name + "_unit"] + _refusal_tests(name),
     )

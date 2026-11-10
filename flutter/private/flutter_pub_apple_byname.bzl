@@ -91,24 +91,98 @@ def _byname_candidates(pkg_deps):
             refs.append(ref)
     return refs
 
-def _byname_error(plugin_name, dep, detail):
+def _byname_error(plugin_name, dep, detail, target = ""):
     """The fetch failure for a by-name dependency that cannot be linked.
 
     Args:
         plugin_name: The pub plugin name.
         dep: The parsed by-name dependency reference.
         detail: What is wrong with it.
+        target: The non-primary target that carries it ("" for the primary).
 
     Returns:
         The failure text, naming the plugin, the dependency and the fix.
     """
-    return ("Flutter plugin {plugin}: target dependency {name} {detail} " +
-            "Write it as `.product(name: {name}, package: \"<package>\")` " +
+    where = " of target " + json.encode(target) if target else ""
+    fix = " on the primary target, or link it there," if target else ""
+    return ("Flutter plugin {plugin}: target dependency {name}{where} {detail} " +
+            "Write it as `.product(name: {name}, package: \"<package>\")`{fix} " +
             "so the package that owns the product is explicit.").format(
         plugin = repr(plugin_name),
         name = json.encode(dep.name),
         detail = detail,
+        where = where,
+        fix = fix,
     )
+
+def _product_key(plugin_name, dep, pkg_deps):
+    """The `(name, package)` a product or by-name dependency links, lowercased.
+
+    Args:
+        plugin_name: The pub plugin name.
+        dep: A dependency that names a product.
+        pkg_deps: The manifest's parsed `.package(...)` declarations.
+
+    Returns:
+        A `(name, package)` tuple; the package is "" for a by-name
+        reference that no single declared package owns.
+    """
+    if getattr(dep, "kind", "") == "product":
+        return (dep.name.lower(), dep.package.lower())
+    resolved = apple_swiftpm_resolve_byname(plugin_name, dep, pkg_deps, lambda _package, _product: False)
+    return (dep.name.lower(), resolved.dep.package.lower() if resolved.ok else "")
+
+def _product_linked_on(dep, platform):
+    """Whether a product-naming dependency is linked on a platform.
+
+    Args:
+        dep: A dependency that names a product.
+        platform: `"ios"` or `"macos"`.
+
+    Returns:
+        False for a conditioned-out dependency and for `FlutterFramework`.
+    """
+    condition = getattr(dep, "condition", None)
+    if condition != None and platform not in getattr(condition, "platforms", [platform]):
+        return False
+    return "flutterframework" not in (dep.name.lower(), getattr(dep, "package", "").lower())
+
+def apple_swiftpm_nonprimary_product_error(plugin_name, model, primary, current, platform):
+    """Refuse a product that a non-primary local target needs and the primary lacks.
+
+    Only the primary target's products are linked on the spoke, so a
+    sibling target that names a product the primary does not link
+    would fail inside Swift with "no such module".
+
+    Args:
+        plugin_name: The pub plugin name, for messages.
+        model: The parsed plugin manifest model.
+        primary: The primary target struct.
+        current: The reached target whose dependencies are checked.
+        platform: `"ios"` or `"macos"`.
+
+    Returns:
+        "" or the refusal text.
+    """
+    if current == primary:
+        return ""
+    targets = getattr(model, "targets", [])
+    local = [getattr(other, "name", "").lower() for other in targets if getattr(other, "name", "")]
+    pkgs = getattr(model, "pkg_deps", [])
+    linked = [
+        _product_key(plugin_name, dep, pkgs)
+        for dep in getattr(primary, "deps", [])
+        if apple_swiftpm_names_product(dep, local) and _product_linked_on(dep, platform)
+    ]
+    for dep in getattr(current, "deps", []):
+        if not apple_swiftpm_names_product(dep, local) or not _product_linked_on(dep, platform):
+            continue
+        name, package = _product_key(plugin_name, dep, pkgs)
+        if [1 for other in linked if other[0] == name and (other[1] == package or "" in (other[1], package))]:
+            continue
+        detail = "is a product the primary target %s does not link." % json.encode(getattr(primary, "name", ""))
+        return _byname_error(plugin_name, dep, detail, getattr(current, "name", ""))
+    return ""
 
 def apple_swiftpm_resolve_byname(plugin_name, dep, pkg_deps, is_mapped):
     """Turn a by-name dependency into the product dependency it names.

@@ -22,7 +22,7 @@ load(
     "detect_apple_swiftpm_deps",
     "with_apple_swiftpm_deps",
 )
-load(":flutter_pub_apple_byname.bzl", "apple_swiftpm_names_product")
+load(":flutter_pub_apple_byname.bzl", "apple_swiftpm_names_product", "apple_swiftpm_nonprimary_product_error")
 load(":flutter_pub_apple_local_refusal.bzl", "local_manifest_decision")
 load(
     ":flutter_pub_apple_local_targets.bzl",
@@ -175,12 +175,13 @@ def _local_dep_applies(dep, platform):
         return True
     return platform in getattr(condition, "platforms", [])
 
-def _local_follow_dependencies(plugin, model, reached, stack, platform):
+def _local_follow_dependencies(plugin, model, primary, reached, stack, platform):
     """Follow the queued targets' same-package dependencies.
 
     Args:
         plugin: The pub plugin name, for messages.
         model: The parsed plugin manifest model.
+        primary: The primary target struct.
         reached: The reached-name dict (mutated in place).
         stack: The pending-name list (mutated in place).
         platform: `"ios"` or `"macos"`.
@@ -194,6 +195,9 @@ def _local_follow_dependencies(plugin, model, reached, stack, platform):
         if not stack:
             break
         current = _local_target_by_name(targets, stack.pop())
+        refused = apple_swiftpm_nonprimary_product_error(plugin, model, primary, current, platform)
+        if refused:
+            return refused
         for dep in getattr(current, "deps", []):
             if apple_swiftpm_names_product(dep, local):
                 continue
@@ -223,12 +227,8 @@ def _local_walk_reachable(plugin, model, primary, platform):
     reached = {}
     stack = []
     error = _local_seed_products(plugin, model, reached, stack)
-    if error:
-        return struct(ok = False, error = error, reached = {})
-    refused = _local_append_reached(plugin, primary, reached, stack)
-    if refused:
-        return struct(ok = False, error = refused, reached = {})
-    error = _local_follow_dependencies(plugin, model, reached, stack, platform)
+    error = error or _local_append_reached(plugin, primary, reached, stack)
+    error = error or _local_follow_dependencies(plugin, model, primary, reached, stack, platform)
     if error:
         return struct(ok = False, error = error, reached = {})
     return struct(ok = True, error = "", reached = reached)
