@@ -271,7 +271,15 @@ List<_PayloadEntry> _payloadFromFlutterAssets(Directory assetsDir) {
 /// Every comparison is a case-sensitive suffix match, like aapt2: each
 /// extension matches `.<ext>` at the end of the path. A user extension may
 /// carry its own leading dot.
-bool _storeUncompressedByName(String path, Set<String> extraNoCompress) {
+bool _storeUncompressedByName(
+  String path,
+  Set<String> extraNoCompress, {
+  bool debug = false,
+}) {
+  if (debug &&
+      (path == 'kernel_blob.bin' || path.endsWith('/kernel_blob.bin'))) {
+    return true;
+  }
   bool suffix(String ext) => ext.isNotEmpty && path.endsWith('.$ext');
   if (suffix('so')) return true;
   for (final String ext in _aaptNoCompressExtensions) {
@@ -378,6 +386,7 @@ const int _zip32Limit = 0xFFFFFFFF;
   Uint8List data, {
   int? crc,
   Set<String> extraNoCompress = const {},
+  bool debug = false,
 }) {
   final Uint8List nameBytes = utf8.encode(path);
   if (nameBytes.length >= 0xFFFF) {
@@ -391,7 +400,11 @@ const int _zip32Limit = 0xFFFFFFFF;
       'ZIP32 limit; ZIP64 archives are not supported.',
     );
   }
-  final bool mustStore = _storeUncompressedByName(path, extraNoCompress);
+  final bool mustStore = _storeUncompressedByName(
+    path,
+    extraNoCompress,
+    debug: debug,
+  );
   final Uint8List payload;
   final int method;
   if (mustStore) {
@@ -521,6 +534,7 @@ void spliceApkOverlay({
   required String flutterAssetsDirPath,
   required String outputApkPath,
   Set<String> nocompressExtensions = const {},
+  bool debug = false,
 }) {
   final Uint8List base = File(baseApkPath).readAsBytesSync();
   final ({int cdOffset, int count, Set<String> names, Uint8List records})
@@ -549,6 +563,7 @@ void spliceApkOverlay({
     offset: central.cdOffset,
     payload: payload,
     nocompressExtensions: nocompressExtensions,
+    debug: debug,
   );
 
   final int totalCount = central.count + payload.length;
@@ -642,6 +657,7 @@ int _appendPayloadEntries({
   required int offset,
   required List<_PayloadEntry> payload,
   required Set<String> nocompressExtensions,
+  bool debug = false,
 }) {
   var cursor = offset;
   for (final entry in payload) {
@@ -656,6 +672,7 @@ int _appendPayloadEntries({
       entry.data,
       crc: entry.crc,
       extraNoCompress: nocompressExtensions,
+      debug: debug,
     );
     final centralBd = ByteData.sublistView(encoded.central);
     _setUint32LE(centralBd, 42, cursor);
@@ -692,10 +709,13 @@ void runApkOverlay(List<String> args) {
   String? flutterAssets;
   String? output;
   final nocompressExtensions = <String>{};
+  var debug = false;
 
   for (var i = 0; i < args.length; i++) {
     final String arg = args[i];
     switch (arg) {
+      case '--debug':
+        debug = true;
       case '--base':
         if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
         base = args[++i];
@@ -735,5 +755,6 @@ void runApkOverlay(List<String> args) {
     flutterAssetsDirPath: flutterAssets,
     outputApkPath: output,
     nocompressExtensions: nocompressExtensions,
+    debug: debug,
   );
 }

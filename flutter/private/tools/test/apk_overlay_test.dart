@@ -75,14 +75,19 @@ void main() {
       required Map<String, Uint8List> assets,
       required List<ZipEntry> jarEntries,
       List<int>? baseComment,
+      bool debug = false,
+      List<ZipEntry>? baseEntries,
     }) {
       final basePath = '${tempDir.path}/base.apk';
-      Uint8List baseBytes = encodeDeterministicZip([
-        ZipEntry(
-          path: 'AndroidManifest.xml',
-          data: Uint8List.fromList([1]),
-        ),
-      ]);
+      Uint8List baseBytes = encodeDeterministicZip(
+        baseEntries ??
+            [
+              ZipEntry(
+                path: 'AndroidManifest.xml',
+                data: Uint8List.fromList([1]),
+              ),
+            ],
+      );
       if (baseComment != null) {
         baseBytes = _withDeclaredComment(
           baseBytes,
@@ -104,6 +109,7 @@ void main() {
         nativeLibsJarPath: jarPath,
         flutterAssetsDirPath: assetsDir.path,
         outputApkPath: outPath,
+        debug: debug,
       );
       return {
         for (final e in readZipRawEntries(File(outPath).readAsBytesSync()))
@@ -165,6 +171,118 @@ void main() {
       expect(methods['AndroidManifest.xml'], isNotNull);
       expect(methods['assets/flutter_assets/plain.txt'], isNotNull);
     });
+
+    test('stores kernel_blob.bin in debug and deflates it in release', () {
+      final compressible = Uint8List.fromList(List<int>.filled(5000, 42));
+      final Map<String, int> debugMethods = spliceMethods(
+        assets: {'kernel_blob.bin': compressible},
+        jarEntries: const [],
+        debug: true,
+      );
+      expect(
+        debugMethods['assets/flutter_assets/kernel_blob.bin'],
+        0,
+        reason: 'debug build must store kernel_blob.bin uncompressed',
+      );
+
+      final Map<String, int> releaseMethods = spliceMethods(
+        assets: {'kernel_blob.bin': compressible},
+        jarEntries: const [],
+      );
+      expect(
+        releaseMethods['assets/flutter_assets/kernel_blob.bin'],
+        8,
+        reason: 'release build must deflate compressible kernel_blob.bin',
+      );
+    });
+
+    test(
+      'carries over stored aligned base entry without recompression in debug',
+      () {
+        final storedData = Uint8List.fromList(
+          List<int>.generate(256, (i) => i),
+        );
+        final Map<String, int> methods = spliceMethods(
+          assets: {
+            'dummy.txt': Uint8List.fromList([1]),
+          },
+          jarEntries: const [],
+          baseEntries: [
+            ZipEntry(
+              path: 'resources.arsc',
+              data: storedData,
+              storeOnly: true,
+            ),
+          ],
+          debug: true,
+        );
+        expect(methods['resources.arsc'], 0);
+        final Uint8List outBytes = File('${tempDir.path}/out.apk')
+            .readAsBytesSync();
+        final List<ZipEntry> entries = readZipEntries(outBytes);
+        final ZipEntry resources = entries.firstWhere(
+          (e) => e.path == 'resources.arsc',
+        );
+        expect(resources.data, equals(storedData));
+      },
+    );
+
+    test(
+      'produces identical APK bytes across multiple runs with same inputs',
+      () {
+        final basePath = '${tempDir.path}/base_repro.apk';
+        File(basePath).writeAsBytesSync(
+          encodeDeterministicZip([
+            ZipEntry(
+              path: 'AndroidManifest.xml',
+              data: Uint8List.fromList([1, 2, 3]),
+            ),
+            ZipEntry(
+              path: 'classes.dex',
+              data: Uint8List.fromList(List<int>.filled(100, 5)),
+              storeOnly: true,
+            ),
+          ]),
+        );
+        final jarPath = '${tempDir.path}/libs_repro.jar';
+        File(jarPath).writeAsBytesSync(
+          encodeDeterministicZip([
+            ZipEntry(
+              path: 'lib/arm64-v8a/libapp.so',
+              data: Uint8List.fromList([0x7f, 0x45, 0x4c, 0x46, 1]),
+              storeOnly: true,
+            ),
+          ]),
+        );
+        final assetsDir = Directory('${tempDir.path}/assets_repro')
+          ..createSync();
+        File('${assetsDir.path}/kernel_blob.bin')
+            .writeAsBytesSync(List<int>.filled(500, 7));
+        File('${assetsDir.path}/asset.txt')
+            .writeAsBytesSync(utf8.encode('asset text'));
+
+        final out1 = '${tempDir.path}/out1.apk';
+        final out2 = '${tempDir.path}/out2.apk';
+        spliceApkOverlay(
+          baseApkPath: basePath,
+          nativeLibsJarPath: jarPath,
+          flutterAssetsDirPath: assetsDir.path,
+          outputApkPath: out1,
+          debug: true,
+        );
+        spliceApkOverlay(
+          baseApkPath: basePath,
+          nativeLibsJarPath: jarPath,
+          flutterAssetsDirPath: assetsDir.path,
+          outputApkPath: out2,
+          debug: true,
+        );
+
+        final Uint8List bytes1 = File(out1).readAsBytesSync();
+        final Uint8List bytes2 = File(out2).readAsBytesSync();
+        expect(bytes1, equals(bytes2));
+      },
+    );
   });
 
   group('EOCD finder and entry names', () {
