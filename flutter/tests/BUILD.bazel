@@ -4,6 +4,7 @@ load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load(":action_inputs_test.bzl", "action_inputs_test_suite")
 load(":analyze_size_test.bzl", "analyze_size_test_suite")
+load(":android_aar_test.bzl", "android_aar_test_suite")
 load(":android_debug_signing_test.bzl", "android_debug_signing_test_suite")
 load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
@@ -402,9 +403,32 @@ dart_test(
     ],
 )
 
+# Inspects the AAR `flutter_android_aar` produces: it builds the Dart AOT
+# library for Android, so it runs on Linux CI.
+dart_test(
+    name = "android_aar_inspect_test",
+    size = "small",
+    data = [
+        ":release_aar",
+        ":release_aar_x64",
+    ],
+    env = {
+        "AAR": "$(rlocationpath :release_aar)",
+        "AAR_X64": "$(rlocationpath :release_aar_x64)",
+    },
+    main = "android_aar_inspect_test.dart",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 action_inputs_test_suite(name = "action_inputs_test")
 
 android_pure_go_test_suite(name = "android_pure_go_test")
+
+android_aar_test_suite(name = "android_aar_test")
 
 android_release_signing_test_suite(name = "android_release_signing_test")
 

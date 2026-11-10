@@ -9,6 +9,10 @@
 ///   - `debug-assets`: Copies the `flutter_assets` tree (dereferencing
 ///     symlinks), `kernel_blob.bin`, and optional `vm_snapshot_data` /
 ///     `isolate_snapshot_data` into the debug assets directory.
+///   - `aar`: Packs a Flutter module's AOT library per ABI (`jni/<abi>/libapp.so`,
+///     ELF-validated), its `flutter_assets` tree (under `assets/`), the
+///     manifest, an empty `classes.jar` and an empty `R.txt` into an Android
+///     library archive.
 ///   - `apk-overlay`: Injects the Flutter payload (`native_libs.jar` entries
 ///     plus the `flutter_assets` tree) into an unsigned base APK after
 ///     resource linking, so Dart edits re-run only this step plus the stock
@@ -201,7 +205,7 @@ void _copyDirectoryDereferencingLinks(Directory src, Directory dst) {
 Future<void> runAndroidBundle(List<String> args) async {
   if (args.isEmpty) {
     throw ArgumentError(
-      'Expected subcommand: "native-libs-jar", "empty-jar", "debug-assets", or "apk-overlay".',
+      'Expected subcommand: "native-libs-jar", "empty-jar", "debug-assets", "aar", or "apk-overlay".',
     );
   }
   final String subcommand = args.first;
@@ -215,6 +219,8 @@ Future<void> runAndroidBundle(List<String> args) async {
       _runDebugAssets(rest);
     case 'apk-overlay':
       runApkOverlay(rest);
+    case 'aar':
+      _runAar(rest);
     default:
       throw ArgumentError('Unknown subcommand: $subcommand');
   }
@@ -335,6 +341,137 @@ void _runDebugAssets(List<String> args) {
     kernelPath: kernel,
     vmSnapshotPath: vmSnapshot,
     isolateSnapshotPath: isolateSnapshot,
+  );
+}
+
+/// One AOT library of an `aar`: packaged at `jni/[abi]/libapp.so`.
+class AarLibrary {
+  const new({
+    required this.abi,
+    required this.machine,
+    required this.path,
+  });
+
+  /// Android ABI directory name, e.g. `arm64-v8a`.
+  final String abi;
+
+  /// ELF `e_machine` the library must have for [abi].
+  final int machine;
+
+  /// Source path of the library.
+  final String path;
+}
+
+/// Lists the files under [dir] as sorted `relative/path` strings, following
+/// symlinks.
+List<String> _listTreeFiles(Directory dir) {
+  final files = <String>[];
+  void walk(Directory d, String prefix) {
+    final List<FileSystemEntity> entities = d.listSync()
+      ..sort((a, b) => a.path.compareTo(b.path));
+    for (final entity in entities) {
+      final String name = entity.uri.pathSegments
+          .where((s) => s.isNotEmpty)
+          .last;
+      if (entity is Directory) {
+        walk(entity, '$prefix$name/');
+      } else {
+        files.add('$prefix$name');
+      }
+    }
+  }
+
+  walk(dir, '');
+  return files;
+}
+
+/// Writes the Android library archive [outputPath] from [libraries], the
+/// `flutter_assets` tree at [assetsDir] and the manifest at [manifestPath].
+void packageAar({
+  required String outputPath,
+  required String manifestPath,
+  required String assetsDir,
+  required List<AarLibrary> libraries,
+}) {
+  final entries = <ZipEntry>[
+    ZipEntry(
+      path: 'AndroidManifest.xml',
+      data: File(manifestPath).readAsBytesSync(),
+    ),
+    ZipEntry(path: 'classes.jar', data: Uint8List.fromList(emptyJarBytes)),
+    ZipEntry(path: 'R.txt', data: Uint8List(0)),
+  ];
+  final seen = <String>{};
+  for (final lib in libraries) {
+    if (!seen.add(lib.abi)) {
+      throw ArgumentError('ERROR: two libraries for ABI ${lib.abi}.');
+    }
+    final Uint8List bytes = File(lib.path).readAsBytesSync();
+    validateAndroidElf(
+      bytes,
+      path: lib.path,
+      wantMachine: lib.machine,
+      abi: lib.abi,
+    );
+    entries.add(
+      ZipEntry(
+        path: 'jni/${lib.abi}/libapp.so',
+        data: bytes,
+        storeOnly: true,
+      ),
+    );
+  }
+  for (final String rel in _listTreeFiles(Directory(assetsDir))) {
+    entries.add(
+      ZipEntry(
+        path: 'assets/flutter_assets/$rel',
+        data: File('$assetsDir/$rel').readAsBytesSync(),
+      ),
+    );
+  }
+  entries.sort((a, b) => a.path.compareTo(b.path));
+  File(outputPath).parent.createSync(recursive: true);
+  File(outputPath)
+      .writeAsBytesSync(encodeDeterministicZip(entries), flush: true);
+}
+
+void _runAar(List<String> args) {
+  String? output;
+  String? manifest;
+  String? assetsDir;
+  final libraries = <AarLibrary>[];
+  for (var i = 0; i < args.length; i++) {
+    final String arg = args[i];
+    switch (arg) {
+      case '--output':
+        output = args[++i];
+      case '--manifest':
+        manifest = args[++i];
+      case '--assets-dir':
+        assetsDir = args[++i];
+      case '--lib':
+        libraries.add(
+          AarLibrary(
+            abi: args[++i],
+            machine: int.parse(args[++i]),
+            path: args[++i],
+          ),
+        );
+      default:
+        throw ArgumentError('Unknown option for aar: $arg');
+    }
+  }
+  if (output == null || manifest == null || assetsDir == null) {
+    throw ArgumentError(
+      'Usage: android_bundle.dart aar --output <aar> --manifest <xml> '
+      '--assets-dir <dir> [--lib <abi> <machine> <libapp.so>]...',
+    );
+  }
+  packageAar(
+    outputPath: output,
+    manifestPath: manifest,
+    assetsDir: assetsDir,
+    libraries: libraries,
   );
 }
 

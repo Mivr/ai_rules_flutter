@@ -42,6 +42,7 @@
 //flutter/tests/corpus:__web_app_manifest
 //flutter/tests/corpus:_android_plugin__manifest
 //flutter/tests/corpus:_apple_xcframework__xtool
+//flutter/tests/corpus:android_aar
 //flutter/tests/corpus:android_bundle
 //flutter/tests/corpus:android_manifest
 //flutter/tests/corpus:android_merged_manifest

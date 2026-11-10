@@ -63,10 +63,12 @@ load(
 load(
     "//flutter/private:flutter_android_application.bzl",
     _android_internal_tags = "android_internal_tags",
+    _flutter_android_aar = "flutter_android_aar",
     _flutter_android_bundle = "flutter_android_bundle",
 )
 load(
     "//flutter/private:flutter_android_binary_proxy.bzl",
+    _FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = "FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS",
     _build_overlay_kwargs = "build_overlay_kwargs",
     _flutter_android_binary_proxy = "flutter_android_binary_proxy",
 )
@@ -112,6 +114,10 @@ _ANDROIDX_EMBEDDING_DEPS = [
 
 flutter_android_bundle = _flutter_android_bundle
 
+# Packages a flutter_application as an AAR for a native Android host app, with
+# the pinned engine flutter.jar in the `engine_maven` output group.
+flutter_android_aar = _flutter_android_aar
+
 # Finishes a payload-free android_binary into a signed APK by injecting the
 # Flutter payload (native libraries and flutter_assets) after resource
 # linking. Wired automatically by flutter_android_app; expose for Tier-2
@@ -119,45 +125,8 @@ flutter_android_bundle = _flutter_android_bundle
 flutter_android_apk_overlay = _flutter_android_apk_overlay
 
 # The aapt2 default no-compress extension list that both the overlay tool and
-# android_binary's own packaging apply (see
-# flutter/private/tools/apk_overlay.dart `_aaptNoCompressExtensions`, itself
-# mirroring singlejar). Reference apps in e2e tests pass this to
-# android_binary's nocompress_extensions so entry-by-entry parity checks
-# compare the same compression policy on both APKs.
-FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = [
-    "jpg",
-    "jpeg",
-    "png",
-    "gif",
-    "wav",
-    "mp2",
-    "mp3",
-    "ogg",
-    "aac",
-    "mpg",
-    "mpeg",
-    "mid",
-    "midi",
-    "smf",
-    "jet",
-    "rtttl",
-    "imy",
-    "xmf",
-    "mp4",
-    "m4a",
-    "m4v",
-    "3gp",
-    "3gpp",
-    "3g2",
-    "3gpp2",
-    "amr",
-    "awb",
-    "wma",
-    "wmv",
-    "webm",
-    "mkv",
-    "webp",
-]
+# android_binary's own packaging apply.
+FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = _FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS
 
 # Merges a variant AndroidManifest.xml overlay (e.g. flutter create's
 # android/app/src/debug/AndroidManifest.xml) into a base manifest — the

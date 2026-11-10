@@ -55,7 +55,7 @@ ANDROID_PLATFORMS_FLAG = "@rules_android//flags:android_platforms"
 
 def _android_platform_transition_platforms(settings, attr):
     abi = getattr(attr, "android_abi", "")
-    if abi:
+    if abi in ANDROID_ABIS:
         return {
             "//command_line_option:platforms": [android_platform_for_abi(abi)],
         }
@@ -444,3 +444,136 @@ def android_internal_tags(tags):
     if "manual" not in internal_tags:
         internal_tags.append("manual")
     return internal_tags
+
+def _aar_manifest(ctx):
+    """Writes the AAR's AndroidManifest.xml, which carries only the package name."""
+    manifest = ctx.actions.declare_file(ctx.label.name + "_aar/AndroidManifest.xml")
+    ctx.actions.write(
+        output = manifest,
+        content = "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\"\n" +
+                  "    package=\"{}\"/>\n".format(ctx.attr.package_name),
+    )
+    return manifest
+
+def _aar_engine_jar(android_abi):
+    """Selects the pinned release engine `flutter.jar` for `android_abi`."""
+    if android_abi == "x86_64":
+        return Label("@flutter_android_engine_x64//:flutter.jar")
+    return Label("@flutter_android_engine_arm64//:flutter.jar")
+
+def _flutter_android_aar_impl(ctx):
+    """Packs the module's AOT library, assets and manifest into `<name>.aar`."""
+    abi = ctx.attr.android_abi
+    if abi not in ANDROID_ABIS:
+        fail((
+            "flutter_android_aar {}: invalid value in 'android_abi' attribute: " +
+            "has to be one of 'arm64-v8a' or 'x86_64' instead of '{}'. " +
+            "Unsupported Android ABI '{}'. Supported: {}."
+        ).format(
+            ctx.label,
+            abi,
+            abi,
+            ", ".join(ANDROID_ABIS.keys()),
+        ))
+    app_info = ctx.attr.application[FlutterApplicationInfo]
+    if ctx.var.get("COMPILATION_MODE") == "dbg" or not app_info.aot_output:
+        fail((
+            "flutter_android_aar {}: debug mode is not supported. A debug AAR needs the JIT " +
+            "kernel, which this rule does not package. Build with `-c opt` (release) or " +
+            "`--//flutter:profile`."
+        ).format(ctx.label))
+    manifest = _aar_manifest(ctx)
+    flutter_assets = app_info.flutter_assets
+    aar = ctx.actions.declare_file(ctx.label.name + ".aar")
+
+    args = ctx.actions.args()
+    args.add(ctx.executable._android_bundle_tool)
+    args.add("aar")
+    args.add("--output", aar)
+    args.add("--manifest", manifest)
+    args.add("--assets-dir", flutter_assets.path)
+    args.add("--lib")
+    args.add(abi)
+    args.add(str(android_elf_machine_for_abi(abi)))
+    args.add(app_info.aot_output)
+
+    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
+    ctx.actions.run(
+        executable = dart_exe,
+        arguments = [args],
+        inputs = depset(
+            direct = [
+                ctx.executable._android_bundle_tool,
+                manifest,
+                flutter_assets,
+                app_info.aot_output,
+            ],
+            transitive = [dart_vm_files],
+        ),
+        outputs = [aar],
+        mnemonic = "FlutterAndroidAar",
+        progress_message = "Packaging Flutter module into %s" % aar.short_path,
+        toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
+    )
+
+    # The engine comes from the pinned `flutter_android_engine_<abi>` repository;
+    # release and profile both use the release flutter.jar.
+    return [
+        DefaultInfo(files = depset([aar])),
+        OutputGroupInfo(engine_maven = depset([ctx.file._engine_jar])),
+    ]
+
+flutter_android_aar = rule(
+    implementation = _flutter_android_aar_impl,
+    cfg = _android_platform_transition,
+    attrs = {
+        "application": attr.label(
+            doc = "A `flutter_application` target providing the compiled artifacts.",
+            mandatory = True,
+            providers = [FlutterApplicationInfo],
+        ),
+        "package_name": attr.string(
+            doc = "The Android package written to the AAR's `AndroidManifest.xml`.",
+            mandatory = True,
+        ),
+        "android_abi": attr.string(
+            doc = """Android ABI to build for ("arm64-v8a" or "x86_64").
+
+Single source of truth for the target platform: the rule transitions itself
+and `application` to the matching `//flutter/platforms` target, packages
+`jni/<abi>/libapp.so` into the AAR, and exposes that ABI's pinned engine
+`flutter.jar` in the `engine_maven` output group.""",
+            default = "arm64-v8a",
+        ),
+        "_android_bundle_tool": attr.label(
+            doc = "Tool that writes the archive.",
+            default = Label("//flutter/private/tools:android_bundle"),
+            executable = True,
+            cfg = "exec",
+        ),
+        "_engine_jar": attr.label(
+            doc = "The pinned release engine `flutter.jar` for `android_abi`.",
+            default = _aar_engine_jar,
+            allow_single_file = True,
+        ),
+        "_allowlist_function_transition": attr.label(
+            doc = "Function-transition allowlist the rule's platform transition requires.",
+            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+        ),
+    },
+    toolchains = [
+        config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
+    ],
+    doc = """Packages a `flutter_application` as an Android library (AAR) for a native host app.
+
+Emits `<name>.aar` holding `jni/<abi>/libapp.so` (the AOT-compiled Dart library for
+`android_abi`), `assets/flutter_assets/`, an `AndroidManifest.xml` with `package_name`,
+and an empty `classes.jar`. No Gradle and no host tool is involved.
+
+Output groups:
+- `engine_maven`: the pinned engine `flutter.jar` for `android_abi` (the Java
+  embedding classes and `libflutter.so`), from the `flutter_android_engine_<abi>`
+  repository and its sha256 pin.
+
+Release and profile only: a debug build fails analysis.""",
+)

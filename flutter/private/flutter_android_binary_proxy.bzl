@@ -33,6 +33,45 @@ load(
 )
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 
+# The aapt2 default no-compress extension list that both the overlay tool and
+# android_binary's own packaging apply. Reference apps in e2e tests pass this to
+# android_binary's nocompress_extensions so entry-by-entry parity checks
+# compare the same compression policy on both APKs.
+FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = [
+    "jpg",
+    "jpeg",
+    "png",
+    "gif",
+    "wav",
+    "mp2",
+    "mp3",
+    "ogg",
+    "aac",
+    "mpg",
+    "mpeg",
+    "mid",
+    "midi",
+    "smf",
+    "jet",
+    "rtttl",
+    "imy",
+    "xmf",
+    "mp4",
+    "m4a",
+    "m4v",
+    "3gp",
+    "3gpp",
+    "3g2",
+    "3gpp2",
+    "amr",
+    "awb",
+    "wma",
+    "wmv",
+    "webm",
+    "mkv",
+    "webp",
+]
+
 def _pure_go_transition_impl(settings, _attr):
     """Set rules_go pure mode for the Android binary subtree, unless opted out.
 

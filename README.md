@@ -1272,6 +1272,69 @@ android_binary(
 
 </details>
 
+#### Android library (AAR) for a native host app
+
+`flutter_android_aar` packages a `flutter_application` as an Android library, for a monorepo whose host app is native Android. It uses no Gradle and no host tool; the archive is made by one action over declared inputs.
+
+```starlark
+load("@rules_flutter//flutter:android.bzl", "flutter_android_aar")
+load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+
+flutter_application(name = "module", main = "lib/main.dart", deps = [...])
+
+flutter_android_aar(
+    name = "module_aar",
+    application = ":module",
+    package_name = "com.example.module",
+    android_abi = "arm64-v8a",
+)
+```
+
+| Attribute | Meaning |
+|---|---|
+| `application` | The `flutter_application`; transitioned to the Android platform for `android_abi`. |
+| `package_name` | The package written to the AAR's `AndroidManifest.xml`. |
+| `android_abi` | `"arm64-v8a"` (default) or `"x86_64"`. An unknown ABI fails analysis naming `android_abi`. |
+
+`<name>.aar` holds `jni/<abi>/libapp.so` (the AOT-compiled Dart library for `android_abi`), `assets/flutter_assets/`, `AndroidManifest.xml`, an empty `classes.jar` and an empty `R.txt`. Only release (`-c opt`) and profile (`--//flutter:profile`) are packaged; a debug build fails analysis naming `flutter_android_aar` and `debug`, because a debug AAR needs the JIT kernel, which this rule does not package.
+
+Output groups:
+
+| Group | Contents |
+|---|---|
+| `engine_maven` | The pinned release `flutter.jar` for `android_abi` (the Java embedding classes and `libflutter.so`), taken from the `flutter_android_engine_<abi>` repository and its `release_sha256` pin. The rule adds no download and no checksum of its own. Release and profile both use the release `flutter.jar`. |
+
+A host app consumes the AAR with `aar_import` and the engine jar with `java_import`, selecting the group with a filegroup:
+
+```starlark
+load("@rules_android//android:rules.bzl", "aar_import", "android_binary", "android_library")
+load("@rules_java//java:java_import.bzl", "java_import")
+
+filegroup(
+    name = "module_engine",
+    srcs = [":module_aar"],
+    output_group = "engine_maven",
+)
+
+aar_import(name = "module_import", aar = ":module_aar")
+
+java_import(name = "module_engine_import", jars = [":module_engine"])
+
+android_library(
+    name = "host_lib",
+    srcs = glob(["src/**/*.kt"]),
+    deps = [":module_import", ":module_engine_import"],
+)
+
+android_binary(
+    name = "host_app",
+    manifest = "AndroidManifest.xml",
+    deps = [":host_lib"],
+)
+```
+
+Running the host app with the embedded module on an emulator is not covered yet: a later item adds an end-to-end workspace that does it, and the host-side snippet above is not built by CI until then.
+
 ### Linux
 
 Run `flutter create --platforms=linux .` first. If `linux/runner/` is missing, the rules use a built-in runner.
