@@ -52,6 +52,7 @@ load(
 load(
     "//flutter/private:common.bzl",
     "COPY_TO_DIRECTORY_TOOLCHAINS",
+    "DEFINES_FILES_APPLICATION_ATTRS",
     "FLUTTER_DEPS_DOC",
     "KERNEL_COMPILE_ATTRS",
     "PLATFORM_CONSTRAINT_ATTRS",
@@ -324,6 +325,12 @@ _ANDROID_INTEGRATION_APP_ATTRS["native_deps"] = attr.label_list(
     doc = "Native shared library targets (cc_library) for dart:ffi bundled into lib/.",
     aspects = [native_sources_aspect],
 )
+
+# The app is built like a `flutter_application`, so it takes `defines_files`
+# (and the tool that parses them) and its kernel compile consumes the
+# generated flagfile. `define_flagfiles` stays off this rule.
+_ANDROID_INTEGRATION_APP_ATTRS["defines_files"] = DEFINES_FILES_APPLICATION_ATTRS["defines_files"]
+_ANDROID_INTEGRATION_APP_ATTRS["_defines_files_tool"] = DEFINES_FILES_APPLICATION_ATTRS["_defines_files_tool"]
 _ANDROID_INTEGRATION_APP_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _ANDROID_INTEGRATION_APP_ATTRS.update(MODULAR_KERNEL_ATTRS)
 _ANDROID_INTEGRATION_APP_ATTRS["_bootstrap_template"] = attr.label(
