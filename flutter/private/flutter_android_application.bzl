@@ -103,6 +103,10 @@ def _android_platform_transition_impl(settings, attr):
     # the surviving configuration produces the same app.dill and app.so.
     result = _android_platform_transition_platforms(settings, attr)
     result["//command_line_option:dynamic_mode"] = "off"
+    features = list(settings["//command_line_option:features"])
+    if getattr(attr, "analyze_size", False) and "analyze_size" not in features:
+        features.append("analyze_size")
+    result["//command_line_option:features"] = features
     return result
 
 # Builds the bundle and everything behind it (the flutter_application, its
@@ -118,10 +122,12 @@ _android_platform_transition = transition(
         ANDROID_PLATFORMS_FLAG,
         "//command_line_option:cpu",
         "//command_line_option:dynamic_mode",
+        "//command_line_option:features",
     ],
     outputs = [
         "//command_line_option:platforms",
         "//command_line_option:dynamic_mode",
+        "//command_line_option:features",
     ],
 )
 
@@ -265,6 +271,12 @@ def _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, flutter_sdk_info)
     )
     return out
 
+def _bundle_size_depset(ctx):
+    """Returns the analyze_size depset from the application target, if present."""
+    if OutputGroupInfo in ctx.attr.application and hasattr(ctx.attr.application[OutputGroupInfo], "analyze_size"):
+        return ctx.attr.application[OutputGroupInfo].analyze_size
+    return depset()
+
 def _flutter_android_bundle_impl(ctx):
     """Bundles Flutter compilation outputs for Android packaging."""
     app_info = ctx.attr.application[FlutterApplicationInfo]
@@ -335,20 +347,32 @@ def _flutter_android_bundle_impl(ctx):
 
         outputs.extend(mobile_install_files)
 
+    output_groups = {
+        "native_libs": depset(all_native_libs),
+        "native_libs_jar": depset([native_libs_jar]),
+        "flutter_assets": depset([flutter_assets]),
+        "mobile_install": depset(mobile_install_files),
+    }
+
+    size_depset = _bundle_size_depset(ctx)
+    size_files = size_depset.to_list()
+    if size_files:
+        outputs.extend(size_files)
+        output_groups["analyze_size"] = size_depset
+
     return [
         DefaultInfo(files = depset(outputs)),
-        OutputGroupInfo(
-            native_libs = depset(all_native_libs),
-            native_libs_jar = depset([native_libs_jar]),
-            flutter_assets = depset([flutter_assets]),
-            mobile_install = depset(mobile_install_files),
-        ),
+        OutputGroupInfo(**output_groups),
     ]
 
 flutter_android_bundle = rule(
     implementation = _flutter_android_bundle_impl,
     cfg = _android_platform_transition,
     attrs = {
+        "analyze_size": attr.bool(
+            doc = "Whether to transition application with analyze_size feature and forward analyze_size output group.",
+            default = False,
+        ),
         "application": attr.label(
             doc = "A flutter_application target providing the compiled artifacts.",
             mandatory = True,
@@ -406,3 +430,17 @@ By default, outputs are also structured for `bazel mobile-install` compatibility
 Use the wrapping android_binary target with `bazel mobile-install` for fast
 incremental deployment to a connected device.""",
 )
+
+def android_internal_tags(tags):
+    """Keeps internal targets out of wildcard builds behind the pure-Go proxy.
+
+    Args:
+        tags: Target tags list to adjust.
+
+    Returns:
+        List of tags including "manual".
+    """
+    internal_tags = list(tags) if tags else []
+    if "manual" not in internal_tags:
+        internal_tags.append("manual")
+    return internal_tags

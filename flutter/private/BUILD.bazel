@@ -228,6 +228,7 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":common",
+        ":flutter_android_binary_proxy",
         "@bazel_skylib//rules:common_settings",
         "@rules_android//providers:providers_bzl",
         "@rules_java//java/common",

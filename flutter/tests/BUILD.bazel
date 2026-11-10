@@ -3,6 +3,7 @@ load("@rules_dart//dart:defs.bzl", "dart_library", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load(":action_inputs_test.bzl", "action_inputs_test_suite")
+load(":analyze_size_test.bzl", "analyze_size_test_suite")
 load(":android_debug_signing_test.bzl", "android_debug_signing_test_suite")
 load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
@@ -634,6 +635,8 @@ build_test(
 )
 
 aot_flags_test_suite(name = "aot_flags_test")
+
+analyze_size_test_suite(name = "analyze_size_test")
 
 flutter_pub_scc_test_suite(name = "flutter_pub_scc_test")
 

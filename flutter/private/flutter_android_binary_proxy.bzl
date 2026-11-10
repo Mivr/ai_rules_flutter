@@ -24,7 +24,13 @@ through the proxy; nothing should reference the private
 `__<name>_binary` target directly.
 """
 
-load("@rules_android//providers:providers.bzl", "AndroidFeatureFlagSet", "AndroidInstrumentationInfo", "ApkInfo", "StarlarkApkInfo")
+load(
+    "@rules_android//providers:providers.bzl",
+    "AndroidFeatureFlagSet",
+    "AndroidInstrumentationInfo",
+    "ApkInfo",
+    "StarlarkApkInfo",
+)
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 
 def _pure_go_transition_impl(settings, _attr):
@@ -50,51 +56,131 @@ flutter_android_pure_go_transition = transition(
     outputs = ["@rules_go//go/config:pure"],
 )
 
-def _flutter_android_binary_proxy_impl(ctx):
-    # NOTE: an attribute with a Starlark transition arrives as a single-element
-    # list (same as rules_go's go_reset_target: `ctx.attr.dep[0]`).
-    binary = ctx.attr.binary[0]
-    signed_apk = binary[ApkInfo].signed_apk
+def _extract_depset_output_groups(output_group_info, exclude = ()):
+    """Extracts valid depset output groups from OutputGroupInfo, skipping excluded names.
 
-    # The binary's own outputs are named after the private binary target
-    # (`<name>__binary.apk`); re-expose the signed APK under the proxy's name
-    # so the file users build has the name it always had (`<name>.apk`).
-    apk = ctx.actions.declare_file(ctx.label.name + ".apk")
-    ctx.actions.symlink(output = apk, target_file = signed_apk)
+    Args:
+        output_group_info: OutputGroupInfo provider instance or None.
+        exclude: Sequence of attribute names to exclude.
 
+    Returns:
+        Dict mapping output group names to depsets.
+    """
+    groups = {}
+    if not output_group_info:
+        return groups
+    for name in dir(output_group_info):
+        if name in ("to_json", "to_proto") or name in exclude:
+            continue
+        val = getattr(output_group_info, name, None)
+        if type(val) == "depset":
+            groups[name] = val
+    return groups
+
+def _collect_proxy_output_groups(binary):
+    """Collects output group mapping from the binary target.
+
+    Args:
+        binary: The inner binary target.
+
+    Returns:
+        Dict mapping output group names to depsets.
+    """
+    if OutputGroupInfo not in binary:
+        return {}
+    return _extract_depset_output_groups(binary[OutputGroupInfo])
+
+def _handle_proxy_analyze_size(ctx, output_groups):
+    """Processes analyze_size output for the proxy target.
+
+    Args:
+        ctx: Rule context.
+        output_groups: Dict of collected output groups to update.
+
+    Returns:
+        The declared APK size File, or None.
+    """
+    if not ctx.attr.analyze_size:
+        return None
+    if ctx.var.get("COMPILATION_MODE") == "dbg":
+        fail("%s: analyze_size is not supported in debug mode: gen_snapshot does not run in debug mode" % ctx.label)
+    if "analyze_size" not in output_groups:
+        return None
+    size_list = output_groups["analyze_size"].to_list()
+    if not size_list:
+        return None
+    apk_size = ctx.actions.declare_file(ctx.label.name + "_size.json")
+    ctx.actions.symlink(output = apk_size, target_file = size_list[0])
+    output_groups["analyze_size"] = depset([apk_size])
+    return apk_size
+
+def _build_proxy_providers(ctx, binary, default_files, output_groups):
+    """Builds the provider list returned by the proxy rule.
+
+    Args:
+        ctx: Rule context.
+        binary: The inner binary target.
+        default_files: List of default output files.
+        output_groups: Dict of forwarded output groups.
+
+    Returns:
+        List of providers.
+    """
     binary_default = binary[DefaultInfo]
     default_runfiles = binary_default.default_runfiles.merge(
-        ctx.runfiles(files = [apk]),
+        ctx.runfiles(files = default_files),
     )
-    if binary_default.data_runfiles:
-        data_runfiles = binary_default.data_runfiles.merge(
-            ctx.runfiles(files = [apk]),
-        )
-    else:
-        data_runfiles = default_runfiles
-
+    data_runfiles = (
+        binary_default.data_runfiles.merge(ctx.runfiles(files = default_files))
+        if binary_default.data_runfiles
+        else default_runfiles
+    )
     providers = [
         DefaultInfo(
-            files = depset([apk]),
+            files = depset(default_files),
             default_runfiles = default_runfiles,
             data_runfiles = data_runfiles,
         ),
         binary[ApkInfo],
         binary[JavaInfo],
     ]
-    if OutputGroupInfo in binary:
-        providers.append(binary[OutputGroupInfo])
-    if AndroidFeatureFlagSet in binary:
-        providers.append(binary[AndroidFeatureFlagSet])
-    if StarlarkApkInfo in binary:
-        providers.append(binary[StarlarkApkInfo])
-    if AndroidInstrumentationInfo in binary:
-        providers.append(binary[AndroidInstrumentationInfo])
+    if output_groups:
+        providers.append(OutputGroupInfo(**output_groups))
+    for prov in (AndroidFeatureFlagSet, StarlarkApkInfo, AndroidInstrumentationInfo):
+        if prov in binary:
+            providers.append(binary[prov])
     return providers
+
+def _flutter_android_binary_proxy_impl(ctx):
+    """Builds the proxy rule forwarding providers and signed APK.
+
+    Args:
+        ctx: Rule context.
+
+    Returns:
+        List of providers forwarded from the inner binary.
+    """
+    binary = ctx.attr.binary[0]
+    signed_apk = binary[ApkInfo].signed_apk
+
+    apk = ctx.actions.declare_file(ctx.label.name + ".apk")
+    ctx.actions.symlink(output = apk, target_file = signed_apk)
+
+    default_files = [apk]
+    output_groups = _collect_proxy_output_groups(binary)
+    apk_size = _handle_proxy_analyze_size(ctx, output_groups)
+    if apk_size:
+        default_files.append(apk_size)
+
+    return _build_proxy_providers(ctx, binary, default_files, output_groups)
 
 flutter_android_binary_proxy = rule(
     implementation = _flutter_android_binary_proxy_impl,
     attrs = {
+        "analyze_size": attr.bool(
+            doc = "Whether to expose instructions-size JSON in default outputs and analyze_size group.",
+            default = False,
+        ),
         "binary": attr.label(
             doc = "The APK target built behind this proxy (the apk overlay), in pure-Go configuration.",
             mandatory = True,
@@ -117,3 +203,56 @@ testing = struct(
     pure_go_transition_impl = _pure_go_transition_impl,
     pure_go_transition = flutter_android_pure_go_transition,
 )
+
+def overlay_output_groups(base_groups, deploy_info, merged_manifest):
+    """Forwards the base output groups, replacing android_deploy_info.
+
+    The fresh group is overlay-owned: the freshly written deploy_info pointing
+    at the overlay signed APK, paired with the merged manifest.
+
+    Args:
+        base_groups: The OutputGroupInfo from the base binary.
+        deploy_info: The regenerated deploy_info file.
+        merged_manifest: The merged manifest file.
+
+    Returns:
+        Dict of output group names to depsets.
+    """
+    group_kwargs = _extract_depset_output_groups(base_groups, exclude = ("android_deploy_info",))
+    group_kwargs["android_deploy_info"] = depset([deploy_info, merged_manifest])
+    return group_kwargs
+
+def build_overlay_kwargs(apk, passthrough):
+    """Collects kwargs for flutter_android_apk_overlay from apk struct and passthrough attrs.
+
+    Args:
+        apk: Struct containing apk options and signing settings.
+        passthrough: Dict of passthrough attributes (compatible_with, restricted_to, testonly).
+
+    Returns:
+        Dict of kwargs for flutter_android_apk_overlay.
+    """
+    overlay_kwargs = {}
+    for key in (
+        "debug_key",
+        "debug_signing_keys",
+        "debug_signing_lineage_file",
+        "key_rotation_min_sdk",
+        "zipalign_alignment",
+    ):
+        if key in apk.kwargs:
+            overlay_kwargs[key] = apk.kwargs[key]
+    if apk.nocompress_extensions != None:
+        overlay_kwargs["nocompress_extensions"] = apk.nocompress_extensions
+    for key, value in (
+        ("keystore", apk.signing.keystore),
+        ("keystore_password_file", apk.signing.keystore_password_file),
+        ("key_alias", apk.signing.key_alias),
+        ("key_password_file", apk.signing.key_password_file),
+    ):
+        if value != None:
+            overlay_kwargs[key] = value
+    for key in ("compatible_with", "restricted_to", "testonly"):
+        if key in passthrough:
+            overlay_kwargs[key] = passthrough[key]
+    return overlay_kwargs

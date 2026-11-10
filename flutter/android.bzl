@@ -60,8 +60,16 @@ load(
     _flutter_android_apk_overlay = "flutter_android_apk_overlay",
     _overlay_signing_select = "overlay_signing_select",
 )
-load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
-load("//flutter/private:flutter_android_binary_proxy.bzl", _flutter_android_binary_proxy = "flutter_android_binary_proxy")
+load(
+    "//flutter/private:flutter_android_application.bzl",
+    _android_internal_tags = "android_internal_tags",
+    _flutter_android_bundle = "flutter_android_bundle",
+)
+load(
+    "//flutter/private:flutter_android_binary_proxy.bzl",
+    _build_overlay_kwargs = "build_overlay_kwargs",
+    _flutter_android_binary_proxy = "flutter_android_binary_proxy",
+)
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
 load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_plugins_aggregator = "flutter_android_plugins_aggregator", _flutter_android_registrant = "flutter_android_registrant")
@@ -499,21 +507,7 @@ def _variant_overlay(name, variant, manifest, base_manifest):
 
 # -- Convenience macro (Tier 1) -----------------------------------------------
 
-def _android_internal_tags(tags):
-    """Keeps internal targets out of wildcard builds behind the pure-Go proxy.
-
-    Behind the proxy's pure-Go transition internal targets would otherwise
-    build the whole Android subtree a second time in the plain
-    configuration. The default tags already carry "manual"; re-add it when
-    the caller overrides tags. The user-facing proxy keeps the caller's tags
-    verbatim.
-    """
-    internal_tags = list(tags) if tags else []
-    if "manual" not in internal_tags:
-        internal_tags.append("manual")
-    return internal_tags
-
-def _android_bundle_and_engine(name, application, android_abi, internal_tags):
+def _android_bundle_and_engine(name, application, android_abi, internal_tags, analyze_size = False):
     """Emits the bundle, native-libs wiring, engine and overlay-assets targets."""
 
     # 1. Bundle Flutter outputs (native_libs.jar + flutter_assets).
@@ -521,8 +515,17 @@ def _android_bundle_and_engine(name, application, android_abi, internal_tags):
         name = "__%s_bundle" % name,
         application = application,
         android_abi = _short_abi_to_full(android_abi),
+        analyze_size = analyze_size,
         tags = internal_tags,
     )
+
+    if analyze_size:
+        native.filegroup(
+            name = "__%s_size_json" % name,
+            srcs = ["__%s_bundle" % name],
+            output_group = "analyze_size",
+            tags = internal_tags,
+        )
 
     # 2. Extract native_libs.jar from the bundle.
     native.filegroup(
@@ -781,28 +784,9 @@ def _android_binary_and_overlay(name, binary_deps, deps, apk):
     # @rules_android//flags:apk_signing_method so the overlay signs exactly
     # like the binary would have. Signing/alignment overrides passed for the
     # binary apply to the overlay too.
-    overlay_kwargs = {}
-    for key in ("debug_key", "debug_signing_keys", "debug_signing_lineage_file", "key_rotation_min_sdk", "zipalign_alignment"):
-        if key in apk.kwargs:
-            overlay_kwargs[key] = apk.kwargs[key]
-    if apk.nocompress_extensions != None:
-        overlay_kwargs["nocompress_extensions"] = apk.nocompress_extensions
-    for key, value in (
-        ("keystore", apk.signing.keystore),
-        ("keystore_password_file", apk.signing.keystore_password_file),
-        ("key_alias", apk.signing.key_alias),
-        ("key_password_file", apk.signing.key_password_file),
-    ):
-        if value != None:
-            overlay_kwargs[key] = value
-
-    # L-1: the overlay is the target users actually build, so it must carry
-    # the same testonly/compatible_with/restricted_to as the user-facing
-    # proxy — otherwise a testonly app's APK would be buildable from
-    # non-testonly targets, or a constrained app from anywhere.
-    for key in ("compatible_with", "restricted_to", "testonly"):
-        if key in passthrough:
-            overlay_kwargs[key] = passthrough[key]
+    overlay_kwargs = _build_overlay_kwargs(apk, passthrough)
+    if apk.analyze_size:
+        overlay_kwargs["size_json"] = ":__%s_size_json" % name
     _flutter_android_apk_overlay(
         name = "__%s_overlay" % name,
         binary = "__%s_binary" % name,
@@ -815,11 +799,14 @@ def _android_binary_and_overlay(name, binary_deps, deps, apk):
 
     # The user-facing target: same providers and the same `<name>.apk` output
     # as the android_binary used to be, with pure Go scoped to its subtree.
+    proxy_kwargs = dict(passthrough)
+    if apk.analyze_size:
+        proxy_kwargs["analyze_size"] = True
     _flutter_android_binary_proxy(
         name = name,
         binary = ":__%s_overlay" % name,
         tags = apk.tags,
-        **passthrough
+        **proxy_kwargs
     )
 
 def flutter_android_app(
@@ -842,6 +829,7 @@ def flutter_android_app(
         keystore_password_file = None,
         key_alias = None,
         key_password_file = None,
+        analyze_size = False,
         **kwargs):
     """Builds a Flutter Android APK from a flutter_application target.
 
@@ -1008,6 +996,10 @@ def flutter_android_app(
             through `--key-pass file:<path>`. When unset, `--key-pass` is
             omitted and apksigner unlocks the key with the keystore password;
             the same first-line-and-newline rule applies when it is set.
+        analyze_size: Whether to emit an instructions-size JSON (<name>_size.json)
+            from gen_snapshot and expose it in default outputs and the
+            analyze_size output group. Works in release and profile modes;
+            fails analysis in debug mode.
         **kwargs: Passed through to android_binary.
     """
     display_name = app_name or name
@@ -1016,7 +1008,7 @@ def flutter_android_app(
 
     # -- Internal targets (all __{name}_ prefixed) --
 
-    _android_bundle_and_engine(name, application, android_abi, internal_tags)
+    _android_bundle_and_engine(name, application, android_abi, internal_tags, analyze_size = analyze_size)
 
     # 6. Auto-wire the plugin registrant.
     #
@@ -1093,6 +1085,7 @@ def flutter_android_app(
         actual_manifest = actual_manifest,
         resources = resources,
         nocompress_extensions = nocompress_extensions,
+        analyze_size = analyze_size,
         tags = tags,
         internal_tags = internal_tags,
         kwargs = kwargs,
