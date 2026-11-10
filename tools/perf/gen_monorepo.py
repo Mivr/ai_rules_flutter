@@ -60,7 +60,15 @@ import shutil
 import sys
 from typing import NamedTuple, Optional
 
+from gen_edits import (
+    EDIT_MANIFEST_REL_PATH,
+    apply_api_edit,
+    apply_app_edit,
+    apply_body_edit,
+)
 from gen_files import write_plain
+from gen_plugins import add_plugins
+from gen_scale_args import resolve_scale_args
 from gen_platform_apps import (
     write_android_scaffolding,
     write_app_build,
@@ -70,7 +78,6 @@ from gen_pub import copy_pub_and_lock_files
 MASK64 = (1 << 64) - 1
 
 STATS_REL_PATH = "bench-workspace-stats.json"
-EDIT_MANIFEST_REL_PATH = "bench-edit-manifest.json"
 
 DEFAULT_LAYERS = 8
 DEFAULT_FANOUT = 4
@@ -639,6 +646,9 @@ def render_app_main(top_layer):
 
 
 class Options:
+    # Exact package count (`--packages`); None derives it from target_loc.
+    packages = None
+
     def __init__(
         self,
         target_loc,
@@ -781,6 +791,9 @@ def tune_plan_to_target(opts, plan):
 
 
 def select_package_count(opts):
+    if opts.packages is not None:
+        plan = MonorepoPlan(opts, opts.packages)
+        return (plan, tune_plan_to_target(opts, plan))
     n = max(1, opts.target_loc // (opts.files_per_package * 125))
     seen = set()
     for _ in range(10):
@@ -1569,7 +1582,7 @@ def generate_flutter_monorepo(out_dir, rules_flutter_dir, overrides, opts):
 
     lo = int(opts.target_loc * (1.0 - LOC_TOLERANCE))
     hi = int(opts.target_loc * (1.0 + LOC_TOLERANCE))
-    if tally["lines"] < lo or tally["lines"] > hi:
+    if opts.packages is None and not lo <= tally["lines"] <= hi:
         raise ValueError(
             "flutter-monorepo generated %d lines for target_loc %d "
             "(outside +/-%d%%)"
@@ -1589,97 +1602,6 @@ def generate_flutter_monorepo(out_dir, rules_flutter_dir, overrides, opts):
 
 
 # --------------------------------------------------------------------------
-# Edits.
-
-
-def resolve_edit_path(workspace_dir, key):
-    """Manifest edit target, validated (relative, contained, Dart, exists)."""
-    manifest_path = os.path.join(workspace_dir, EDIT_MANIFEST_REL_PATH)
-    with open(manifest_path, encoding="utf-8") as fh:
-        manifest = json.load(fh)
-    rel = manifest.get(key)
-    if not rel:
-        raise ValueError(
-            "edit manifest '%s' is missing required key '%s'"
-            % (manifest_path, key))
-    if os.path.isabs(rel):
-        raise ValueError("edit manifest has an absolute '%s' path" % key)
-    if ".." in rel.split(os.sep):
-        raise ValueError("edit manifest has an escaping '%s' path" % key)
-    if not rel.endswith(".dart"):
-        raise ValueError("edit manifest has a non-Dart '%s' path" % key)
-    full = os.path.join(workspace_dir, rel)
-    if not os.path.isfile(full):
-        raise ValueError("edit manifest '%s' target '%s' does not exist"
-                         % (key, full))
-    return full
-
-
-def apply_body_edit(workspace_dir, key="body_edit"):
-    """Body-only edit keeping the public API (kernel outline) unchanged."""
-    path = resolve_edit_path(workspace_dir, key)
-    with open(path, encoding="utf-8") as fh:
-        original = fh.read()
-    if "i * 1]" in original:
-        edited = original.replace("i * 1]", "i * 1 + 0]", 1)
-    elif "var total = 1;" in original:
-        edited = original.replace("var total = 1;", "var total = 2;", 1)
-    elif "return " in original:
-        pos = original.rfind("return ")
-        edited = original[:pos] + "final _ = 0;\n  " + original[pos:]
-    else:
-        raise ValueError("unable to apply body-only edit to '%s'" % path)
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(edited)
-    return original
-
-
-def apply_api_edit(workspace_dir, key="api_edit"):
-    """Public API edit (adding a member), changing the kernel outline."""
-    path = resolve_edit_path(workspace_dir, key)
-    with open(path, encoding="utf-8") as fh:
-        original = fh.read()
-    if "  /// The value.\n" in original:
-        edited = original.replace(
-            "  /// The value.\n",
-            "  /// Added API.\n  int get extra => 1;\n\n  /// The value.\n",
-            1)
-    else:
-        edited = original + "\n/// Added API.\nint addedApi0x0() => 1;\n"
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(edited)
-    return original
-
-
-def apply_app_edit(workspace_dir):
-    """Behaviour-changing top-layer edit of the bench application.
-
-    Bumps the first wired widget's displayed value, changing what the app
-    renders without touching any package API.
-    """
-    path = os.path.join(workspace_dir, "app", "lib", "main.dart")
-    with open(path, encoding="utf-8") as fh:
-        original = fh.read()
-    marker = "W"
-    idx = original.find("              W")
-    if idx < 0:
-        raise ValueError(
-            "unable to apply app edit: no wired widget in '%s'" % path)
-    end = original.find("),", idx)
-    if end < 0:
-        raise ValueError(
-            "unable to apply app edit: malformed widget line in '%s'" % path)
-    line = original[idx:end]
-    if marker not in line or "value" not in line:
-        raise ValueError(
-            "unable to apply app edit: unexpected widget line in '%s'" % path)
-    edited = original[:end] + " + 1" + original[end:]
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(edited)
-    return original
-
-
-# --------------------------------------------------------------------------
 # CLI.
 
 
@@ -1689,9 +1611,17 @@ def build_parser():
     sub = parser.add_subparsers(dest="command", required=True)
 
     gen = sub.add_parser("generate", help="generate a workspace")
-    gen.add_argument("--target-loc", type=int, required=True)
-    gen.add_argument("--layers", type=int, default=DEFAULT_LAYERS)
-    gen.add_argument("--fanout", type=int, default=DEFAULT_FANOUT)
+    gen.add_argument("--target-loc", type=int, default=None,
+                     help="required unless --packages derives it")
+    gen.add_argument("--layers", type=int, default=None,
+                     help="layer count (default %d)" % DEFAULT_LAYERS)
+    gen.add_argument("--fanout", type=int, default=None,
+                     help="direct deps per package (default %d)"
+                     % DEFAULT_FANOUT)
+    gen.add_argument("--packages", type=int, default=None,
+                     help="exact package count; picks layers and fanout")
+    gen.add_argument("--plugins", type=int, default=0,
+                     help="native plugin packages (all three kinds)")
     gen.add_argument("--files-per-package", type=int,
                      default=DEFAULT_FILES_PER_PACKAGE)
     gen.add_argument("--seed", type=int, default=1)
@@ -1720,6 +1650,8 @@ def main(argv=None):
                 raise ValueError(
                     "--override must be NAME=PATH, got '%s'" % item)
             overrides.append((name, path))
+        packages, plugins = resolve_scale_args(
+            parser, args, (DEFAULT_LAYERS, DEFAULT_FANOUT))
         opts = Options(
             target_loc=args.target_loc,
             layers=args.layers,
@@ -1729,8 +1661,14 @@ def main(argv=None):
             test_ratio=args.test_ratio,
             edit_layer=args.edit_layer,
         )
+        opts.packages = packages
         stats = generate_flutter_monorepo(
             args.out, args.rules_flutter, overrides, opts)
+        if plugins:
+            stats.update(add_plugins(
+                args.out, plugins, SplitMix64((args.seed ^ 0xB1A57) & MASK64)))
+            write_plain(args.out, STATS_REL_PATH,
+                        json.dumps(stats, indent=2) + "\n")
         print(json.dumps(stats, indent=2))
     elif args.command == "apply-body-edit":
         apply_body_edit(args.workspace)
