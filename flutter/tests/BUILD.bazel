@@ -10,6 +10,7 @@ load(":aot_flags_test.bzl", "aot_flags_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_objc_deps_test.bzl", "apple_objc_deps_test_suite")
 load(":apple_private_headers_test.bzl", "apple_private_headers_test_suite")
+load(":apple_shared_engine_test.bzl", "apple_shared_engine_test_suite")
 load(":architecture_fixtures.bzl", "architecture_fixtures")
 load(":artifact_urls_test.bzl", "artifact_urls_test_suite")
 load(":asset_bundle_test.bzl", "asset_bundle_test_suite")
@@ -526,6 +527,8 @@ app_entrypoint_test_suite(name = "app_entrypoint_test")
 apple_objc_deps_test_suite(name = "apple_objc_deps_test")
 
 apple_private_headers_test_suite(name = "apple_private_headers_test")
+
+apple_shared_engine_test_suite(name = "apple_shared_engine_test")
 
 pub_lock_sdks_test_suite(name = "pub_lock_sdks_test")
 

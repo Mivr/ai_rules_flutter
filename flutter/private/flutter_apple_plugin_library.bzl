@@ -116,43 +116,53 @@ def _emit_xtool_plugin_branch(spec):
         sdk_frameworks = spec.sdk_frameworks,
         weak_sdk_frameworks = spec.weak_sdk_frameworks,
         sdk_dylibs = spec.sdk_dylibs,
-        deps = [":" + spec.framework_target] + spec.deps,
+        deps = [spec.framework_dep] + spec.deps,
         plugin_defines = spec.plugin_defines,
         tags = spec.tags,
         target_compatible_with = spec.target_compatible_with,
         visibility = spec.visibility,
     )
 
-def _emit_apple_framework_import(spec):
-    """Emit the Flutter engine framework import target for the `rules_apple` backend.
+def _emit_apple_engine_framework(name, platform, imports, visibility):
+    """Emit the engine import `name` + "_raw" and its module-map wrapper `name`."""
 
-    The raw import is wrapped so its `Modules/module.modulemap` reaches
-    `CcInfo` headers and `@import Flutter;` resolves in a sandboxed compile.
-    """
-    raw = "%s_raw" % spec.framework_target
-    if spec.platform == "macos":
-        apple_dynamic_framework_import(
-            name = raw,
-            framework_imports = spec.engine_imports,
-            tags = spec.internal_tags,
-            target_compatible_with = spec.target_compatible_with,
-            visibility = ["//visibility:private"],
-        )
-    else:
-        apple_dynamic_xcframework_import(
-            name = raw,
-            xcframework_imports = spec.engine_imports,
-            tags = spec.internal_tags,
-            target_compatible_with = spec.target_compatible_with,
-            visibility = ["//visibility:private"],
-        )
-    apple_framework_modulemap_import(
-        name = spec.framework_target,
-        dep = ":" + raw,
-        tags = spec.internal_tags,
-        target_compatible_with = spec.target_compatible_with,
+    # The wrapper puts `Modules/module.modulemap` into `CcInfo` headers so
+    # `@import Flutter;` resolves in a sandboxed compile.
+    compatible = ["@platforms//os:%s" % platform]
+    macos = platform == "macos"
+    (apple_dynamic_framework_import if macos else apple_dynamic_xcframework_import)(
+        name = name + "_raw",
+        tags = ["manual"],
+        target_compatible_with = compatible,
         visibility = ["//visibility:private"],
+        **{"framework_imports" if macos else "xcframework_imports": imports}
     )
+    apple_framework_modulemap_import(
+        name = name,
+        dep = ":" + name + "_raw",
+        tags = ["manual"],
+        target_compatible_with = compatible,
+        visibility = visibility,
+    )
+
+def apple_engine_framework_targets(name):
+    """Declare the `<name>_ios` and `<name>_macos` engine wrappers every Apple plugin shares."""
+    for platform in ("ios", "macos"):
+        _emit_apple_engine_framework(
+            "%s_%s" % (name, platform),
+            platform,
+            _apple_plugin_engine_imports(platform, None),
+            ["//visibility:public"],
+        )
+
+def _engine_framework_dep(platform, engine):
+    """The shared wrapper label for `platform`; an `engine` override gets one per package and label."""
+    if engine == None:
+        return str(Label("//flutter/private:apple_engine_framework_" + platform))
+    name = "_flutter_framework_" + "".join([c if c.isalnum() else "_" for c in str(engine).elems()])
+    if not native.existing_rule(name):
+        _emit_apple_engine_framework(name, platform, [engine], ["//visibility:private"])
+    return ":" + name
 
 def _emit_plugin_objc_target(spec, objc_files, layout):
     """Emit the inner `objc_library`; return `(objc_module_name, dep_label_or_None)`."""
@@ -169,7 +179,7 @@ def _emit_plugin_objc_target(spec, objc_files, layout):
         module_name = objc_module_name,
         enable_modules = True,
         copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
-        deps = [":" + spec.framework_target] + list(spec.deps),
+        deps = [spec.framework_dep] + list(spec.deps),
         implementation_deps = emit_plugin_private_header_dirs(spec, layout.search),
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
@@ -191,7 +201,7 @@ def _emit_plugin_objc_module_target(spec, headers):
         includes = spec.includes,
         module_name = "%s_objc" % spec.module_name,
         enable_modules = True,
-        deps = [":" + spec.framework_target],
+        deps = [spec.framework_dep],
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
         visibility = ["//visibility:private"],
@@ -218,7 +228,7 @@ def _emit_plugin_mixed_objc_target(spec, objc_files, layout, swift_deps):
         linkopts = _sdk_link_opts(spec.sdk_frameworks, spec.weak_sdk_frameworks, spec.sdk_dylibs),
         enable_modules = True,
         copts = plugin_objc_copts(spec.copts, spec.objc_copts, spec.plugin_defines),
-        deps = [":" + spec.framework_target] + swift_deps,
+        deps = [spec.framework_dep] + swift_deps,
         implementation_deps = emit_plugin_private_header_dirs(spec, layout.search),
         tags = spec.internal_tags,
         target_compatible_with = spec.target_compatible_with,
@@ -341,7 +351,7 @@ def _emit_mixed_plugin(spec, swift_files, objc_files, layout, kwargs):
     bridging_header, extra_copts = _plugin_bridging_copts(spec, layout.all)
 
     swift_target = "_%s__swift" % spec.name
-    swift_deps = [":" + spec.framework_target, objc_module] + list(spec.deps)
+    swift_deps = [spec.framework_dep, objc_module] + list(spec.deps)
     _emit_plugin_swift_target(
         spec,
         swift_target,
@@ -444,16 +454,7 @@ def flutter_apple_plugin_objc_library(
     if settings == None:
         settings = flutter_apple_plugin_objc_settings()
     target_compatible_with = ["@platforms//os:%s" % platform]
-    framework_target = "_%s__flutter_framework" % name
-    spec = struct(
-        framework_target = framework_target,
-        platform = platform,
-        engine_imports = _apple_plugin_engine_imports(platform, None),
-        internal_tags = ["manual"],
-        target_compatible_with = target_compatible_with,
-    )
-    _emit_apple_framework_import(spec)
-    objc_deps = [":" + framework_target] + deps
+    objc_deps = [_engine_framework_dep(platform, None)] + deps
     private_target = "_%s__private_headers" % name
     implementation_deps = []
     private_includes = settings.private_includes
@@ -526,13 +527,12 @@ def _emit_rules_apple_plugin(spec, extra_attrs):
     """Emit the `rules_apple` target graph for a plugin library."""
     swift_files, objc_files, headers = _split_srcs(spec.srcs)
     layout = plugin_header_layout(headers, objc_files, spec.includes)
-    _emit_apple_framework_import(spec)
 
     if swift_files and objc_files:
         _emit_mixed_plugin(spec, swift_files, objc_files, layout, extra_attrs)
         return
 
-    swift_deps = [":" + spec.framework_target] + spec.deps
+    swift_deps = [spec.framework_dep] + spec.deps
 
     objc_module_name, objc_dep = _emit_plugin_objc_target(spec, objc_files, layout)
     if objc_dep:
@@ -629,6 +629,8 @@ def flutter_apple_plugin_library(
         ["@platforms//os:%s" % platform],
     )
 
+    xtool = backend == "xtool"
+    framework_dep = ":_%s__flutter_framework" % name if xtool else _engine_framework_dep(platform, engine)
     spec = struct(
         name = name,
         srcs = srcs,
@@ -644,13 +646,14 @@ def flutter_apple_plugin_library(
         sdk_dylibs = sdk_dylibs,
         engine_imports = _apple_plugin_engine_imports(platform, engine),
         framework_target = "_%s__flutter_framework" % name,
+        framework_dep = framework_dep,
         internal_tags = internal_tags,
         target_compatible_with = target_compatible_with,
         visibility = visibility,
         tags = tags,
     )
 
-    if backend == "xtool":
+    if xtool:
         _emit_xtool_plugin_branch(spec)
     else:
         _emit_rules_apple_plugin(spec, kwargs)

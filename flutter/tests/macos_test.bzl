@@ -1411,8 +1411,6 @@ def _apple_surface_tests(name):
         reg_name: "flutter_macos_registrant",
         "_" + runner_name + "__apple_plugins_aggregator": "flutter_apple_plugins_aggregator",
         runner_name: "swift_library",
-        "_" + plugin_name + "__flutter_framework": "apple_framework_modulemap_import",
-        "_" + plugin_name + "__flutter_framework_raw": "apple_dynamic_framework_import",
         plugin_name: "swift_library",
         "__" + app_name + "_registrant": "flutter_macos_registrant",
         "__" + app_name + "_app_framework": "flutter_macos_framework",
