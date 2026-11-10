@@ -47,7 +47,7 @@ load(
 )
 load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag", "validate_swift_package_product_deps")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
-load("//flutter/private:flutter_sdk_package.bzl", "flutter_sdk_package")
+load("//flutter/private:flutter_sdk_package.bzl", "declare_sdk_source", "declare_sdk_spokes")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256", "parse_lock_sdk_constraints", "version_below_lower_bound")
 load("//flutter/private:rules_dart_floor.bzl", "check_rules_dart_floor")
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_package")
@@ -325,7 +325,7 @@ def _register_local_toolchain(name, local_path, lock_flutter_constraints, darwin
         hub_name = "gen_l10n_deps",
         local_path = local_path,
     )
-    return struct(version = "", local_path = local_path)
+    return struct(version = "", local_path = local_path, source_label = "")
 
 def _register_download_toolchain(name, selected, merged, darwin_sdk, llvm_tool_repos):
     """Registers one downloaded toolchain and its gen-l10n repo."""
@@ -350,19 +350,23 @@ def _register_download_toolchain(name, selected, merged, darwin_sdk, llvm_tool_r
         darwin_sdk_llvm_tool_repos = llvm_tool_repos,
     )
 
-    # The gen-l10n generator, carved out of the same release's
-    # flutter_tools. Declared unconditionally because bzlmod repositories
-    # are lazy: a workspace that never references `@{name}_gen_l10n` never
-    # fetches the tarball, the same way gen_snapshot repos work.
+    # One extraction of the release's source tarball, shared by every SDK
+    # package spoke and the gen-l10n generator carved out of its flutter_tools.
+    # Declared unconditionally because bzlmod repositories are lazy: a
+    # workspace that never references them never fetches the tarball.
+    source_label = declare_sdk_source(
+        name,
+        selected,
+        flutter_source_sha256(selected, merged.versions),
+        version_source_url,
+    )
     flutter_gen_l10n_repo(
         name = name + "_gen_l10n",
         flutter_version = selected,
-        sha256 = flutter_source_sha256(selected, merged.versions),
+        sdk_source = source_label,
         hub_name = "gen_l10n_deps",
-        source_url = version_source_url,
-        source_strip_prefix = source_strip_prefix(selected, version_source_url),
     )
-    return struct(version = selected, local_path = "")
+    return struct(version = selected, local_path = "", source_label = source_label)
 
 def _register_all_toolchains(module_ctx, registrations, merged, lock_flutter_constraints, darwin_sdk):
     """Registers every requested toolchain; returns name → selected info."""
@@ -647,40 +651,13 @@ def _create_path_spokes(plan, path_pkgs, user_overlay_roots, pub_tag, ignore_hoo
                 android_maven_ignore = maven.ignore,
             )
 
-def _create_sdk_spokes(plan, sdk_flutter, toolchain_info, merged, flutter_version):
+def _create_sdk_spokes(plan, sdk_flutter, toolchain_info):
     """Creates one `flutter_sdk_package` spoke per Flutter SDK package.
 
-    In download mode each pins the same framework source tarball, so the
-    checksum is read once here for all of them; custom-source overrides
-    travel with the release. In local mode each symlinks the package out
-    of the local SDK tree instead.
+    A downloaded version's spokes all link into the toolchain's one shared
+    source extraction; a local SDK's symlink the package out of the local tree.
     """
-    hub_name = plan.hub_name
-    if toolchain_info.local_path:
-        for name in sdk_flutter.keys():
-            flutter_sdk_package(
-                name = hub_name + "__" + name,
-                package_name = name,
-                local_path = toolchain_info.local_path,
-                hub_name = hub_name,
-                lock_packages = plan.all_package_names,
-                scc_targets = plan.scc_targets,
-            )
-        return
-    sdk_source_sha256 = flutter_source_sha256(flutter_version, merged.versions)
-    sdk_source_url = custom_source_url(flutter_version, merged.source_urls)
-    for name in sdk_flutter.keys():
-        flutter_sdk_package(
-            name = hub_name + "__" + name,
-            package_name = name,
-            flutter_version = flutter_version,
-            sha256 = sdk_source_sha256,
-            hub_name = hub_name,
-            lock_packages = plan.all_package_names,
-            scc_targets = plan.scc_targets,
-            source_url = sdk_source_url,
-            source_strip_prefix = source_strip_prefix(flutter_version, sdk_source_url),
-        )
+    declare_sdk_spokes(plan, sdk_flutter.keys(), toolchain_info)
 
 def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
     """Creates one `swiftpm_package` spoke per SwiftPM pin.
@@ -745,7 +722,7 @@ def _create_swiftpm_spokes(hub_name, pub_tag, module_ctx):
         )
     return
 
-def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_roots, facts_state):
+def _register_pub_hub(module_ctx, pub_tag, selected_info, user_overlay_roots, facts_state):
     """Resolves one `flutter.pub` tag into spoke repos plus the hub repo."""
     hub_name = pub_tag.name
     podfile, lock_label = read_hub_podfile_lock(module_ctx, pub_tag)
@@ -802,7 +779,7 @@ def _register_pub_hub(module_ctx, pub_tag, selected_info, merged, user_overlay_r
     _create_hosted_spokes(plan, hosted, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
     _create_path_spokes(plan, path_pkgs, user_overlay_roots, pub_tag, ignore_hooks, module_ctx)
     create_scc_spokes(plan, hosted, path_pkgs, user_overlay_roots, pub_tag)
-    _create_sdk_spokes(plan, sdk_flutter, toolchain_info, merged, toolchain_info.version)
+    _create_sdk_spokes(plan, sdk_flutter, toolchain_info)
 
 def _overlay_roots_of_module(mod):
     """Overlay roots one module declares, in tag order."""
@@ -851,7 +828,6 @@ def _toolchain_extension(module_ctx):
                 module_ctx,
                 pub_tag,
                 selected_info,
-                merged,
                 hub_overlay_roots(root_overlay_roots, _overlay_roots_of_module(mod), mod.is_root),
                 facts_state,
             )

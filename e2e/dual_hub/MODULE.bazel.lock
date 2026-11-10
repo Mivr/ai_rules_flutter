@@ -11371,7 +11371,7 @@
     },
     "@@ai_rules_flutter+//flutter:extensions.bzl%flutter": {
       "general": {
-        "bzlTransitiveDigest": "F+1S93TsxOY8I6/gQpoYYiyxfX5ysaWQwkeKz76GCcY=",
+        "bzlTransitiveDigest": "/RbmgybqSwOocaYUeZ4OlgHeFgw1S2aHdG1+XfN5e/E=",
         "usagesDigest": "fc6GUjgIpEIXwOUg59AArvdxxBjx/atWVFfSC3f6gVU=",
         "recordedInputs": [
           "REPO_MAPPING:ai_rules_dart+,dart_pub_scanner ai_rules_dart++dart+dart_pub_scanner",
@@ -12403,14 +12403,31 @@
               "build_file_content": "load(\"@rules_flutter//flutter/private:flutter_android_engine_jar.bzl\", \"flutter_android_engine_jar\")\n\nexports_files([\"flutter.jar\"], visibility = [\"//visibility:public\"])\n\nflutter_android_engine_jar(\n    name = \"stripped\",\n    jar = \"flutter.jar\",\n    android_abi = \"x86_64\",\n    visibility = [\"//visibility:public\"],\n)\n"
             }
           },
+          "flutter_ios_engine_release": {
+            "repoRuleId": "@@ai_rules_flutter+//flutter/private:flutter_ios_engine_repo.bzl%flutter_ios_engine_mode_repo",
+            "attributes": {
+              "mode": "release",
+              "engine_revision": "deb287481e3ce9468f3434937ced4240a70539ca",
+              "engine_base_url": "",
+              "sha256": "3e3e5a772ca311074aaca857dba5cc1f253f3568242debcf07840c75b897584f",
+              "local_path": ""
+            }
+          },
+          "flutter_ios_engine_debug": {
+            "repoRuleId": "@@ai_rules_flutter+//flutter/private:flutter_ios_engine_repo.bzl%flutter_ios_engine_mode_repo",
+            "attributes": {
+              "mode": "debug",
+              "engine_revision": "deb287481e3ce9468f3434937ced4240a70539ca",
+              "engine_base_url": "",
+              "sha256": "536f7df16f472b13d58354da464b47191b44215660a797d217fe8eaf557a8f58",
+              "local_path": ""
+            }
+          },
           "flutter_ios_engine": {
             "repoRuleId": "@@ai_rules_flutter+//flutter/private:flutter_ios_engine_repo.bzl%flutter_ios_engine_repo",
             "attributes": {
-              "engine_revision": "deb287481e3ce9468f3434937ced4240a70539ca",
-              "engine_base_url": "",
-              "release_sha256": "3e3e5a772ca311074aaca857dba5cc1f253f3568242debcf07840c75b897584f",
-              "debug_sha256": "536f7df16f472b13d58354da464b47191b44215660a797d217fe8eaf557a8f58",
-              "profile_repo_name": "flutter_ios_engine_profile"
+              "release_repo": "flutter_ios_engine_release",
+              "debug_repo": "flutter_ios_engine_debug"
             }
           },
           "flutter_ios_engine_profile": {
@@ -12461,14 +12478,21 @@
               "user_repository_name": "flutter"
             }
           },
+          "flutter_sdk_source": {
+            "repoRuleId": "@@ai_rules_flutter+//flutter/private:flutter_sdk_package.bzl%flutter_sdk_source_repo",
+            "attributes": {
+              "flutter_version": "3.47.7",
+              "sha256": "3bf237d76744f452aee98fc21962c6fc1481345e474c04e6ebdac8eb436364a8",
+              "source_url": "",
+              "source_strip_prefix": "flutter-3.47.7/"
+            }
+          },
           "flutter_gen_l10n": {
             "repoRuleId": "@@ai_rules_flutter+//flutter/private:flutter_gen_l10n_repo.bzl%flutter_gen_l10n_repo",
             "attributes": {
               "flutter_version": "3.47.7",
-              "sha256": "3bf237d76744f452aee98fc21962c6fc1481345e474c04e6ebdac8eb436364a8",
-              "hub_name": "gen_l10n_deps",
-              "source_url": "",
-              "source_strip_prefix": "flutter-3.47.7/"
+              "sdk_source": "@@ai_rules_flutter++flutter+flutter_sdk_source//:BUILD.bazel",
+              "hub_name": "gen_l10n_deps"
             }
           },
           "hub_a": {

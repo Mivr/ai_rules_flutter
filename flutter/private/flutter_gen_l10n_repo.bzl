@@ -4,7 +4,7 @@
 is a command inside `flutter_tools`, which the rules deliberately do not
 download (they take engine artifacts plus framework source, never the CLI). Its
 generator code is nevertheless ordinary Dart, sitting in the same GitHub tarball
-`flutter_sdk_package` already fetches for `package:flutter`.
+`flutter_sdk_source_repo` already extracts for `package:flutter`.
 
 Importing it as-is is not viable: Dart resolves dependencies by *file import*,
 not by call graph, so `gen_l10n.dart` transitively reaches 187 files and 33 pub
@@ -54,8 +54,6 @@ applies is a loud failure, where a rewrite would quietly drift.
    another dead-code cut, not a toolchain workaround — see the seventh patch.
 """
 
-load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "require_sha256")
-load("//flutter/private:download.bzl", "pinned_download_and_extract")
 load("//flutter/private:local_sdk.bzl", "copy_local_text_file", "read_local_sdk_version", "resolve_local_sdk_root")
 load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 
@@ -117,14 +115,15 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
                 "the gen-l10n subset file " + src,
             )
     else:
-        tarball_url = getattr(repository_ctx.attr, "source_url", "") or flutter_source_tarball_url(version)
-        strip_prefix = getattr(repository_ctx.attr, "source_strip_prefix", "") or "flutter-{}/".format(version)
-        pinned_download_and_extract(
-            repository_ctx,
-            url = tarball_url,
-            sha256 = require_sha256(repository_ctx.attr.sha256, tarball_url),
-            stripPrefix = strip_prefix + "packages/flutter_tools",
-        )
+        # The subset is staged as repo-owned copies out of the version's one
+        # shared source extraction (`flutter_sdk_source_repo`), for the same
+        # reason as above: the patches below rewrite the files in place.
+        tools_root = repository_ctx.path(repository_ctx.attr.sdk_source).dirname.get_child("packages/flutter_tools")
+        for src in _SUBSET_SRCS:
+            source = tools_root.get_child(src)
+            if not source.exists:
+                fail("{}: the Flutter {} flutter_tools source has no {}".format(repository_ctx.name, version, src))
+            repository_ctx.file(src, repository_ctx.read(source), executable = False)
 
     # `-p1` strips the leading `a/`, leaving the `lib/src/...` paths the
     # stripped tarball already uses. A patch that no longer applies stops the
@@ -166,27 +165,11 @@ flutter_gen_l10n_repo = repository_rule(
                   "taken from. Empty means a local SDK (with `local_path`).",
             default = "",
         ),
-        "sha256": attr.string(
-            doc = "Checksum of the Flutter source tarball — an unpinned " +
-                  "fetch would let the generator's code change under a fixed " +
-                  "Flutter version. Guaranteed non-empty by the caller: " +
-                  "extensions.bzl reads it through `flutter_source_sha256()`, " +
-                  "which refuses a version with no recorded checksum. Empty " +
-                  "means a local SDK (with `local_path`).",
-            default = "",
-        ),
-        "source_url": attr.string(
-            doc = "Optional replacement framework source tarball URL from a " +
-                  "custom `flutter.version` registration. Empty means the " +
-                  "default GitHub tag tarball. Plain mirrors stay Bazel's " +
-                  "job (`--downloader_config`), not an attribute.",
-            default = "",
-        ),
-        "source_strip_prefix": attr.string(
-            doc = "Top-level directory the source tarball extracts to. " +
-                  "Empty means the stock `flutter-{version}/` layout (or " +
-                  "`flutter-{tag}/` for a mirrored stock tarball URL).",
-            default = "",
+        "sdk_source": attr.label(
+            doc = "The `flutter_sdk_source_repo` extraction of this Flutter " +
+                  "version (its `BUILD.bazel`), pinned by the checksum that " +
+                  "repository carries. Unused with `local_path`.",
+            allow_single_file = True,
         ),
         "local_path": attr.string(
             doc = "Optional path to a pre-extracted Flutter SDK " +

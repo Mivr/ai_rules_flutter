@@ -86,6 +86,9 @@ JIT-only simulator engine cannot load AOT code.
 This is the pinned iOS engine the rules already select for the compilation
 configuration (`@flutter_ios_engine` for release and debug,
 `@flutter_ios_engine_profile` for profile; see `flutter/private/ios_app.bzl`).
+`@flutter_ios_engine` is a hub of aliases to a private release repository and a
+private debug repository, so a debug-only build fetches only the debug engine;
+the one `use_repo` entry is unchanged.
 The rule writes the xcframework layout by symlinking every engine file at its
 existing relative path, so the slice binaries are the pinned engine's own
 files, never copied or rewritten.

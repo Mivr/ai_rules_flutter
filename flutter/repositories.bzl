@@ -16,7 +16,7 @@ load("//flutter/private:flutter_cross_repo.bzl", "flutter_cross_compilation_repo
 load("//flutter/private:flutter_desktop_cross_repo.bzl", "flutter_desktop_cross_repo")
 load("//flutter/private:flutter_desktop_engine_repo.bzl", "flutter_desktop_engine_repo")
 load("//flutter/private:flutter_dev_root_repo.bzl", "flutter_dev_root_repo")
-load("//flutter/private:flutter_ios_engine_repo.bzl", "flutter_ios_engine_repo")
+load("//flutter/private:flutter_ios_engine_repo.bzl", "flutter_ios_engine_repos")
 load("//flutter/private:flutter_linux_sysroot_repo.bzl", "flutter_linux_sysroot_repo")
 load("//flutter/private:flutter_macos_engine_repo.bzl", "flutter_macos_engine_repo")
 load("//flutter/private:flutter_profile_repo.bzl", "flutter_profile_repo", "local_host_profile_downloads")
@@ -1639,18 +1639,16 @@ def _register_download_android_repos(name, flutter_version, engine_revision, eng
 def _register_download_ios_macos_repos(name, engine_revision, flutter_version, engine_base_url, checksums):
     """The iOS engine (release + debug + profile) and the macOS engine alias repos."""
 
-    # iOS engine repo (lazy — only downloaded when iOS targets are built).
-    # One repo carries both the release engine (device, AOT) and the debug
-    # engine (simulator, JIT); the iOS macros select() between its two targets,
-    # so consumers only need a single `flutter_ios_engine` use_repo entry —
-    # matching the macOS engine alias repo.
-    flutter_ios_engine_repo(
+    # iOS engine hub (lazy — only downloaded when iOS targets are built):
+    # aliases to private release and debug repos, so a debug-only build never
+    # fetches the release archive. Consumers keep one `flutter_ios_engine`
+    # use_repo entry, matching the macOS engine alias repo.
+    flutter_ios_engine_repos(
         name = name + "_ios_engine",
         engine_revision = engine_revision,
         engine_base_url = engine_base_url,
         release_sha256 = flutter_artifact_sha256(flutter_version, ios_engine_artifact_path("release"), checksums),
         debug_sha256 = flutter_artifact_sha256(flutter_version, ios_engine_artifact_path("debug"), checksums),
-        profile_repo_name = name + "_ios_engine_profile",
     )
 
     # The iOS profile engine and its gen_snapshot, apart so only a profile
@@ -1936,10 +1934,9 @@ def _register_local_android_repos(name, local_path):
 
 def _register_local_ios_macos_repos(name, local_path):
     """The iOS engine (release + debug + profile) and macOS alias repos."""
-    flutter_ios_engine_repo(
+    flutter_ios_engine_repos(
         name = name + "_ios_engine",
         engine_revision = "",
-        profile_repo_name = name + "_ios_engine_profile",
         local_path = local_path,
     )
     ios_profile_path = ios_engine_artifact_path("profile")
