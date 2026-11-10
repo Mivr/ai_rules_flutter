@@ -1368,16 +1368,9 @@ def _flutter_web_bundle_impl(ctx):
 # web build that drops one of those compiles the app against something other
 # than what it declared. That is exactly how `language_version` was lost here.
 _WEB_RELEVANT_KEYS = (
-    "assets",
-    "shaders",
-    "shader_includes",
-    "require_sksl_shaders",
-    "_shader_compile_tool",
-    "tree_shake_icons",
-    "license_files",
-    "track_widget_creation",
-    "_asset_bundle_tool",
-)
+    "assets shaders shader_includes require_sksl_shaders _shader_compile_tool " +
+    "tree_shake_icons license_files track_widget_creation _asset_bundle_tool _const_finder_tool"
+).split(" ")
 _WEB_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     k: v
     for k, v in FLUTTER_APPLICATION_ATTRS.items()

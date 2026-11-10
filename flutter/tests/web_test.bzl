@@ -1075,10 +1075,7 @@ def _font_icon_tree_shake_test_impl(ctx):
                 "-DFLUTTER_WEB_USE_SKIA=false",
                 "-DFLUTTER_WEB_USE_SKWASM=true",
             ],
-            absent_substrings = [
-                "/flutter_patched_sdk",
-                "/flutter_patched_sdk_product/platform_strong.dill",
-            ],
+            absent_substrings = ["/flutter_patched_sdk", "/flutter_patched_sdk_product/platform_strong.dill"],
         )
         _assert_argv(
             env,
@@ -1089,10 +1086,7 @@ def _font_icon_tree_shake_test_impl(ctx):
                 "-DFLUTTER_WEB_USE_SKIA=true",
                 "-DFLUTTER_WEB_USE_SKWASM=false",
             ],
-            absent_substrings = [
-                "/flutter_patched_sdk",
-                "/flutter_patched_sdk_product/platform_strong.dill",
-            ],
+            absent_substrings = ["/flutter_patched_sdk", "/flutter_patched_sdk_product/platform_strong.dill"],
         )
         for k in kernels:
             input_paths = [f.path for f in k.inputs.to_list()]
@@ -1102,13 +1096,18 @@ def _font_icon_tree_shake_test_impl(ctx):
                 "web icon kernel must compile against the web platform dill: %s" % input_paths,
             )
 
+    cf_actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterConstFinder"]
+    asserts.equals(env, 1, len(cf_actions), "expected FlutterConstFinder action")
+    if cf_actions:
+        cf_dills = [f.path for f in cf_actions[0].inputs.to_list() if f.path.endswith(".dill")]
+        asserts.equals(env, 2, len(cf_dills), "expected both skwasm and canvaskit dills in const finder")
+
     asset_cfg = written_json(env, ".asset_bundle_config.json")
     if asset_cfg != None:
-        asserts.equals(
+        asserts.true(
             env,
-            2,
-            len(asset_cfg["icon_tree_shaking"]["kernel_dills"]),
-            "expected both skwasm and canvaskit dills in icon_tree_shaking.kernel_dills",
+            "code_points" in asset_cfg["icon_tree_shaking"],
+            "expected code_points in icon_tree_shaking",
         )
     return analysistest.end(env)
 

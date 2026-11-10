@@ -507,10 +507,10 @@ _WEB_RELEVANT_KEYS = (
     "license_files",
     "track_widget_creation",
     "_asset_bundle_tool",
+    "_const_finder_tool",
 )
 
-# The kernel-compile and asset attributes every platform's test or app rule
-# takes; the platform files copy it and add their own.
+# The kernel-compile and asset attributes every platform test or app rule takes.
 INTEGRATION_TEST_BUILD_ATTRS = KERNEL_COMPILE_ATTRS | {
     k: v
     for k, v in FLUTTER_APPLICATION_ATTRS.items()

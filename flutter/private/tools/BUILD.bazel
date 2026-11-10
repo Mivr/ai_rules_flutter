@@ -10,6 +10,7 @@ exports_files(
     [
         "android_bundle.dart",
         "apk_overlay.dart",
+        "const_finder.dart",
         "generate_asset_manifest.dart",
         "bundle_app.dart",
         "chmod.dart",
@@ -190,6 +191,14 @@ dart_binary(
     # the suite's `@Tags` with this tool, as `extract_library_tags_action`
     # does for `flutter_test`.
     visibility = ["//visibility:public"],
+)
+
+dart_binary(
+    name = "const_finder",
+    compile_mode = "exe",
+    main = "const_finder.dart",
+    target_compatible_with = HOST_COMPATIBLE,
+    visibility = ["//flutter:__subpackages__"],
 )
 
 dart_binary(
@@ -422,6 +431,7 @@ _UNIT_TESTS = {
         "bazel_test_protocol.dart",
         ["@dev_tool_deps//:boolean_selector"],
     ),
+    "const_finder_test": ("const_finder.dart", []),
     "extract_library_tags_test": ("extract_library_tags.dart", []),
     # The run_home helper's own tests, including the Dart/shell flag
     # agreement checks against `//flutter/private:run_home.bzl`.
@@ -595,6 +605,7 @@ _TEST_ENV = {
 _MEDIUM_TESTS = [
     "android_bundle_test",
     "compile_shader_test",
+    "const_finder_test",
     "flutter_integration_test_ios_test",
     "flutter_integration_test_runner_test",
     "flutter_test_runner_test",

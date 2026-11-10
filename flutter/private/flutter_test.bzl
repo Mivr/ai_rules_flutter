@@ -503,6 +503,7 @@ _TEST_ATTRS = {
         "license_files",
         "tree_shake_icons",
         "_asset_bundle_tool",
+        "_const_finder_tool",
     )
 }
 _TEST_ATTRS["deps"] = attr.label_list(
@@ -511,10 +512,9 @@ _TEST_ATTRS["deps"] = attr.label_list(
     aspects = [flutter_tester_shader_aspect, flutter_kernel_module_aspect],
 )
 
-# Standard `data` attr — files made available at test runtime via
-# runfiles. Tests resolve them through `package:runfiles` /
-# `Runfiles.create()`. Used for fixtures, golden images, and
-# (importantly) FFI shared libraries the test loads via `dart:ffi`.
+# Standard `data` attr — files made available at test runtime via runfiles.
+# Tests resolve them through `package:runfiles` / `Runfiles.create()`.
+# Used for fixtures, golden images, and (importantly) FFI shared libraries the test loads via `dart:ffi`.
 # Without this, a test that calls into a `cc_library`-produced dylib
 # fails at `DynamicLibrary.open` with "file not found", and the
 # failure surfaces silently from worker isolates as a hung

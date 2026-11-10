@@ -124,6 +124,12 @@ flutter_asset_bundle = rule(
             executable = True,
             cfg = "exec",
         ),
+        "_const_finder_tool": attr.label(
+            doc = "Tool that extracts used icon code points from kernel dills.",
+            default = Label("//flutter/private/tools:const_finder"),
+            executable = True,
+            cfg = "exec",
+        ),
         "_shader_compile_tool": attr.label(
             doc = "Shader compiler for the bundle's shaders.",
             default = Label("//flutter/private/tools:compile_shader"),

@@ -182,40 +182,60 @@ def _application_opt_inputs_test_impl(ctx):
     return analysistest.end(env)
 
 def _application_opt_fonts_inputs_test_impl(ctx):
-    """In `-c opt` with fonts, asset bundling stages the Dart VM and font-subset tools."""
+    """In `-c opt` with fonts, const finder runs on the kernel and asset bundling stages font-subset and code points."""
     env = analysistest.begin(ctx)
-
+    cf_action = _find_action(env, ["FlutterConstFinder"])
+    _assert_some_path_contains(
+        env,
+        _input_paths(cf_action),
+        ["const_finder.dart.snapshot", "/dart-sdk/bin/dart", ".dill"],
+        "font-bearing release FlutterConstFinder",
+    )
     asset_action = _find_action(env, ["FlutterAssetBundle"])
     asset_paths = _input_paths(asset_action)
     _assert_some_path_contains(
         env,
         asset_paths,
-        ["const_finder.dart.snapshot", "font-subset", "/dart-sdk/bin/dart", ".dill"],
+        ["font-subset", ".icon_code_points.json"],
         "font-bearing release FlutterAssetBundle",
     )
-    _assert_no_path_contains(
-        env,
-        asset_paths,
-        [
-            "/patched-sdk/",
-            "/dart-sdk/lib/",
-            "/dart-sdk/bin/snapshots/",
-            "/dart-sdk/bin/utils/",
-        ],
-        "font-bearing release FlutterAssetBundle",
-    )
+    _assert_no_path_contains(env, asset_paths, [
+        "const_finder.dart.snapshot",
+        "/dart-sdk/bin/dart",
+        ".dill",
+        "/patched-sdk/",
+        "/dart-sdk/lib/",
+        "/dart-sdk/bin/snapshots/",
+        "/dart-sdk/bin/utils/",
+    ], "font-bearing release FlutterAssetBundle")
     return analysistest.end(env)
 
 def _application_dbg_inputs_test_impl(ctx):
-    """In `-c dbg`, icon tree shaking is off so asset bundling needs no Dart VM."""
+    """In `-c dbg`, icon tree shaking is off so const finder does not run and asset bundling needs no Dart VM."""
     env = analysistest.begin(ctx)
     asset_action = _find_action(env, ["FlutterAssetBundle"])
     _assert_no_path_contains(
         env,
         _input_paths(asset_action),
-        ["/dart-sdk/", "/patched-sdk/", "const_finder", "font-subset"],
+        ["/dart-sdk/", "/patched-sdk/", "const_finder", "font-subset", ".icon_code_points.json"],
         "debug FlutterAssetBundle",
     )
+    cf_actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterConstFinder"]
+    asserts.equals(env, [], cf_actions, "debug FlutterConstFinder must not be registered")
+    return analysistest.end(env)
+
+def _application_no_tree_shake_icons_test_impl(ctx):
+    """When `tree_shake_icons = False`, no const finder runs and asset bundle takes no font tools."""
+    env = analysistest.begin(ctx)
+    asset_action = _find_action(env, ["FlutterAssetBundle"])
+    _assert_no_path_contains(
+        env,
+        _input_paths(asset_action),
+        ["/dart-sdk/", "/patched-sdk/", "const_finder", "font-subset", ".icon_code_points.json"],
+        "tree_shake_icons=False FlutterAssetBundle",
+    )
+    cf_actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterConstFinder"]
+    asserts.equals(env, [], cf_actions, "tree_shake_icons=False FlutterConstFinder must not be registered")
     return analysistest.end(env)
 
 def _asset_bundle_inputs_test_impl(ctx):
@@ -790,19 +810,31 @@ def _reverse_toolchain_flutter_test_impl(ctx):
 def _reverse_toolchain_application_opt_fonts_test_impl(ctx):
     """When `@rules_dart`'s SDK resolves first, `const_finder` (icon tree-shaking) uses Flutter's `dart-sdk/`."""
     env = analysistest.begin(ctx)
-
+    cf_action = _find_action(env, ["FlutterConstFinder"])
+    _assert_some_path_contains(
+        env,
+        _input_paths(cf_action),
+        ["const_finder.dart.snapshot", "/dart-sdk/bin/dart", ".dill"],
+        "reverse-toolchain font-bearing release FlutterConstFinder",
+    )
+    _assert_no_path_contains(
+        env,
+        _input_paths(cf_action),
+        ["synthetic_dart_sdk/"],
+        "reverse-toolchain font-bearing release FlutterConstFinder",
+    )
     asset_action = _find_action(env, ["FlutterAssetBundle"])
     asset_paths = _input_paths(asset_action)
     _assert_some_path_contains(
         env,
         asset_paths,
-        ["const_finder.dart.snapshot", "font-subset", "/dart-sdk/bin/dart", ".dill"],
+        ["font-subset", ".icon_code_points.json"],
         "reverse-toolchain font-bearing release FlutterAssetBundle",
     )
     _assert_no_path_contains(
         env,
         asset_paths,
-        ["synthetic_dart_sdk/"],
+        ["synthetic_dart_sdk/", "const_finder.dart.snapshot", ".dill"],
         "reverse-toolchain font-bearing release FlutterAssetBundle",
     )
     return analysistest.end(env)
@@ -871,26 +903,27 @@ _bare_pub_fonts_dep = rule(
 def _exec_font_subset_toolchain_test_impl(ctx):
     """App rules resolve `const_finder` and `font_subset` in `exec` config from their own toolchain, independent of `deps`."""
     env = analysistest.begin(ctx)
+    cf_action = _find_action(env, ["FlutterConstFinder"])
+    cf_paths = _input_paths(cf_action)
+    _assert_some_path_contains(
+        env,
+        cf_paths,
+        ["exec_const_finder.dart.snapshot"],
+        "exec-configured font_subset_toolchain FlutterConstFinder",
+    )
+    for p in [p for p in cf_paths if p.endswith("exec_const_finder.dart.snapshot")]:
+        asserts.true(env, "-exec-" in p, "expected const_finder tool %r in exec cfg" % p)
 
     asset_action = _find_action(env, ["FlutterAssetBundle"])
     asset_paths = _input_paths(asset_action)
     _assert_some_path_contains(
         env,
         asset_paths,
-        ["exec_const_finder.dart.snapshot", "exec_font_subset"],
+        ["exec_font_subset"],
         "exec-configured font_subset_toolchain FlutterAssetBundle",
     )
-    exec_tool_paths = [
-        p
-        for p in asset_paths
-        if p.endswith("exec_const_finder.dart.snapshot") or p.endswith("exec_font_subset")
-    ]
-    for p in exec_tool_paths:
-        asserts.true(
-            env,
-            "-exec-" in p,
-            "expected font-subset tool %r to be in exec configuration (-exec- in path)" % p,
-        )
+    for p in [p for p in asset_paths if p.endswith("exec_font_subset")]:
+        asserts.true(env, "-exec-" in p, "expected font-subset tool %r in exec cfg" % p)
     return analysistest.end(env)
 
 def _missing_font_subset_toolchain_test_impl(ctx):
@@ -932,78 +965,26 @@ _dart_extra_defines_ignored_test = analysistest.make(
         str(Label("@rules_dart//dart:extra_dart_defines")): ["FROM_DART=1", "dart.vm.product=true"],
     },
 )
-_application_opt_inputs_test = analysistest.make(
-    _application_opt_inputs_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "opt",
-        str(Label("//flutter:profile")): False,
-    },
-)
-_application_opt_fonts_inputs_test = analysistest.make(
-    _application_opt_fonts_inputs_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "opt",
-        str(Label("//flutter:profile")): False,
-    },
-)
-_application_dbg_inputs_test = analysistest.make(
-    _application_dbg_inputs_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "dbg",
-        str(Label("//flutter:profile")): False,
-    },
+_OPT = {"//command_line_option:compilation_mode": "opt", str(Label("//flutter:profile")): False}
+_DBG = {"//command_line_option:compilation_mode": "dbg", str(Label("//flutter:profile")): False}
+_FASTBUILD = {"//command_line_option:compilation_mode": "fastbuild", str(Label("//flutter:profile")): False}
+
+_application_opt_inputs_test = analysistest.make(_application_opt_inputs_test_impl, config_settings = _OPT)
+_application_opt_fonts_inputs_test = analysistest.make(_application_opt_fonts_inputs_test_impl, config_settings = _OPT)
+_application_dbg_inputs_test = analysistest.make(_application_dbg_inputs_test_impl, config_settings = _DBG)
+_application_no_tree_shake_icons_test = analysistest.make(
+    _application_no_tree_shake_icons_test_impl,
+    config_settings = _OPT,
 )
 _asset_bundle_inputs_test = analysistest.make(_asset_bundle_inputs_test_impl)
-_aot_target_inputs_test = analysistest.make(
-    _aot_target_inputs_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "opt",
-        str(Label("//flutter:profile")): False,
-    },
-)
-_aot_target_dbg_inputs_test = analysistest.make(
-    _aot_target_dbg_inputs_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "dbg",
-        str(Label("//flutter:profile")): False,
-    },
-)
-_kernel_target_opt_test = analysistest.make(
-    _kernel_target_release_aot_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "opt",
-        str(Label("//flutter:profile")): False,
-    },
-)
-_kernel_target_fastbuild_test = analysistest.make(
-    _kernel_target_release_aot_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "fastbuild",
-        str(Label("//flutter:profile")): False,
-    },
-)
-_kernel_target_dbg_test = analysistest.make(
-    _kernel_target_dbg_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "dbg",
-        str(Label("//flutter:profile")): False,
-    },
-)
+_aot_target_inputs_test = analysistest.make(_aot_target_inputs_test_impl, config_settings = _OPT)
+_aot_target_dbg_inputs_test = analysistest.make(_aot_target_dbg_inputs_test_impl, config_settings = _DBG)
+_kernel_target_opt_test = analysistest.make(_kernel_target_release_aot_test_impl, config_settings = _OPT)
+_kernel_target_fastbuild_test = analysistest.make(_kernel_target_release_aot_test_impl, config_settings = _FASTBUILD)
+_kernel_target_dbg_test = analysistest.make(_kernel_target_dbg_test_impl, config_settings = _DBG)
 _kernel_target_aot_test = analysistest.make(_kernel_target_aot_test_impl)
-_kernel_target_aot_dbg_test = analysistest.make(
-    _kernel_target_aot_dbg_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "dbg",
-        str(Label("//flutter:profile")): False,
-    },
-)
-_web_inputs_test = analysistest.make(
-    _web_inputs_test_impl,
-    config_settings = {
-        "//command_line_option:compilation_mode": "opt",
-        str(Label("//flutter:profile")): False,
-    },
-)
+_kernel_target_aot_dbg_test = analysistest.make(_kernel_target_aot_dbg_test_impl, config_settings = _DBG)
+_web_inputs_test = analysistest.make(_web_inputs_test_impl, config_settings = _OPT)
 _pub_runfiles_test = analysistest.make(_pub_runfiles_test_impl)
 _dart_toolchain_inputs_test = analysistest.make(
     _dart_toolchain_inputs_test_impl,
@@ -1187,6 +1168,14 @@ def _setup_fixtures():
         deps = ["//flutter:material_icons"],
         tags = ["manual"],
     )
+    flutter_application(
+        name = "_inputs_application_with_fonts_no_tree_shake",
+        package_name = _PACKAGE,
+        main = _MAIN,
+        deps = ["//flutter:material_icons"],
+        tree_shake_icons = False,
+        tags = ["manual"],
+    )
     flutter_asset_bundle(
         name = "_inputs_asset_bundle",
         tags = ["manual"],
@@ -1295,7 +1284,12 @@ def action_inputs_test_suite(name):
     )
     _application_dbg_inputs_test(
         name = name + "_application_dbg",
-        target_under_test = ":_inputs_application",
+        target_under_test = ":_inputs_application_with_fonts",
+    )
+    _application_no_tree_shake_icons_test(
+        name = name + "_application_no_tree_shake",
+        target_under_test = ":_inputs_application_with_fonts_no_tree_shake",
+        target_compatible_with = HOST_COMPATIBLE,
     )
     _asset_bundle_inputs_test(
         name = name + "_asset_bundle",
@@ -1402,6 +1396,7 @@ def action_inputs_test_suite(name):
             ":" + name + "_application_opt",
             ":" + name + "_application_opt_fonts",
             ":" + name + "_application_dbg",
+            ":" + name + "_application_no_tree_shake",
             ":" + name + "_asset_bundle",
             ":" + name + "_aot_target",
             ":" + name + "_aot_target_dbg",
