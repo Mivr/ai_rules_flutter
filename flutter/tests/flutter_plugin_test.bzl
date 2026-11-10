@@ -56,6 +56,25 @@ def _empty_platforms_test_impl(ctx):
     asserts.equals(env, {}, plugin.platforms)
     return unittest.end(env)
 
+def _implements_field_test_impl(ctx):
+    """The plugin struct carries implements beside name and platforms."""
+    env = unittest.begin(ctx)
+    p_with_impl = build_plugin_struct(
+        name = "greeting_alt",
+        plugin_platforms = {"android": {"pluginClass": "GreetingAltPlugin"}},
+        implements = "greeting",
+    )
+    asserts.equals(env, "greeting_alt", p_with_impl.name)
+    asserts.equals(env, "greeting", p_with_impl.implements)
+
+    p_without_impl = build_plugin_struct(
+        name = "greeting_plain",
+        plugin_platforms = {},
+    )
+    asserts.equals(env, "greeting_plain", p_without_impl.name)
+    asserts.equals(env, "", p_without_impl.implements)
+    return unittest.end(env)
+
 def _fake_apple_plugin_lib_impl(ctx):
     cc_info = CcInfo(compilation_context = cc_common.create_compilation_context())
     return [
@@ -119,6 +138,9 @@ _t0_test = unittest.make(_dart_only_plugin_test_impl)
 _t1_test = unittest.make(_native_only_plugin_test_impl)
 _t2_test = unittest.make(_multi_platform_plugin_test_impl)
 _t3_test = unittest.make(_empty_platforms_test_impl)
+_t4_test = unittest.make(_implements_field_test_impl)
+
+_UNIT_TESTS = (_t0_test, _t1_test, _t2_test, _t3_test, _t4_test)
 
 def flutter_plugin_test_suite(name):
     """Defines unit and analysis tests for `flutter_plugin` and Apple plugin library routing.
@@ -213,13 +235,7 @@ def flutter_plugin_test_suite(name):
         target_under_test = ":" + name + "_bare_apple_libs_plugin",
     )
 
-    small_unittest_suite(
-        name + "_unit",
-        _t0_test,
-        _t1_test,
-        _t2_test,
-        _t3_test,
-    )
+    small_unittest_suite(name + "_unit", *_UNIT_TESTS)
 
     native.test_suite(
         name = name,
