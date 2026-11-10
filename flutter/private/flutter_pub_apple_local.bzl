@@ -32,17 +32,17 @@ load(
     _render_local_target_blocks = "render_local_target_blocks",
     _with_apple_local_targets = "with_apple_local_targets",
 )
+load(":flutter_pub_apple_localdeps.bzl", "apple_local_product_links")
+load(":flutter_pub_apple_localparse.bzl", _parse_plugin_local_package = "parse_plugin_local_package")
 load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "has_files_bound_error")
 load(":podspec_read.bzl", "apply_apple_podspec_link_settings")
 load(":podspec_read_xcconfig.bzl", "active_podspec_defines")
-load(":swiftpm_manifest.bzl", "parse_swiftpm_package")
-load(":swiftpm_manifest_lex.bzl", "lex_swiftpm_manifest", "swiftpm_first_content_line")
 load(":swiftpm_package.bzl", "swiftpm_is_code_file", "swiftpm_select_target_files")
 load(":swiftpm_translate.bzl", "swiftpm_c99name")
 
-_LOCAL_SPECIAL_KINDS = ["executableTarget", "binaryTarget", "systemLibrary", "plugin", "macro"]
+parse_plugin_local_package = _parse_plugin_local_package
 
-_LOCAL_SKIPPED_ARGS = ["resources", "plugins", "defaultLocalization", "pkgConfig", "providers", "packageAccess"]
+_LOCAL_SPECIAL_KINDS = ["executableTarget", "binaryTarget", "systemLibrary", "plugin", "macro"]
 
 def _local_special_error(plugin, target):
     """Refuse reached targets whose kind rules_apple cannot build.
@@ -390,122 +390,6 @@ def local_target_files(ctx, plugin, targets):
         selected[target.name] = result
     return struct(ok = True, error = "", files = selected)
 
-def _token_depths(tokens):
-    """The paren/bracket depth before each token.
-
-    Args:
-        tokens: The lexed manifest token list.
-
-    Returns:
-        The depth list, one entry per token.
-    """
-    depths = []
-    depth = 0
-    for token in tokens:
-        depths.append(depth)
-        if token.kind == "punct" and token.text in ("(", "["):
-            depth += 1
-        elif token.kind == "punct" and token.text in (")", "]"):
-            depth -= 1
-    return depths
-
-def _is_keyword_argument(tokens, index, keywords):
-    """True when token `index` opens a `keyword:` argument to drop.
-
-    Args:
-        tokens: The lexed manifest token list.
-        index: The token to inspect.
-        keywords: The argument names to drop.
-
-    Returns:
-        True for a matching word followed by a colon.
-    """
-    if tokens[index].kind != "word" or tokens[index].text not in keywords:
-        return False
-    return index + 1 < len(tokens) and tokens[index + 1].kind == "punct" and tokens[index + 1].text == ":"
-
-def _skip_keyword_argument(tokens, depths, start):
-    """Return the index one past one keyword argument's value.
-
-    Args:
-        tokens: The lexed manifest token list.
-        depths: The per-token depth list from `_token_depths`.
-        start: The keyword token's index.
-
-    Returns:
-        The index after the value's comma, or at its closing bracket.
-    """
-    target_depth = depths[start]
-    i = start + 1
-    for _ in range(len(tokens) + 1):
-        if i >= len(tokens):
-            break
-        if depths[i] == target_depth and tokens[i].kind == "punct":
-            if tokens[i].text == ",":
-                return i + 1
-            if tokens[i].text in (")", "]"):
-                return i
-        i += 1
-    return i
-
-def _strip_tokens(tokens, keywords):
-    """Drop the skipped keyword arguments from a token list.
-
-    Args:
-        tokens: The lexed manifest token list.
-        keywords: The argument names to drop.
-
-    Returns:
-        The token list without those arguments and their values.
-    """
-    depths = _token_depths(tokens)
-    out = []
-    i = 0
-    for _ in range(len(tokens) + 1):
-        if i >= len(tokens):
-            break
-        if _is_keyword_argument(tokens, i, keywords):
-            i = _skip_keyword_argument(tokens, depths, i)
-            continue
-        out.append(tokens[i])
-        i += 1
-    return out
-
-def _render_tokens(tokens):
-    """Render a token list as manifest text the parser accepts.
-
-    Args:
-        tokens: The token list to render.
-
-    Returns:
-        The manifest body text.
-    """
-    parts = []
-    for t in tokens:
-        item = "\n" if t.kind == "nl" else ('"""' + t.text + '""" ' if t.kind == "str" else t.text + " ")
-        parts.append(item)
-    return "".join(parts)
-
-def parse_plugin_local_package(plugin, text):
-    """Parse a plugin manifest with target settings kept.
-
-    Args:
-        plugin: The pub plugin name, for messages.
-        text: The `Package.swift` text.
-
-    Returns:
-        The strict parser's `struct(ok, error, model)`.
-    """
-    lexed = lex_swiftpm_manifest(text, plugin)
-    if not lexed.ok:
-        return struct(ok = False, error = lexed.error, model = None)
-    first = swiftpm_first_content_line(text)
-    if not first.ok:
-        return struct(ok = False, error = first.error, model = None)
-    stripped = _strip_tokens(lexed.tokens, _LOCAL_SKIPPED_ARGS)
-    rendered = first.line + "\n" + _render_tokens(stripped)
-    return parse_swiftpm_package(plugin, rendered)
-
 def _local_primary_dir(manifest_dir, srcs_dirs):
     """Find the primary source directory belonging to one manifest.
 
@@ -593,19 +477,29 @@ def _detect_platform_local_targets(ctx, plugin, platform, srcs_dirs, podspec_def
             fail(locals.error)
         if not locals.targets:
             continue
-        files = local_target_files(ctx, plugin, locals.targets)
+        linked = apple_local_product_links(ctx, plugin, platform, manifest_dir, parsed.model, locals.targets)
+        if not linked.ok:
+            fail(linked.error)
+        files = local_target_files(ctx, plugin, linked.targets)
         if not files.ok:
             fail(files.error)
         rendered = render_local_target_blocks(
             plugin,
             platform,
-            locals.targets,
+            linked.targets,
             files.files,
             plugin_defines = plugin_defines,
         )
         if not rendered.ok:
             fail(rendered.error)
-        return rendered
+        return struct(
+            ok = True,
+            error = "",
+            text = rendered.text,
+            labels = rendered.labels,
+            xtool_files = rendered.xtool_files,
+            product_labels = linked.labels,
+        )
     return empty
 
 def detect_apple_local_targets(ctx, plugin, apple):
@@ -653,8 +547,15 @@ def apply_apple_native_deps(ctx, plugin, apple, content):
     """
     content = apply_apple_podspec_link_settings(ctx, content, plugin, apple)
     swiftpm = detect_apple_swiftpm_deps(ctx, plugin, apple)
-    content = with_apple_swiftpm_deps(content, plugin, swiftpm.macos, swiftpm.ios)
     local = detect_apple_local_targets(ctx, plugin, apple)
+    macos_products = getattr(local.macos, "product_labels", [])
+    ios_products = getattr(local.ios, "product_labels", [])
+    content = with_apple_swiftpm_deps(
+        content,
+        plugin,
+        swiftpm.macos + [label for label in macos_products if label not in swiftpm.macos],
+        swiftpm.ios + [label for label in ios_products if label not in swiftpm.ios],
+    )
     content = with_apple_local_targets(content, plugin, "macos", local.macos)
     return with_apple_local_targets(content, plugin, "ios", local.ios)
 

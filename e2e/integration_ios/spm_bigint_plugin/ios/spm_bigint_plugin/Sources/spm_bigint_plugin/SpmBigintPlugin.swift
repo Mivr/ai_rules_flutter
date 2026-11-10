@@ -5,6 +5,7 @@
 
 import BigInt
 import Flutter
+import SpmBigintHelper
 import UIKit
 
 public class SpmBigintPlugin: NSObject, FlutterPlugin {
@@ -20,7 +21,7 @@ public class SpmBigintPlugin: NSObject, FlutterPlugin {
     // proves the product made it into this library's link.
     case "computeBig":
       result(
-        "\(BigUInt(2).power(100)) \(BigInt("-0", radix: 10)!) \(SpmBigintPluginFlag())"
+        "\(BigUInt(2).power(100)) \(SpmBigintHelper.negativeZero()) \(SpmBigintPluginFlag())"
       )
     default:
       result(FlutterMethodNotImplemented)

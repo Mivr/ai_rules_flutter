@@ -1,10 +1,12 @@
 """Unit tests for a plugin manifest's sibling SwiftPM path dependencies."""
 
-load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
+load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
+load("//flutter/private:flutter_pub_apple.bzl", "apple_plugin_targets")
 load(
     "//flutter/private:flutter_pub_apple_deps.bzl",
     "select_apple_swiftpm_deps",
 )
+load("//flutter/private:flutter_pub_apple_local.bzl", "apply_apple_native_deps")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 _LOCK_LABEL = "//app:pubspec.lock"
@@ -416,8 +418,105 @@ _flutterframework_path_product_is_skipped_test = unittest.make(_flutterframework
 _url_and_id_products_still_resolve_test = unittest.make(_url_and_id_products_still_resolve_test_impl)
 _unpinned_url_product_still_refuses_test = unittest.make(_unpinned_url_product_still_refuses_test_impl)
 
+_HELPER_BYNAME_MANIFEST = """// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(
+    name: "spm_bigint_plugin",
+    platforms: [.iOS("12.0")],
+    products: [.library(name: "spm_bigint_plugin", targets: ["spm_bigint_plugin"])],
+    dependencies: [.package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.1")],
+    targets: [
+        .target(name: "spm_bigint_plugin", dependencies: ["Helper"]),
+        .target(name: "Helper", dependencies: ["BigInt"]),
+    ]
+)
+"""
+
+def _helper_byname_ctx(manifest = _HELPER_BYNAME_MANIFEST):
+    """A fake spoke context whose non-primary `Helper` target lists `"BigInt"`."""
+    resolved = '{"pins": [{"identity": "bigint", "kind": "remoteSourceControl", "location": "https://github.com/attaswift/BigInt.git", "state": {"revision": "63feef7820abb1a8fb08587d7da56bb0b7db8751", "version": "6.0.1"}}], "version": 3}'
+    files = {
+        "//:Package.resolved": resolved,
+        "//:package_sha256.json": '{"bigint": "55fc8a63f655a09d9216f2c9bc062c508f98d4eca4b8ebefaf295a3ea4ac8f22"}',
+        "ios/spm_bigint_plugin/Package.swift": manifest,
+        "ios/spm_bigint_plugin/Sources/Helper/Helper.swift": "public enum Helper {}\n",
+    }
+    dirs = {
+        "ios/spm_bigint_plugin/Sources": [("spm_bigint_plugin", True), ("Helper", True)],
+        "ios/spm_bigint_plugin/Sources/Helper": [("Helper.swift", False)],
+    }
+
+    def _path(rel):
+        key = str(rel)
+        children = [struct(basename = name, is_dir = is_d) for name, is_d in dirs.get(key, [])]
+        return struct(
+            exists = key in files or key in dirs,
+            is_dir = key in dirs,
+            basename = key[key.rfind("/") + 1:],
+            readdir = lambda: children,
+        )
+
+    return struct(
+        attr = struct(
+            plugin_native_deps = None,
+            podfile_lock = None,
+            package_resolved = "//:Package.resolved",
+            package_sha256 = "//:package_sha256.json",
+            ios_native_deps = None,
+            hub_name = "deps",
+            lock_packages = ["spm_bigint_plugin"],
+            pubspec_lock = "//:pubspec.lock",
+            scc_targets = {},
+            plugin_defines = [],
+        ),
+        path = _path,
+        read = lambda rel: files[str(rel)],
+    )
+
+def _apply_helper_byname_subject_impl(_ctx):
+    """Run `apply_apple_native_deps` on the Helper by-name manifest."""
+    srcs = ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"]
+    apple = struct(macos_srcs = [], ios_srcs = srcs, macos_podspec = None, ios_podspec = None)
+    base = apple_plugin_targets("spm_bigint_plugin", srcs, [], "ios")
+    manifest = _HELPER_BYNAME_MANIFEST.replace('    dependencies: [.package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.1")],\n', "")
+    apply_apple_native_deps(_helper_byname_ctx(manifest), "spm_bigint_plugin", apple, base)
+    return []
+
+_apply_helper_byname_subject = rule(implementation = _apply_helper_byname_subject_impl)
+
+def _nonprimary_byname_product_refused_test_impl(ctx):
+    """An unresolvable by-name product on a non-primary target fails the fetch with a named fix."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, "Flutter plugin \"spm_bigint_plugin\": target dependency \"BigInt\"")
+    asserts.expect_failure(env, ".product(name: \"BigInt\", package:")
+    return analysistest.end(env)
+
+def _nonprimary_byname_product_links_test_impl(ctx):
+    """A resolvable by-name product on a non-primary target lands in that target's deps."""
+    env = unittest.begin(ctx)
+    srcs = ["ios/spm_bigint_plugin/Sources/spm_bigint_plugin"]
+    apple = struct(macos_srcs = [], ios_srcs = srcs, macos_podspec = None, ios_podspec = None)
+    base = apple_plugin_targets("spm_bigint_plugin", srcs, [], "ios")
+    rendered = apply_apple_native_deps(_helper_byname_ctx(), "spm_bigint_plugin", apple, base)
+    start = rendered.find('name = "spm_bigint_plugin_apple_ios__Helper"')
+    asserts.true(env, start >= 0, rendered)
+    helper = rendered[start:]
+    asserts.true(env, "@deps__swiftpm-bigint//:BigInt" in helper[:helper.find("visibility")], rendered)
+    return unittest.end(env)
+
+_nonprimary_byname_product_links_test = unittest.make(_nonprimary_byname_product_links_test_impl)
+
+_nonprimary_byname_product_refused_test = analysistest.make(
+    _nonprimary_byname_product_refused_test_impl,
+    expect_failure = True,
+)
+
 def flutter_pub_apple_deps_test_suite(name):
-    """Registers the sibling plugin path dependency unit tests."""
+    """Registers the sibling plugin path dependency unit tests.
+
+    Args:
+        name: The test_suite target name.
+    """
     small_unittest_suite(
         name + "_unit",
         _firebase_auth_sibling_path_ios_test,
@@ -432,8 +531,14 @@ def flutter_pub_apple_deps_test_suite(name):
         _flutterframework_path_product_is_skipped_test,
         _url_and_id_products_still_resolve_test,
         _unpinned_url_product_still_refuses_test,
+        _nonprimary_byname_product_links_test,
+    )
+    _apply_helper_byname_subject(name = name + "_helper_byname_subject", tags = ["manual"])
+    _nonprimary_byname_product_refused_test(
+        name = name + "_helper_byname_refused",
+        target_under_test = ":" + name + "_helper_byname_subject",
     )
     native.test_suite(
         name = name,
-        tests = [":" + name + "_unit"],
+        tests = [":" + name + "_unit", ":" + name + "_helper_byname_refused"],
     )

@@ -17,8 +17,13 @@ let package = Package(
             name: "spm_bigint_plugin",
             dependencies: [
                 .product(name: "BigInt", package: "BigInt"),
-                "BigInt"
+                "BigInt",
+                "SpmBigintHelper"
             ]
+        ),
+        .target(
+            name: "SpmBigintHelper",
+            dependencies: ["BigInt"]
         )
     ]
 )

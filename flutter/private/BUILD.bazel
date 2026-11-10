@@ -1077,13 +1077,33 @@ bzl_library(
         ":flutter_pub_apple_byname",
         ":flutter_pub_apple_local_refusal",
         ":flutter_pub_apple_local_targets",
+        ":flutter_pub_apple_localdeps",
+        ":flutter_pub_apple_localparse",
         ":flutter_pub_walk",
         ":podspec_read",
         ":podspec_read_xcconfig",
-        ":swiftpm_manifest",
-        ":swiftpm_manifest_lex",
         ":swiftpm_package",
         ":swiftpm_translate",
+    ],
+)
+
+bzl_library(
+    name = "flutter_pub_apple_localdeps",
+    srcs = ["flutter_pub_apple_localdeps.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":flutter_pub_apple",
+        ":flutter_pub_apple_byname",
+    ],
+)
+
+bzl_library(
+    name = "flutter_pub_apple_localparse",
+    srcs = ["flutter_pub_apple_localparse.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":swiftpm_manifest",
+        ":swiftpm_manifest_lex",
     ],
 )
 

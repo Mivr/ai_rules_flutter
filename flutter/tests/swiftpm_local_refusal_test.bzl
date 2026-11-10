@@ -143,6 +143,31 @@ def _unknown_same_target_refusal_test_impl(ctx):
     asserts.equals(env, [], skipped.targets)
     return unittest.end(env)
 
+def _nonprimary_byname_product_walk_test_impl(ctx):
+    """A by-name product on a reached non-primary target passes the walk; the product path links it."""
+    env = unittest.begin(ctx)
+    text = """// swift-tools-version: 5.9
+import PackageDescription
+let package = Package(
+    name: "demo",
+    platforms: [.iOS("13.0")],
+    products: [.library(name: "demo", targets: ["demo"])],
+    dependencies: [.package(url: "https://github.com/attaswift/BigInt.git", exact: "6.0.1")],
+    targets: [
+        .target(name: "demo", dependencies: ["Helper"], path: "Sources/demo"),
+        .target(name: "Helper", dependencies: ["BigInt"], path: "Sources/Helper"),
+    ]
+)
+"""
+    parsed = parse_plugin_local_package("demo", text)
+    asserts.true(env, parsed.ok, parsed.error)
+    refused = plugin_local_targets("demo", parsed.model, "ios/demo", "ios/demo/Sources/demo", "ios")
+    asserts.true(env, refused.ok, refused.error)
+    asserts.equals(env, ["Helper"], [t.name for t in refused.targets])
+    other = parse_plugin_local_package("demo", text.replace('dependencies: ["BigInt"]', 'dependencies: [.product(name: "BigInt", package: "BigInt")]'))
+    asserts.true(env, plugin_local_targets("demo", other.model, "ios/demo", "ios/demo/Sources/demo", "ios").ok)
+    return unittest.end(env)
+
 _define_when_test = unittest.make(_define_when_test_impl)
 _unsafe_flags_test = unittest.make(_unsafe_flags_test_impl)
 _unknown_setting_test = unittest.make(_unknown_setting_test_impl)
@@ -151,6 +176,7 @@ _program_sibling_dir_test = unittest.make(_program_sibling_dir_test_impl)
 _single_target_program_test = unittest.make(_single_target_program_test_impl)
 _mapped_skips_read_test = unittest.make(_mapped_skips_read_test_impl)
 _unknown_same_target_refusal_test = unittest.make(_unknown_same_target_refusal_test_impl)
+_nonprimary_byname_product_walk_test = unittest.make(_nonprimary_byname_product_walk_test_impl)
 
 def swiftpm_local_refusal_test_suite(name):
     """Declares the local-refusal unit tests.
@@ -168,4 +194,5 @@ def swiftpm_local_refusal_test_suite(name):
         _single_target_program_test,
         _mapped_skips_read_test,
         _unknown_same_target_refusal_test,
+        _nonprimary_byname_product_walk_test,
     )

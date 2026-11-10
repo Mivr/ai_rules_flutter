@@ -630,7 +630,7 @@ def _apple_swiftpm_dep_hint(plugin_name, dep, pkg_deps, pins):
         return _apple_swiftpm_mapping_hint(located.dep_identity, dep.name)
     return ""
 
-def _apple_swiftpm_keeps_dep(dep, pkg_deps, platform):
+def apple_swiftpm_keeps_dep(dep, pkg_deps, platform):
     """True when this platform links one plugin-target product dep.
 
     Drops the products the spoke never links: a `condition:` excluding
@@ -712,7 +712,7 @@ def apple_swiftpm_manifest_products(plugin_name, manifest_text, manifest_dir, sr
     products = [
         dep
         for dep in target.deps
-        if apple_swiftpm_names_product(dep, local) and _apple_swiftpm_keeps_dep(dep, pkgs, platform)
+        if apple_swiftpm_names_product(dep, local) and apple_swiftpm_keeps_dep(dep, pkgs, platform)
     ]
     return struct(ok = True, error = "", products = products, pkg_deps = parsed.model.pkg_deps, target = target)
 
@@ -741,7 +741,7 @@ def _apple_swiftpm_linked_dep(plugin_name, dep, pkg_deps, product_deps):
 
     return apple_swiftpm_resolve_byname(plugin_name, dep, pkg_deps, is_mapped)
 
-def _apple_swiftpm_labels_for_products(plugin_name, manifest_dir, srcs_dirs, platform, pins, prepared, product_deps):
+def apple_swiftpm_labels_for_products(plugin_name, manifest_dir, srcs_dirs, platform, pins, prepared, product_deps):
     """Resolve one manifest's kept product dependencies to spoke labels.
 
     Args:
@@ -820,7 +820,7 @@ def select_apple_swiftpm_deps(plugin_name, manifest_text, manifest_dir, srcs_dir
     prepared = apple_swiftpm_manifest_products(plugin_name, manifest_text, manifest_dir, srcs_dirs, platform)
     if not prepared.ok:
         return struct(ok = False, error = prepared.error, labels = [])
-    return _apple_swiftpm_labels_for_products(
+    return apple_swiftpm_labels_for_products(
         plugin_name,
         manifest_dir,
         srcs_dirs,
@@ -885,7 +885,7 @@ def apple_swiftpm_pins(
         ),
     )
 
-def _apple_swiftpm_pins(ctx, resolved_label, checksums_label, hub_name):
+def apple_swiftpm_read_pins(ctx, resolved_label, checksums_label, hub_name):
     """Read the hub's pin and checksum files for one plugin's links.
 
     Both labels come from the `flutter.pub` tag and are repository
@@ -936,7 +936,7 @@ def _apple_swiftpm_pins(ctx, resolved_label, checksums_label, hub_name):
         fail(built.error)
     return built.pins
 
-def _apple_swiftpm_product_deps(ctx, native_deps_label, hub_name):
+def apple_swiftpm_read_product_deps(ctx, native_deps_label, hub_name):
     """Read the hub's iOS native-deps mapping for one plugin's links.
 
     The label is a constant repository attribute of every pub spoke, but
@@ -1010,15 +1010,15 @@ def _detect_apple_swiftpm_platform(
         if not ctx.path(manifest).exists:
             continue
         if pins == None:
-            pins = _apple_swiftpm_pins(ctx, resolved_label, checksums_label, hub_name)
+            pins = apple_swiftpm_read_pins(ctx, resolved_label, checksums_label, hub_name)
         prepared = apple_swiftpm_manifest_products(package_name, ctx.read(manifest), manifest_dir, srcs_dirs, platform)
         if not prepared.ok:
             fail(prepared.error)
         if not prepared.products:
             continue
         if product_deps == None:
-            product_deps = _apple_swiftpm_product_deps(ctx, native_deps_label, hub_name)
-        selected = _apple_swiftpm_labels_for_products(
+            product_deps = apple_swiftpm_read_product_deps(ctx, native_deps_label, hub_name)
+        selected = apple_swiftpm_labels_for_products(
             package_name,
             manifest_dir,
             srcs_dirs,
