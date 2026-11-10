@@ -55,7 +55,11 @@ load("@rules_android//android:rules.bzl", _android_binary = "android_binary", _a
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
 load("//flutter/private:constants.bzl", _ANDROID_ABI_FOR_ARCH = "ANDROID_ABI_FOR_ARCH", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
-load("//flutter/private:flutter_android_apk_overlay.bzl", _flutter_android_apk_overlay = "flutter_android_apk_overlay")
+load(
+    "//flutter/private:flutter_android_apk_overlay.bzl",
+    _flutter_android_apk_overlay = "flutter_android_apk_overlay",
+    _overlay_signing_select = "overlay_signing_select",
+)
 load("//flutter/private:flutter_android_application.bzl", _flutter_android_bundle = "flutter_android_bundle")
 load("//flutter/private:flutter_android_binary_proxy.bzl", _flutter_android_binary_proxy = "flutter_android_binary_proxy")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
@@ -804,12 +808,7 @@ def _android_binary_and_overlay(name, binary_deps, deps, apk):
         binary = "__%s_binary" % name,
         native_libs_jar = "__%s_native_libs_jar" % name,
         flutter_assets = "__%s_overlay_assets" % name,
-        signing = select({
-            "@rules_flutter//flutter:apk_signing_v1": "v1",
-            "@rules_flutter//flutter:apk_signing_v2": "v2",
-            "@rules_flutter//flutter:apk_signing_v4": "v4",
-            "//conditions:default": "v1_v2",
-        }),
+        signing = _overlay_signing_select(apk.min_sdk_version),
         tags = apk.internal_tags,
         **overlay_kwargs
     )

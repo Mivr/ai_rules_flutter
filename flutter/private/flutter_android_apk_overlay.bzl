@@ -69,6 +69,41 @@ def release_execution_requirements(release):
         return {}
     return {"no-remote": "1"}
 
+def overlay_signing_select(min_sdk_version):
+    """Selects the APK signature scheme based on minimum SDK and compilation mode.
+
+    In debug builds (`-c dbg`), apps with `minSdkVersion` 24 or higher default
+    to APK Signature Scheme v2 alone (`v2`) for faster archive-level hashing.
+    Apps below API 24 fall back to `v1_v2` so they remain installable on Android
+    devices lacking standalone v2 support. Release builds keep the default
+    `v1_v2` scheme. An explicit `@rules_android//flags:apk_signing_method` flag
+    overrides this default in all configurations.
+
+    Args:
+      min_sdk_version: Minimum Android SDK version (int or string).
+
+    Returns:
+      A select() dictionary expression resolving to the signing scheme string.
+    """
+    sdk = int(min_sdk_version) if min_sdk_version != None else 21
+    if sdk >= 24:
+        return select({
+            "@rules_flutter//flutter/private:apk_signing_v1_dbg": "v1",
+            "@rules_flutter//flutter/private:apk_signing_v2_dbg": "v2",
+            "@rules_flutter//flutter/private:apk_signing_v4_dbg": "v4",
+            "@rules_flutter//flutter:apk_signing_v1": "v1",
+            "@rules_flutter//flutter:apk_signing_v2": "v2",
+            "@rules_flutter//flutter:apk_signing_v4": "v4",
+            "@rules_flutter//flutter/private:dbg": "v2",
+            "//conditions:default": "v1_v2",
+        })
+    return select({
+        "@rules_flutter//flutter:apk_signing_v1": "v1",
+        "@rules_flutter//flutter:apk_signing_v2": "v2",
+        "@rules_flutter//flutter:apk_signing_v4": "v4",
+        "//conditions:default": "v1_v2",
+    })
+
 def _single_secret_file(ctx, files, setting, source):
     """Returns the one file a release-signing setting must name, failing closed.
 
@@ -175,6 +210,8 @@ def _run_apk_overlay(ctx, dart_exe, dart_vm_files, base_unsigned, native_libs_ja
     overlay_args.add("--output", overlay_unsigned.path)
     if ctx.attr.nocompress_extensions:
         overlay_args.add_joined("--nocompress-extensions", ctx.attr.nocompress_extensions, join_with = ",")
+    if ctx.var.get("COMPILATION_MODE", "") == "dbg":
+        overlay_args.add("--debug")
     ctx.actions.run(
         executable = dart_exe,
         arguments = [overlay_args],
