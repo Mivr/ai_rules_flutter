@@ -979,7 +979,6 @@ def _apple_plugin_analysis_tests(
         name,
         fixtures,
         platform,
-        framework_kind,
         swift_header_test,
         objc_input_test,
         public_test):
@@ -989,7 +988,6 @@ def _apple_plugin_analysis_tests(
       name: Prefix for the test targets.
       fixtures: The struct returned by `apple_plugin_fixtures`.
       platform: `"ios"` or `"macos"`.
-      framework_kind: The framework-import rule kind the backend emits.
       swift_header_test: The platform's generated-header analysis rule.
       objc_input_test: The platform's ObjC-input analysis rule.
       public_test: The platform's public-provider analysis rule.
@@ -1072,14 +1070,10 @@ def _apple_plugin_analysis_tests(
 
     pure_swift_kinds = {
         fixtures.pure_swift: "swift_library",
-        "_" + fixtures.pure_swift + "__flutter_framework": "apple_framework_modulemap_import",
-        "_" + fixtures.pure_swift + "__flutter_framework_raw": framework_kind,
     }
     pure_objc_kinds = {
         "_" + fixtures.pure_objc + "__swift_placeholder": "_write_file",
         "_" + fixtures.pure_objc + "__objc": "objc_library",
-        "_" + fixtures.pure_objc + "__flutter_framework": "apple_framework_modulemap_import",
-        "_" + fixtures.pure_objc + "__flutter_framework_raw": framework_kind,
         fixtures.pure_objc: "swift_library",
     }
     mixed_kinds = {
@@ -1087,8 +1081,6 @@ def _apple_plugin_analysis_tests(
         "_" + fixtures.mixed + "__swift": "swift_library",
         "_" + fixtures.mixed + "__swift_include": "_swift_generated_header_include",
         "_" + fixtures.mixed + "__objc": "objc_library",
-        "_" + fixtures.mixed + "__flutter_framework": "apple_framework_modulemap_import",
-        "_" + fixtures.mixed + "__flutter_framework_raw": framework_kind,
         fixtures.mixed: "flutter_apple_plugin_bundle",
     }
     attrs_name = name + "_mixed_swift_attrs"
@@ -1146,7 +1138,6 @@ def ios_apple_plugin_analysis_tests(name, fixtures):
         name,
         fixtures,
         "ios",
-        "apple_dynamic_xcframework_import",
         _ios_mixed_plugin_swift_header_test,
         _ios_mixed_plugin_objc_input_test,
         _ios_apple_plugin_public_test,
@@ -1166,7 +1157,6 @@ def macos_apple_plugin_analysis_tests(name, fixtures):
         name,
         fixtures,
         "macos",
-        "apple_dynamic_framework_import",
         _macos_mixed_plugin_swift_header_test,
         _macos_mixed_plugin_objc_input_test,
         _macos_apple_plugin_public_test,

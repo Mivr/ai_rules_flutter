@@ -16,6 +16,8 @@ load(
     "plugin_defines_xtool_refusal",
 )
 
+_IOS_ENGINE = "//flutter/private:apple_engine_framework_ios"
+
 def _objc_target_surface_test_impl(ctx):
     """The ObjC target gets the plugin deps and `objc_copts`; Swift gets neither `objc_copts`."""
     env = unittest.begin(ctx)
@@ -162,7 +164,7 @@ def apple_objc_deps_test_suite(name):
         name = name + "_objc_copts_surface",
         objc_deps = [str(d) for d in objc_rule["deps"]],
         expected_objc_deps = [
-            ":_%s__flutter_framework" % objc_plugin,
+            _IOS_ENGINE,
             ":" + name + "_sample_headers",
         ],
         objc_copts = [str(c) for c in objc_rule["copts"]],
@@ -190,7 +192,7 @@ def apple_objc_deps_test_suite(name):
         name = name + "_plain_surface",
         objc_deps = [str(d) for d in plain_objc_rule["deps"]],
         expected_objc_deps = [
-            ":_%s__flutter_framework" % plain_plugin,
+            _IOS_ENGINE,
             ":" + name + "_sample_headers",
         ],
         objc_copts = [str(c) for c in plain_objc_rule["copts"]],
