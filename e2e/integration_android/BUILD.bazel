@@ -75,6 +75,7 @@ flutter_integration_test(
     app_srcs = ["lib/main.dart"],
     assets = ["assets/logo.png"],
     defines = ["COV13_GREETING=hello, world=ok"],
+    defines_files = ["//defines:app_defines.json"],
     native_deps = [":add"],
     platform = "android",
     pub_hub_name = "deps",

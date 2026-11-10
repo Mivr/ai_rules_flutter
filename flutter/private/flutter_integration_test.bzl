@@ -264,7 +264,9 @@ def flutter_integration_test(
             `ios/Runner/Info.plist`.
         **kwargs: Additional attributes forwarded to the rule (`main`, `srcs`,
             `app_srcs`, `assets`, `shaders`, `compiler`, `renderer`,
-            `native_deps`, `defines`, `data`, `env`, etc.).
+            `native_deps`, `defines`, `data`, `env`, etc.). With
+            `platform = "android"`, `defines_files` (`.json` / `.env` files of Dart
+            defines) is also accepted and reaches the app the test builds.
     """
     merged_deps = _merge_integration_test_deps(deps, app_deps, app)
     resolved_package_name = package_name or name

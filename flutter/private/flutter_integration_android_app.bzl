@@ -92,5 +92,6 @@ ANDROID_APP_KWARG_KEYS = (
     "profile",
     "language_version",
     "defines",
+    "defines_files",
     "native_deps",
 )
