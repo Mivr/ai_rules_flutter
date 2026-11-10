@@ -1164,6 +1164,8 @@ common --repo_env=ANDROID_HOME=/path/to/Android/sdk
 common --repo_env=ANDROID_NDK_HOME=/path/to/Android/sdk/ndk/28.2.13676358
 ```
 
+**Persistent workers.** No Android worker flag is enabled: the preset and `e2e/android_example/.bazelrc` leave aapt2, desugar and dex at Bazel's defaults, because the gain was not measured (see [docs/perf-android-workers.md](docs/perf-android-workers.md)). Nothing needs turning off. To try workers yourself, add the flags to your own `.bazelrc.user`, and remove them to go back.
+
 With `ANDROID_NDK_HOME` unset, the build stops during fetch:
 
 ```
