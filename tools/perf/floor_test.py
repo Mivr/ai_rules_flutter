@@ -1,0 +1,426 @@
+#!/usr/bin/env python3
+"""Unit tests for the toolchain floor (fake tools, runners and servers)."""
+
+import argparse
+import io
+import os
+import plistlib
+import struct
+import sys
+import tempfile
+import unittest
+import zipfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import floor
+import floor_apk
+import floor_check
+import floor_flow
+import floor_run
+import floor_sources
+import floor_summary
+import sol
+import sol_summary
+
+
+def touch(path, data=b""):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(data)
+
+
+def fake_sdk(root):
+    """A fake SDK and platform tool directory."""
+    for rel in (
+            "sdk/dart-sdk/bin/dartaotruntime",
+            "sdk/engine/frontend_server_aot.dart.snapshot",
+            "sdk/engine/flutter_patched_sdk/platform_strong.dill",
+            "sdk/engine/flutter_patched_sdk_product/platform_strong.dill",
+            "sdk/engine/ios-release/gen_snapshot",
+            "sdk/engine/android-arm64-release/gen_snapshot",
+            "plat/codesign", "plat/apksigner", "plat/zipalign",
+            "plat/keytool"):
+        touch(os.path.join(root, rel))
+    return [os.path.join(root, "sdk"), os.path.join(root, "plat")]
+
+
+def make_spec(platform, mode, scratch, package="/pkg"):
+    return floor.FloorSpec(platform, mode, package, "file:///app/main.dart",
+                           "/pc.json", scratch)
+
+
+class ChainTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.roots = fake_sdk(self.tmp)
+
+    def chain(self, platform, mode):
+        spec = make_spec(platform, mode, self.tmp)
+        return floor.build_chain(spec, floor.resolve_tools(spec, self.roots))
+
+    def test_debug_chains_start_a_resident_incremental_compile(self):
+        for platform in ("ios", "android"):
+            chain = self.chain(platform, "debug")
+            frontend = [s for s in chain if s.kind == "frontend"]
+            self.assertEqual(["compile", "recompile"],
+                             [s.detail[0] for s in frontend])
+            self.assertFalse(frontend[0].timed)
+            self.assertIn("--incremental", frontend[0].argv)
+            self.assertTrue(frontend[0].argv[0].startswith(self.tmp))
+            self.assertEqual(0, sum(s.name == "gen_snapshot"
+                                    for s in chain))
+
+    def test_release_chains_run_exactly_one_gen_snapshot(self):
+        for platform in ("ios", "android"):
+            chain = self.chain(platform, "release")
+            snaps = [s for s in chain if s.name == "gen_snapshot"]
+            self.assertEqual(1, len(snaps))
+            self.assertEqual("gen_snapshot",
+                             os.path.basename(snaps[0].argv[0]))
+            self.assertIn(
+                "ios" if platform == "ios" else "android-arm64",
+                snaps[0].argv[0])
+            self.assertEqual([], [s for s in chain
+                                  if s.kind == "frontend"])
+
+    def test_resign_is_minimal(self):
+        ios = self.chain("ios", "debug")[-1].argv
+        self.assertNotIn("--deep", ios)
+        android = self.chain("android", "debug")[-1].argv
+        self.assertIn("--v1-signing-enabled", android)
+        self.assertEqual("false",
+                         android[android.index("--v1-signing-enabled") + 1])
+
+    def test_missing_tool_names_itself(self):
+        os.remove(os.path.join(self.tmp, "plat", "apksigner"))
+        spec = make_spec("android", "debug", self.tmp)
+        with self.assertRaises(floor.MissingToolError) as ctx:
+            floor.resolve_tools(spec, self.roots)
+        self.assertIn("apksigner", str(ctx.exception))
+
+    def test_tools_come_from_roots_only(self):
+        spec = make_spec("ios", "debug", self.tmp)
+        with self.assertRaises(floor.MissingToolError):
+            floor.resolve_tools(spec, [os.path.join(self.tmp, "empty")])
+
+
+def make_apk(path, with_manifest=True, payload="assets/flutter_assets/kernel_blob.bin"):
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        if with_manifest:
+            archive.writestr("AndroidManifest.xml", "<manifest/>")
+        if payload:
+            archive.writestr(payload, b"old" * 100)
+        archive.writestr("classes.dex", b"dex" * 50)
+
+
+def make_app(path, executable=True, plist=True):
+    os.makedirs(path)
+    if plist:
+        with open(os.path.join(path, "Info.plist"), "wb") as fh:
+            plistlib.dump({"CFBundleExecutable": "Runner"}, fh)
+    if executable:
+        touch(os.path.join(path, "Runner"))
+
+
+def ok_runner(argv):
+    return (0, "")
+
+
+def bad_runner(argv):
+    return (1, "boom")
+
+
+TOOLS = {"codesign": "codesign", "apksigner": "apksigner",
+         "zipalign": "zipalign"}
+
+
+class CheckTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_good_packages_pass(self):
+        app = os.path.join(self.tmp, "A.app")
+        make_app(app)
+        self.assertEqual((True, "ok"), floor_check.check_package(
+            make_spec("ios", "debug", self.tmp, app), TOOLS, ok_runner))
+        apk = os.path.join(self.tmp, "a.apk")
+        make_apk(apk)
+        self.assertEqual((True, "ok"), floor_check.check_package(
+            make_spec("android", "debug", self.tmp, apk), TOOLS, ok_runner))
+
+    def test_ios_failures(self):
+        app = os.path.join(self.tmp, "A.app")
+        make_app(app, executable=False)
+        spec = make_spec("ios", "debug", self.tmp, app)
+        ok, reason = floor_check.check_package(spec, TOOLS, bad_runner)
+        self.assertFalse(ok)
+        self.assertIn("codesign", reason)
+        self.assertIn("executable", reason)
+        bare = os.path.join(self.tmp, "B.app")
+        make_app(bare, plist=False)
+        ok, reason = floor_check.check_package(
+            make_spec("ios", "debug", self.tmp, bare), TOOLS, ok_runner)
+        self.assertEqual((False, "Info.plist missing"), (ok, reason))
+
+    def test_android_failures(self):
+        apk = os.path.join(self.tmp, "a.apk")
+        make_apk(apk, with_manifest=False, payload=None)
+        ok, reason = floor_check.check_package(
+            make_spec("android", "release", self.tmp, apk), TOOLS,
+            bad_runner)
+        self.assertFalse(ok)
+        for text in ("apksigner", "zipalign", "AndroidManifest.xml",
+                     "payload"):
+            self.assertIn(text, reason)
+
+
+class ApkTest(unittest.TestCase):
+    def test_replace_keeps_other_entries_byte_identical_and_aligned(self):
+        path = os.path.join(tempfile.mkdtemp(), "a.apk")
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("AndroidManifest.xml", "<manifest/>",
+                             zipfile.ZIP_DEFLATED)
+            archive.writestr("lib/arm64-v8a/libapp.so", b"old" * 1000)
+            archive.writestr("classes.dex", b"dex" * 50,
+                             zipfile.ZIP_DEFLATED)
+        with zipfile.ZipFile(path) as archive:
+            before = {i.filename: archive.read(i) for i in archive.infolist()}
+        new = b"newer-payload" * 5000
+        floor_apk.replace_entry(path, "lib/arm64-v8a/libapp.so", new)
+        with zipfile.ZipFile(path) as archive:
+            self.assertIsNone(archive.testzip())
+            self.assertEqual(new, archive.read("lib/arm64-v8a/libapp.so"))
+            self.assertEqual(before["classes.dex"],
+                             archive.read("classes.dex"))
+            self.assertEqual(3, len(archive.infolist()))
+            info = archive.getinfo("lib/arm64-v8a/libapp.so")
+            with open(path, "rb") as fh:
+                fh.seek(info.header_offset + 26)
+                nlen, elen = struct.unpack("<HH", fh.read(4))
+            data_start = info.header_offset + 30 + nlen + elen
+            self.assertEqual(0, data_start % floor_apk.PAGE)
+
+    def test_missing_entry_raises(self):
+        path = os.path.join(tempfile.mkdtemp(), "a.apk")
+        make_apk(path)
+        with self.assertRaises(KeyError):
+            floor_apk.replace_entry(path, "nope", b"x")
+
+
+class FakeServer:
+    instances = []
+
+    def __init__(self, argv):
+        self.argv = argv
+        self.calls = []
+        self.proc = type("P", (), {"poll": lambda s: 0})()
+        FakeServer.instances.append(self)
+
+    def compile(self, entry):
+        self.calls.append(("compile", entry))
+
+    def recompile(self, entry, invalidated):
+        self.calls.append(("recompile", entry, tuple(invalidated)))
+
+    def quit(self):
+        return 0.5
+
+
+class RunTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.roots = fake_sdk(self.tmp)
+        FakeServer.instances = []
+        self.src = os.path.join(self.tmp, "main.dart")
+        touch(self.src, b"old")
+        self.swap = floor_sources.SourceSwap.snapshot(self.tmp)
+        touch(self.src, b"new")
+
+    def runner(self, argv):
+        if "gen_snapshot" in argv[0]:
+            touch(os.path.join(self.tmp, "libapp.so"), b"snap")
+        return (0, 0.25, "")
+
+    def apk_spec(self, mode):
+        apk = os.path.join(self.tmp, "a.apk")
+        make_apk(apk, payload="assets/flutter_assets/kernel_blob.bin"
+                 if mode == "debug" else "lib/arm64-v8a/libapp.so")
+        return floor.FloorSpec("android", mode, apk, "file:///m.dart",
+                               "/pc", self.tmp)
+
+    def test_debug_floor_sums_timed_steps_and_restores_sources(self):
+        spec = self.apk_spec("debug")
+        touch(os.path.join(self.tmp, "app.dill"), b"kernel")
+
+        def checked(argv):
+            return (0, 0.25, "")
+        result = floor_run.run_floor(spec, self.roots, self.swap, checked,
+                                     FakeServer)
+        self.assertEqual("ok", result.reason, result.reason)
+        self.assertTrue(result.identical)
+        self.assertAlmostEqual(0.5 + 0.25, result.cpu_s, delta=0.05)
+        self.assertEqual("compile", FakeServer.instances[0].calls[0][0])
+        with open(self.src, "rb") as fh:
+            self.assertEqual(b"new", fh.read())
+
+    def test_failed_check_has_no_number(self):
+        spec = self.apk_spec("debug")
+        touch(os.path.join(self.tmp, "app.dill"), b"kernel")
+
+        def runner(argv):
+            return (1 if "zipalign" in argv[0] else 0, 0.1, "misaligned")
+        result = floor_run.run_floor(spec, self.roots, self.swap, runner,
+                                     FakeServer)
+        self.assertFalse(result.identical)
+        self.assertIsNone(result.cpu_s)
+        self.assertIn("zipalign", result.reason)
+
+    def test_missing_tool_is_a_reason(self):
+        spec = self.apk_spec("release")
+        result = floor_run.run_floor(spec, [os.path.join(self.tmp, "x")],
+                                     self.swap, self.runner, FakeServer)
+        self.assertFalse(result.identical)
+        self.assertIn("dartaotruntime", result.reason)
+
+    def test_release_floor_replaces_snapshot(self):
+        spec = self.apk_spec("release")
+        result = floor_run.run_floor(spec, self.roots, self.swap,
+                                     self.runner, FakeServer)
+        self.assertTrue(result.identical, result.reason)
+        with zipfile.ZipFile(spec.package) as archive:
+            self.assertEqual(b"snap", archive.read("lib/arm64-v8a/libapp.so"))
+        self.assertEqual([], FakeServer.instances)
+
+
+class FrontendTest(unittest.TestCase):
+    def test_protocol(self):
+        class Proc:
+            pid = 1
+            stdin = io.StringIO()
+            stdout = iter(["result K1\n", "K1 out.dill 0\n"])
+        written = []
+        Proc.stdin.write = written.append
+        Proc.stdin.flush = lambda: None
+        server = floor_run.FrontendServer(
+            ["fe"], popen=lambda *a, **k: Proc())
+        orig = floor_run.process_cpu
+        floor_run.process_cpu = lambda pid: 1.0
+        try:
+            server.compile("file:///m.dart")
+        finally:
+            floor_run.process_cpu = orig
+        self.assertEqual("compile file:///m.dart\n", written[0])
+        self.assertEqual("accept\n", written[1])
+        self.assertEqual(1.0, server.baseline)
+
+
+class FlowTest(unittest.TestCase):
+    def args(self, **extra):
+        base = dict(work=tempfile.mkdtemp(), floor="on")
+        base.update(extra)
+        return argparse.Namespace(**base)
+
+    def test_floor_off_gives_base_output(self):
+        args = self.args(floor="off")
+        self.assertIsNone(floor_flow.snapshot_sources(
+            args, "sim_debug", "core_edit"))
+        self.assertEqual({}, floor_flow.floor_fields(
+            args, "sim_debug", "core_edit", None, None))
+
+    def test_only_mobile_edit_flows(self):
+        args = self.args()
+        self.assertIsNone(floor_flow.snapshot_sources(
+            args, "web_debug", "core_edit"))
+        self.assertIsNone(floor_flow.snapshot_sources(
+            args, "sim_debug", "clean"))
+        self.assertIsNotNone(floor_flow.snapshot_sources(
+            args, "android_debug", "app_edit"))
+
+    def test_failure_sets_reason_only(self):
+        args = self.args()
+        built = argparse.Namespace(bazel_out="/nonexistent", plan=None,
+                                   execroot="/nonexistent")
+        fields = floor_flow.floor_fields(
+            args, "android_debug", "core_edit", built,
+            floor_sources.SourceSwap({}))
+        self.assertFalse(fields["floor_identical"])
+        self.assertIsNone(fields["toolchain_floor"])
+        self.assertNotEqual("ok", fields["floor_reason"])
+
+    def test_success_fields(self):
+        args = self.args()
+        tmp = tempfile.mkdtemp()
+        pc = os.path.join(tmp, "app", "package_config.json")
+        touch(pc, b"{}")
+        apk = os.path.join(tmp, "x.apk")
+        make_apk(apk)
+        built = argparse.Namespace(
+            bazel_out=tmp, execroot=tmp,
+            plan=("archives", [apk], tmp))
+        result = floor_run.FloorResult(1.5, 2.0, True, "ok", {"a": 1.5})
+        fields = floor_flow.floor_fields(
+            args, "android_debug", "core_edit", built,
+            floor_sources.SourceSwap({}),
+            runner=lambda spec, roots, swap: result)
+        self.assertEqual(1.5, fields["toolchain_floor"]["cpu_s"])
+        self.assertTrue(fields["floor_identical"])
+
+
+def sol_record(floor_cpu=None, reason="ok", with_floor=True):
+    record = {"flow": "x", "scenario": "core_edit", "method": "warm",
+              "bazel": {"cpu_s": 30.0, "real_s": 40.0},
+              "sol": {"cpu_s": 10.0, "real_s": 11.0}, "identical": True,
+              "reason": "ok", "n_sol_actions": 3, "worker_steps": {},
+              "profile": {}, "chain": {}}
+    if with_floor:
+        ok = floor_cpu is not None
+        record["toolchain_floor"] = {"cpu_s": floor_cpu} if ok else None
+        record["floor_identical"] = ok
+        record["floor_reason"] = reason
+    return record
+
+
+class SummaryTest(unittest.TestCase):
+    def test_floor_beside_unchanged_sol(self):
+        records = [sol_record(5.0), sol_record(6.0), sol_record(7.0)]
+        flow = sol_summary.summarize_flow(records, "cpu_seconds")
+        base = sol_summary.summarize_flow(
+            [sol_record(with_floor=False)] * 3, "cpu_seconds")
+        self.assertEqual(base["sol"], flow["sol"])
+        self.assertEqual(6.0, flow["toolchain_floor"])
+        self.assertEqual([5.0, 7.0], flow["spread"]["toolchain_floor"])
+        self.assertAlmostEqual(5.0, flow["bazel_over_toolchain_floor"])
+        self.assertTrue(flow["floor_identical"])
+        self.assertEqual("ok", flow["floor_reason"])
+
+    def test_failed_floor_leaves_sol(self):
+        records = [sol_record(5.0), sol_record(None, "apksigner verify failed")]
+        flow = sol_summary.summarize_flow(records, "cpu_seconds")
+        self.assertIsNone(flow["toolchain_floor"])
+        self.assertFalse(flow["floor_identical"])
+        self.assertIn("apksigner", flow["floor_reason"])
+        self.assertEqual(10.0, flow["sol"])
+        self.assertTrue(flow["identical"])
+
+    def test_no_floor_keys_without_floor_records(self):
+        flow = sol_summary.summarize_flow(
+            [sol_record(with_floor=False)], "cpu_seconds")
+        for key in ("toolchain_floor", "floor_identical", "floor_reason",
+                    "bazel_over_toolchain_floor"):
+            self.assertNotIn(key, flow)
+        self.assertNotIn("toolchain_floor", flow["spread"])
+        self.assertFalse(floor_summary.has_floor([sol_record(
+            with_floor=False)]))
+
+    def test_parser_floor_flag(self):
+        parser = sol.build_parser()
+        base = ["run", "--tools", "t", "--pristine", "p", "--work", "w",
+                "--out-base", "o", "--results", "r", "--rep", "1"]
+        self.assertEqual("on", parser.parse_args(base).floor)
+        self.assertEqual("off", parser.parse_args(
+            base + ["--floor=off"]).floor)
+
+
+if __name__ == "__main__":
+    unittest.main()
