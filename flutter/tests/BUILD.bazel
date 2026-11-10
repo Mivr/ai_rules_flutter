@@ -77,6 +77,7 @@ load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pubspec_errors_test.bzl", "pubspec_errors_test_suite")
 load(":repo_metadata_test.bzl", "repo_metadata_test_suite")
 load(":rules_dart_floor_test.bzl", "rules_dart_floor_test_suite")
+load(":sdk_source_and_ios_engine_repos_test.bzl", "sdk_source_and_ios_engine_repos_test_suite")
 load(":shader_compile_test.bzl", "shader_compile_test_suite")
 load(":shader_keys_test.bzl", "shader_keys_test_suite")
 load(":starlark_hygiene_test.bzl", "starlark_hygiene_test_suite")
@@ -492,6 +493,8 @@ pubspec_errors_test_suite(name = "pubspec_errors_test")
 rules_dart_floor_test_suite(name = "rules_dart_floor_test")
 
 flutter_sdk_package_test_suite(name = "flutter_sdk_package_test")
+
+sdk_source_and_ios_engine_repos_test_suite(name = "sdk_source_and_ios_engine_repos_test")
 
 flutter_test_bootstrap_test_suite(name = "flutter_test_bootstrap_test")
 

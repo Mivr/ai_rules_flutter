@@ -513,8 +513,6 @@ bzl_library(
     srcs = ["flutter_gen_l10n_repo.bzl"],
     visibility = ["//visibility:public"],
     deps = [
-        ":artifact_urls",
-        ":download",
         ":local_sdk",
         ":repo_metadata",
     ],
@@ -1391,6 +1389,7 @@ bzl_library(
     deps = [
         ":artifact_urls",
         ":download",
+        ":flutter_sky_engine_repo",
         ":local_sdk",
         ":repo_metadata",
         "@rules_dart//dart/pub:pub_lock_package",

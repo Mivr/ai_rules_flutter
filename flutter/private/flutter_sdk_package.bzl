@@ -4,6 +4,10 @@ Downloads the Flutter SDK source from GitHub and generates a dart_library
 target for the framework. Follows the same hub/spoke pattern as rules_dart's
 pub_lock_package, so it integrates seamlessly into the same hub repo.
 
+The framework source tarball is downloaded and extracted once per SDK version
+by `flutter_sdk_source_repo`; every spoke (and the gen-l10n repo) reads its
+package out of that one extraction instead of unpacking the tarball again.
+
 Like a pub spoke, an SDK spoke declares the language version its own
 `environment.sdk` implies, which is what pub writes for these packages too.
 Omitting it is not neutral: `package_config.json` reads a missing
@@ -12,8 +16,9 @@ Omitting it is not neutral: `package_config.json` reads a missing
 
 load("@rules_dart//dart/pub:pub_lock_package.bzl", "derive_language_version")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "parse_pubspec_deps", "parse_pubspec_sdk_constraint", "pubspec_sdk_constraint_error")
-load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "require_sha256")
+load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url", "require_sha256", "source_strip_prefix")
 load("//flutter/private:download.bzl", "pinned_download_and_extract")
+load("//flutter/private:flutter_sky_engine_repo.bzl", "list_local_files")
 load("//flutter/private:local_sdk.bzl", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
 load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 
@@ -94,8 +99,38 @@ dart_library(
         language_version = language_version,
     )
 
+def copy_sdk_package_from_source(repository_ctx, package_name):
+    """Stages `lib/` and `pubspec.yaml` as repo-owned copies from `sdk_source`.
+
+    Args:
+        repository_ctx: The repository rule context.
+        package_name: The SDK package name under `packages/`.
+    """
+    source_root = repository_ctx.path(repository_ctx.attr.sdk_source).dirname
+    pubspec_src = source_root.get_child("packages/{}/pubspec.yaml".format(package_name))
+    if not pubspec_src.exists:
+        fail("{}: the Flutter {} source has no packages/{}/pubspec.yaml".format(
+            repository_ctx.name,
+            repository_ctx.attr.flutter_version,
+            package_name,
+        ))
+    repository_ctx.file("pubspec.yaml", repository_ctx.read(pubspec_src), executable = False)
+    lib_src = source_root.get_child("packages/{}/lib".format(package_name))
+    if not lib_src.exists:
+        fail("{}: the Flutter {} source has no packages/{}/lib".format(
+            repository_ctx.name,
+            repository_ctx.attr.flutter_version,
+            package_name,
+        ))
+    what = "the {} package sources".format(package_name)
+    for rel in list_local_files(lib_src, what, str(lib_src)):
+        repository_ctx.file(
+            "lib/" + rel,
+            repository_ctx.read(lib_src.get_child(rel)),
+            executable = False,
+        )
+
 def _flutter_sdk_package_impl(repository_ctx):
-    flutter_version = repository_ctx.attr.flutter_version
     package_name = repository_ctx.attr.package_name
 
     if getattr(repository_ctx.attr, "local_path", ""):
@@ -122,22 +157,11 @@ def _flutter_sdk_package_impl(repository_ctx):
             "the {} package pubspec".format(package_name),
         )
     else:
-        # Download Flutter SDK source, extracting only the relevant package.
-        #
-        # One spoke exists per SDK package, so this same tarball is requested once
-        # per package in the lock, and again by flutter_gen_l10n_repo and
-        # flutter_dev_root_repo. Because every one of those fetches is pinned to
-        # the same checksum, Bazel's content-addressed repository cache serves
-        # them all from a single download; an unpinned fetch could not be
-        # deduplicated that way.
-        tarball_url = getattr(repository_ctx.attr, "source_url", "") or flutter_source_tarball_url(flutter_version)
-        strip_prefix = getattr(repository_ctx.attr, "source_strip_prefix", "") or "flutter-{}/".format(flutter_version)
-        pinned_download_and_extract(
-            repository_ctx,
-            url = tarball_url,
-            sha256 = require_sha256(repository_ctx.attr.sha256, tarball_url),
-            stripPrefix = strip_prefix + "packages/{}".format(package_name),
-        )
+        # The package comes out of the version's one shared extraction (see
+        # `flutter_sdk_source_repo`), staged as repo-owned copies so the spoke
+        # holds no symlink into another repository and can share one entry in
+        # the repo contents cache across output bases.
+        copy_sdk_package_from_source(repository_ctx, package_name)
 
     # Discover deps and the language version from the spoke pubspec.yaml,
     # filtering deps to packages available in the lock file (same pattern as
@@ -189,6 +213,7 @@ kt_android_library(
     visibility = ["//visibility:public"],
 )
 """)
+
     return download_mode_metadata(repository_ctx)
 
 flutter_sdk_package = repository_rule(
@@ -196,7 +221,7 @@ flutter_sdk_package = repository_rule(
     doc = "Downloads a Flutter SDK package (e.g. package:flutter) and generates a dart_library target.",
     attrs = {
         "flutter_version": attr.string(
-            doc = "Flutter SDK version tag on GitHub. Empty means a local " +
+            doc = "Flutter SDK version, for error messages. Empty means a local " +
                   "SDK (with `local_path`).",
             default = "",
         ),
@@ -204,26 +229,11 @@ flutter_sdk_package = repository_rule(
             doc = "The package name within the Flutter SDK (e.g. 'flutter', 'flutter_test').",
             mandatory = True,
         ),
-        "sha256": attr.string(
-            doc = "Expected SHA-256 of the Flutter SDK source tarball. " +
-                  "Guaranteed non-empty by the caller: extensions.bzl reads " +
-                  "it through `flutter_source_sha256()`, which refuses a " +
-                  "version with no recorded checksum. Empty means a local " +
-                  "SDK (with `local_path`), which needs no source tarball.",
-            default = "",
-        ),
-        "source_url": attr.string(
-            doc = "Optional replacement framework source tarball URL from a " +
-                  "custom `flutter.version` registration. Empty means the " +
-                  "default GitHub tag tarball. Plain mirrors stay Bazel's " +
-                  "job (`--downloader_config`), not an attribute.",
-            default = "",
-        ),
-        "source_strip_prefix": attr.string(
-            doc = "Top-level directory the source tarball extracts to. " +
-                  "Empty means the stock `flutter-{version}/` layout (or " +
-                  "`flutter-{tag}/` for a mirrored stock tarball URL).",
-            default = "",
+        "sdk_source": attr.label(
+            doc = "The `flutter_sdk_source_repo` extraction of this version " +
+                  "(its `BUILD.bazel`), shared by every spoke. Unused with " +
+                  "`local_path`.",
+            allow_single_file = True,
         ),
         "local_path": attr.string(
             doc = "Optional path to a pre-extracted Flutter SDK " +
@@ -245,3 +255,94 @@ flutter_sdk_package = repository_rule(
         ),
     },
 )
+
+def _flutter_sdk_source_repo_impl(repository_ctx):
+    version = repository_ctx.attr.flutter_version
+    url = repository_ctx.attr.source_url or flutter_source_tarball_url(version)
+    strip_prefix = repository_ctx.attr.source_strip_prefix or "flutter-{}/".format(version)
+
+    # The one extraction of the version's tarball: `packages/` only, which
+    # holds every SDK package spoke and flutter_tools (gen-l10n). The
+    # content-addressed repository cache shares the download; this rule is what
+    # shares the extraction.
+    pinned_download_and_extract(
+        repository_ctx,
+        url = url,
+        sha256 = require_sha256(repository_ctx.attr.sha256, url),
+        output = "packages",
+        stripPrefix = strip_prefix + "packages",
+    )
+    repository_ctx.file("BUILD.bazel", "# Generated by flutter_sdk_package.bzl\n")
+    return repository_ctx.repo_metadata(reproducible = True)
+
+flutter_sdk_source_repo = repository_rule(
+    implementation = _flutter_sdk_source_repo_impl,
+    doc = "Downloads and extracts the packages/ tree of one Flutter SDK source tarball, once.",
+    attrs = {
+        "flutter_version": attr.string(doc = "Flutter SDK version tag on GitHub.", mandatory = True),
+        "sha256": attr.string(
+            doc = "Expected SHA-256 of the source tarball, guaranteed non-empty by the caller " +
+                  "(`flutter_source_sha256()` refuses a version with no recorded checksum).",
+            mandatory = True,
+        ),
+        "source_url": attr.string(
+            doc = "Optional replacement framework source tarball URL from a custom " +
+                  "`flutter.version` registration. Empty means the default GitHub tag tarball.",
+            default = "",
+        ),
+        "source_strip_prefix": attr.string(
+            doc = "Top-level directory the source tarball extracts to. Empty means `flutter-{version}/`.",
+            default = "",
+        ),
+    },
+)
+
+def declare_sdk_source(toolchain_name, flutter_version, sha256, source_url, rule = flutter_sdk_source_repo):
+    """Declares the one shared source repository of a downloaded SDK version.
+
+    Args:
+        toolchain_name: The toolchain registration name (`flutter`).
+        flutter_version: The Flutter SDK version.
+        sha256: The source tarball checksum, from `flutter_source_sha256()`.
+        source_url: The custom source tarball URL, or `""`.
+        rule: The repository rule to declare; replaceable so a test can count
+            the extractions without fetching.
+
+    Returns:
+        The label string spokes and gen-l10n use to find the extraction.
+    """
+    name = toolchain_name + "_sdk_source"
+    rule(
+        name = name,
+        flutter_version = flutter_version,
+        sha256 = sha256,
+        source_url = source_url,
+        source_strip_prefix = source_strip_prefix(flutter_version, source_url),
+    )
+    return "@{}//:BUILD.bazel".format(name)
+
+def declare_sdk_spokes(plan, packages, sdk, rule = flutter_sdk_package):
+    """Declares one `flutter_sdk_package` spoke per SDK package.
+
+    None of them unpacks a tarball: a downloaded version's spokes link into
+    the `declare_sdk_source` extraction (`sdk.source_label`), a local SDK's
+    into the local tree.
+
+    Args:
+        plan: The hub plan, with `hub_name`, `all_package_names`, `scc_targets`.
+        packages: The SDK package names that get a spoke.
+        sdk: Struct with `version`, `local_path` and `source_label`
+            (empty for a local SDK).
+        rule: The repository rule to declare; replaceable for tests.
+    """
+    for name in packages:
+        rule(
+            name = plan.hub_name + "__" + name,
+            package_name = name,
+            flutter_version = sdk.version,
+            local_path = sdk.local_path,
+            sdk_source = sdk.source_label or None,
+            hub_name = plan.hub_name,
+            lock_packages = plan.all_package_names,
+            scc_targets = plan.scc_targets,
+        )
