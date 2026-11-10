@@ -37,11 +37,8 @@ def android_integration_app_kernel(ctx, setup, sources, native_assets):
     """
     if not ctx.files.defines_files:
         return integration_test_kernel(ctx, setup.sdk, sources, native_assets, setup.aot, setup.mode)
-    platform_dill = (
-        setup.sdk.platform_kernel_dill_product
-        if setup.aot and setup.mode == "release"
-        else setup.sdk.platform_kernel_dill
-    )
+    is_release_aot = setup.aot and setup.mode == "release"
+    platform_dill = setup.sdk.platform_kernel_dill_product if is_release_aot else setup.sdk.platform_kernel_dill
     if platform_dill == None:
         return integration_test_kernel(ctx, setup.sdk, sources, native_assets, setup.aot, setup.mode)
     user_defines = merge_dart_defines(ctx)
