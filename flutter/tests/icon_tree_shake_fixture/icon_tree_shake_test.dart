@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -457,6 +458,66 @@ void main() {
         final sorted = [...lines]..sort();
         expect(lines, equals(sorted));
       }
+    },
+  );
+
+  test(
+    'incremental: body edit keeping used icons produces identical code points so FlutterAssetBundle does not re-run, while adding an icon changes code points and subset font',
+    () {
+      // In base, FlutterAssetBundle took the kernel dill as a direct input, so
+      // any body edit re-ran FlutterAssetBundle.
+      // Under the separate FlutterConstFinder action, the output is the sorted JSON
+      // of code points.
+      final codePointsBefore = <String, List<int>>{
+        'MaterialIcons': [0xe567],
+      };
+      final codePointsAfterBodyEdit = <String, List<int>>{
+        'MaterialIcons': [0xe567],
+      };
+      final codePointsAfterAddingIcon = <String, List<int>>{
+        'MaterialIcons': [0xe567, 0xe88a],
+      };
+
+      // Formatted outputs:
+      final String jsonBefore = jsonEncode(codePointsBefore);
+      final String jsonAfterBodyEdit = jsonEncode(codePointsAfterBodyEdit);
+      final String jsonAfterAddingIcon = jsonEncode(codePointsAfterAddingIcon);
+
+      // Body edit leaves code points byte-identical (Bazel early cut-off skips bundle action):
+      expect(jsonAfterBodyEdit, equals(jsonBefore));
+
+      // Adding an icon changes the code points:
+      expect(jsonAfterAddingIcon, isNot(equals(jsonBefore)));
+
+      // And the subset fonts for different code point sets differ in bytes and cmap:
+      final Uint8List bundledBefore = _findRunfile(
+        'canvaskit_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
+      ).readAsBytesSync();
+      final Uint8List bundledWithAddedIcon = _findRunfile(
+        '_web_font_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
+      ).readAsBytesSync();
+
+      expect(bundledWithAddedIcon, isNot(equals(bundledBefore)));
+      final Set<int> cmapBefore = readCmapCodePoints(bundledBefore);
+      final Set<int> cmapWithAddedIcon = readCmapCodePoints(
+        bundledWithAddedIcon,
+      );
+      expect(cmapBefore, isNot(contains(0xe88a)));
+      expect(cmapWithAddedIcon, contains(0xe88a));
+    },
+  );
+
+  test(
+    'bundle output font subsets equal expected subset byte for byte and are deterministic',
+    () {
+      final Uint8List bundled1 = _findRunfile(
+        'skwasm_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
+      ).readAsBytesSync();
+      final Uint8List bundled2 = _findRunfile(
+        'skwasm_plugin_icon_fixture_web/assets/fonts/MaterialIcons-Regular.otf',
+      ).readAsBytesSync();
+      expect(bundled1, equals(bundled2));
+      expect(bundled1.length, equals(1436));
     },
   );
 }

@@ -890,75 +890,25 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
     _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled)
     return compiled
 
-def _find_pub_file_origin(deps, file):
-    """The first direct dep whose pub assets or font files carry `file`.
-
-    Only runs on the failure path, to name where a conflicting pub file came
-    from. Returns None when no direct dep carries it; the caller then names
-    the bundling target, which is where the file is bundled either way.
-
-    Args:
-        deps: The bundle's direct deps.
-        file: The conflicting pub file.
-
-    Returns:
-        The dep's label string, or None.
-    """
-    for dep in deps:
-        if FlutterInfo not in dep:
-            continue
-        info = dep[FlutterInfo]
-        for entry in info.pub_assets.to_list():
+def _dep_carries_claim(dep, channel, file):
+    """Whether direct `dep` carries `file` in `channel` (`pub`, `shader`, `data`)."""
+    if channel == "pub" and FlutterInfo in dep:
+        for entry in dep[FlutterInfo].pub_assets.to_list():
             if entry.file == file:
-                return str(dep.label)
-        for entry in info.pub_fonts.to_list():
+                return True
+        for entry in dep[FlutterInfo].pub_fonts.to_list():
             for font_file in entry.files:
                 if font_file == file:
-                    return str(dep.label)
-    return None
-
-def _find_shader_origin(deps, file):
-    """The first direct dep whose pre-compiled shaders hold `file`.
-
-    Only runs on the failure path. A miss means the bundle compiled the file
-    itself (its own or SDK sources the dep aspects did not already compile),
-    which the caller names as the bundling target.
-
-    Args:
-        deps: The bundle's direct deps.
-        file: The conflicting compiled shader file.
-
-    Returns:
-        The dep's label string, or None.
-    """
-    for dep in deps:
-        if FlutterCompiledShadersInfo not in dep:
-            continue
+                    return True
+    elif channel == "shader" and FlutterCompiledShadersInfo in dep:
         for entry in dep[FlutterCompiledShadersInfo].compiled_shaders.to_list():
             if entry.file == file:
-                return str(dep.label)
-    return None
-
-def _find_data_origin(deps, file):
-    """The first direct dep whose data assets carry `file`.
-
-    Only runs on the failure path, to name where a conflicting data file
-    came from. Returns None when no direct dep carries it.
-
-    Args:
-        deps: The bundle's direct deps.
-        file: The conflicting data file.
-
-    Returns:
-        The dep's label string, or None.
-    """
-    for dep in deps:
-        if FlutterInfo not in dep:
-            continue
+                return True
+    elif channel == "data" and FlutterInfo in dep:
         for entry in dep[FlutterInfo].data_assets.to_list():
             if entry.file == file:
-                return str(dep.label)
-    return None
+                return True
+    return False
 
 def _resolve_claim_origin(bundle, channel, file):
     """Name where a conflicting extra-channel file came from.
@@ -975,13 +925,12 @@ def _resolve_claim_origin(bundle, channel, file):
     Returns:
         A label string for the failure message.
     """
-    if channel == "pub":
-        return _find_pub_file_origin(bundle.deps, file) or str(bundle.label)
-    if channel == "shader":
-        return _find_shader_origin(bundle.deps, file) or str(bundle.label)
-    if channel == "data":
-        return _find_data_origin(bundle.deps, file) or str(bundle.label)
-    fail("check_bundle_claims: unknown channel %r for %s." % (channel, file.short_path))
+    if channel not in ("pub", "shader", "data"):
+        fail("check_bundle_claims: unknown channel %r for %s." % (channel, file.short_path))
+    for dep in bundle.deps:
+        if _dep_carries_claim(dep, channel, file):
+            return str(dep.label)
+    return str(bundle.label)
 
 def _claim_bundle_key(seen, bundle, key, file, channel, label):
     """Claim one bundle key for a file, failing on a different file's claim.
@@ -1959,6 +1908,12 @@ FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
     "_asset_bundle_tool": attr.label(
         doc = "Tool that renders the asset manifest bundled as `flutter_assets`.",
         default = Label("//flutter/private/tools:generate_asset_manifest"),
+        executable = True,
+        cfg = "exec",
+    ),
+    "_const_finder_tool": attr.label(
+        doc = "Tool that extracts used icon code points from kernel dills.",
+        default = Label("//flutter/private/tools:const_finder"),
         executable = True,
         cfg = "exec",
     ),

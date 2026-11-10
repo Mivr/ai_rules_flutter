@@ -119,7 +119,8 @@ def _dedupe_bundle_keys(assets):
 
     The same file reaches the bundle once per declaring entry (two entries
     declaring `a/b.png` both carry `a/2.0x/b.png`), while the copies map
-    already collapses to one file per key. Grouping a repeated key twice would list its variant twice; flutter_tools keeps one
+    already collapses to one file per key. Grouping a repeated key twice
+    would list its variant twice; flutter_tools keeps one
     manifest entry per declaration key instead (`asset.dart:905-930`), so a
     repeat contributes nothing.
 
@@ -326,6 +327,79 @@ def _add_collapsed_copies(asset_paths, copies):
             if collapsed not in copies:
                 copies[collapsed] = copies[dest]
 
+def _const_finder_action(ctx, shaking, all_kernel_dills):
+    """Run `const_finder` on kernel dills to extract used icon code points.
+
+    Args:
+        ctx: Rule context providing `_const_finder_tool` and `actions`.
+        shaking: The `make_tree_shake` struct holding tools and SDK files.
+        all_kernel_dills: List of kernel dill `File`s to scan for const icons.
+
+    Returns:
+        The declared JSON `File` containing the extracted code points map.
+    """
+    if shaking.tree_shake_key:
+        code_points_name = "%s.%x.icon_code_points.json" % (
+            ctx.label.name,
+            hash(shaking.tree_shake_key) & 0xffffffff,
+        )
+    else:
+        code_points_name = ctx.label.name + ".icon_code_points.json"
+    code_points_file = ctx.actions.declare_file(code_points_name)
+    args = ctx.actions.args()
+    args.add("--output", code_points_file)
+    args.add("--dart", shaking.dart)
+    args.add("--const-finder", shaking.const_finder)
+    args.add_all(all_kernel_dills, before_each = "--kernel-file")
+
+    transitive_inputs = []
+    if shaking.flutter_sdk_files:
+        transitive_inputs.append(shaking.flutter_sdk_files)
+
+    tool = getattr(ctx.executable, "_const_finder_tool", None)
+    if tool == None:
+        fail("%s: _const_finder_tool is required on rule attrs for icon tree shaking" % ctx.label)
+
+    ctx.actions.run(
+        executable = tool,
+        arguments = [args],
+        inputs = depset(
+            direct = [shaking.dart, shaking.const_finder] + all_kernel_dills,
+            transitive = transitive_inputs,
+        ),
+        outputs = [code_points_file],
+        mnemonic = "FlutterConstFinder",
+        progress_message = "Finding const icons for %s" % ctx.label,
+        toolchain = None,
+    )
+    return code_points_file
+
+def _build_bundle_copies(content):
+    """Build asset paths and copy map relative to the output directory.
+
+    Args:
+        content: What goes into the bundle, from `make_bundle_content`.
+
+    Returns:
+        A `(asset_paths, copies, extra_files)` tuple.
+    """
+    asset_paths = []
+    copies = {}
+    for entry in content.assets:
+        if entry.key not in copies:
+            asset_paths.append(entry.key)
+        copies[entry.key] = entry.file.path
+
+    extra_files = []
+    for dest_path, f in content.extra_asset_copies.items():
+        if dest_path not in copies:
+            asset_paths.append(dest_path)
+        copies[dest_path] = f.path
+        extra_files.append(f)
+
+    _add_collapsed_copies(asset_paths, copies)
+    return asset_paths, copies, extra_files
+
 def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
     """Create an action that generates the flutter_assets/ tree artifact.
 
@@ -351,34 +425,7 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
         fail("flutter_asset_bundle_action: `output_dir` is required — declare it with ctx.actions.declare_directory().")
     tool = ctx.executable._asset_bundle_tool
 
-    # Build asset paths and copy map relative to the output directory. The key
-    # travels with the file — set once by the target that listed the asset —
-    # so this action keys every file by its carried key and computes none.
-    # The manifest decodes those keys (`build_asset_manifest`); the copies
-    # keep them encoded.
-    # One channel may repeat a key another already claimed for the same file
-    # (a diamond, or an own asset a dep also ships through pub): both callers
-    # refuse two different files for one key before reaching this action, so
-    # a repeat here is always the same file, and the manifest lists each key
-    # once. The copies map already collapses to one entry per key.
-    asset_paths = []
-    copies = {}
-    for entry in content.assets:
-        if entry.key not in copies:
-            asset_paths.append(entry.key)
-        copies[entry.key] = entry.file.path
-
-    # Add extra copies with custom destination paths.
-    extra_files = []
-    for dest_path, f in content.extra_asset_copies.items():
-        if dest_path not in copies:
-            asset_paths.append(dest_path)
-        copies[dest_path] = f.path
-        extra_files.append(f)
-
-    # An entry keeping an empty segment also bundles its collapsed file
-    # under the collapsed key, holding the same file flutter_tools read.
-    _add_collapsed_copies(asset_paths, copies)
+    asset_paths, copies, extra_files = _build_bundle_copies(content)
 
     # Build manifest structure.
     manifest = build_asset_manifest(asset_paths)
@@ -395,21 +442,16 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
     # Icon tree shaking config.
     all_kernel_dills = kernel_dills_of(shaking)
     extra_inputs = []
-    transitive_inputs = []
     if shaking.const_finder and shaking.font_subset and all_kernel_dills:
+        icon_code_points = _const_finder_action(ctx, shaking, all_kernel_dills)
         icon_cfg = {
-            "dart": shaking.dart.path,
-            "const_finder": shaking.const_finder.path,
             "font_subset": shaking.font_subset.path,
-            "kernel_dill": all_kernel_dills[0].path,
-            "kernel_dills": [d.path for d in all_kernel_dills],
+            "code_points": icon_code_points.path,
         }
         if shaking.tree_shake_key:
             icon_cfg["key"] = "%x" % (hash(shaking.tree_shake_key) & 0xffffffff)
         config["icon_tree_shaking"] = icon_cfg
-        extra_inputs.extend([shaking.dart, shaking.const_finder, shaking.font_subset] + all_kernel_dills)
-        if shaking.flutter_sdk_files:
-            transitive_inputs.append(shaking.flutter_sdk_files)
+        extra_inputs.extend([shaking.font_subset, icon_code_points])
 
     config_content = json.encode(config)
     config_name = (
@@ -429,7 +471,6 @@ def flutter_asset_bundle_action(ctx, content, shaking, output_dir):
         inputs = depset(
             direct = [config_file] + [entry.file for entry in content.assets] + extra_files + content.license_files +
                      extra_inputs,
-            transitive = transitive_inputs,
         ),
         outputs = [output_dir],
         mnemonic = "FlutterAssetBundle",
