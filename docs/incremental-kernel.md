@@ -31,16 +31,28 @@ environment variable names, or `bazel` on PATH: under `bazel run` the PATH
 `bazel` is Bazel's own binary, so a caller whose Bazel is a wrapper sets
 `BAZEL` to that wrapper.
 
-## Turning it on
+## Default and opting out
+
+The worker is on by default for debug builds (`-c dbg`), which is what the
+iOS simulator and Android debug flows build, so a debug edit does not pay a
+cold `frontend_server`. Every other compilation mode (fastbuild, opt) and
+every AOT, web, `from_dill`, `import_dill` or `recorded_uses` compile runs
+the stock one-shot action, byte-identical to a build without the worker, so
+release, CI and remote-cache builds keep hitting their caches.
+
+To restore the stock action in a debug build:
 
 ```sh
-bazel build --@rules_flutter//flutter:incremental_kernel //app:app
+bazel build -c dbg --@rules_flutter//flutter:incremental_kernel=false //app:app
 ```
 
-The flag is a `bool_flag` defaulting to `False`. Turning it off again (or
-just omitting it) restores the stock one-shot action: with the flag off the
-`FlutterKernelCompile` actions are byte-identical to a build without the
-flag, so remote and local caches keep hitting.
+The flag is a `bool_flag` defaulting to `True`. The worker's dill is
+canonically equal to the one-shot dill (above), but a debug build that goes
+through a remote cache or executor with the worker route gets a different
+action key than the stock action; set the flag to `false` there. The bench
+(`tools/perf/incr_kernel_ab.py`) reports the iOS (`sim_debug`) and Android
+(`android_debug`) debug body-edit flows with each setting on and off in one
+session, so the numbers behind the default are reproducible.
 
 ## Dev-only incremental serialization
 
@@ -56,6 +68,11 @@ default `False`) starts it without that flag, which keeps the server's
 incremental serialization. A reporter measured the reset phase at 13-16 s
 with the default against 1.6 s without it (one build each, one machine).
 
+- It is **not** the default, and cannot be: its dill is not byte-identical to
+  a one-shot compile and its compiles carry `no-remote-cache` and
+  `no-remote-exec`, so defaulting it on would take every debug build off
+  shared caches and remote executors and make outputs differ between a
+  cold and a warm build.
 - It only has an effect together with `//flutter:incremental_kernel`, on the
   same compiles that flag routes through the worker.
 - The resulting dill is **not byte-identical** to a one-shot compile.
@@ -68,9 +85,8 @@ with the default against 1.6 s without it (one build each, one machine).
 
 ## Scope
 
-JIT whole-program compiles only (`target == "flutter"`, non-AOT, in any
-compilation mode — the predicate has deliberately no `-c` condition). The
-flag never applies to AOT, web (`dartdevc`), `from_dill`,
+JIT whole-program compiles of debug builds only (`target == "flutter"`,
+non-AOT, `-c dbg`). The flag never applies to AOT, web (`dartdevc`), `from_dill`,
 `import_dill` or `recorded_uses` compiles — those always run the stock
 action. The guard and read-set checks enforce the same manifest-only policy
 as the stock `kernel_filter` path — allowances come only from the

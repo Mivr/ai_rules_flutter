@@ -201,13 +201,15 @@ def _check_extra_flags(label, extra_flags):
 def _is_incr_worker(ctx, aot, target, from_dill, import_dill, recorded_uses):
     """Whether the compile runs through the incremental worker.
 
-    Opt-in via `--@rules_flutter//flutter:incremental_kernel`: JIT
-    whole-program compiles only (`target == "flutter"`, non-AOT, in any
-    compilation mode — deliberately no `-c` condition) — never AOT, web
-    (`dartdevc`), `from_dill`, `import_dill` or `recorded_uses` compiles.
+    On by default for debug builds (`-c dbg`) and off in every other
+    compilation mode; `--@rules_flutter//flutter:incremental_kernel=false`
+    restores the one-shot action. JIT whole-program compiles only
+    (`target == "flutter"`, non-AOT) — never AOT, web (`dartdevc`),
+    `from_dill`, `import_dill` or `recorded_uses` compiles.
     """
     return (
         ctx.attr._incremental_kernel[BuildSettingInfo].value and
+        ctx.var["COMPILATION_MODE"] == "dbg" and
         not aot and target == "flutter" and
         from_dill == None and import_dill == None and recorded_uses == None
     )
@@ -704,9 +706,9 @@ def flutter_kernel_compile_action(ctx, tools, sources, outputs, options, dills, 
         main = sources.main,
     )
 
-    # Opt-in incremental compiles run the debug JIT whole-program compile
-    # through the persistent worker. With the flag off every action below is
-    # unchanged.
+    # Incremental compiles run the debug JIT whole-program compile through
+    # the persistent worker. Outside `-c dbg`, or with the flag off, every
+    # action below is unchanged.
     incr_worker = _is_incr_worker(
         ctx,
         options.aot,
