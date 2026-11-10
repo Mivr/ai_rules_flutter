@@ -14,7 +14,7 @@ Pins that:
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("//flutter:defs.bzl", "flutter_application")
+load("//flutter:defs.bzl", "flutter_application", "flutter_integration_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 
 _PACKAGE = "defines_files_fixture"
@@ -197,6 +197,44 @@ def _no_defines_files_test_impl(ctx):
 
     return analysistest.end(env)
 
+def _android_it_defines_files_test_impl(ctx):
+    """Android flutter_integration_test forwards defines_files to its app kernel compile."""
+    env = analysistest.begin(ctx)
+    df_action = _defines_files_action(env)
+    kernel_act = _kernel_action(env)
+    if df_action and kernel_act:
+        df_inputs = _action_paths(df_action)
+        asserts.true(
+            env,
+            any([p.endswith(_JSON_FILE) for p in df_inputs]),
+            "expected JSON file in Android app FlutterDefinesFiles inputs, got %s" % df_inputs,
+        )
+        generated_flagfile = [f.path for f in df_action.outputs.to_list()][0]
+        k_inputs = _action_paths(kernel_act)
+        asserts.true(
+            env,
+            generated_flagfile in k_inputs,
+            "expected generated flagfile %s in Android app kernel inputs, got %s" % (generated_flagfile, k_inputs),
+        )
+        argv = kernel_act.argv
+        asserts.true(
+            env,
+            "@" + generated_flagfile in argv,
+            "expected @%s in Android app kernel argv, got %s" % (generated_flagfile, argv),
+        )
+        for arg in argv:
+            asserts.false(
+                env,
+                "secret_from_json" in arg,
+                "secret value leaked into Android app kernel argv %s" % arg,
+            )
+        asserts.true(
+            env,
+            argv.index("-D" + _VISIBLE_DEFINE) < argv.index("@" + generated_flagfile),
+            "expected explicit define before generated flagfile in Android app kernel argv",
+        )
+    return analysistest.end(env)
+
 _DBG = {
     "//command_line_option:compilation_mode": "dbg",
     str(Label("//flutter:profile")): False,
@@ -208,6 +246,10 @@ _defines_files_test = analysistest.make(
 )
 _no_defines_files_test = analysistest.make(
     _no_defines_files_test_impl,
+    config_settings = _DBG,
+)
+_android_it_defines_files_test = analysistest.make(
+    _android_it_defines_files_test_impl,
     config_settings = _DBG,
 )
 
@@ -259,6 +301,27 @@ def defines_files_test_suite(name):
         tags = ["manual"],
     )
 
+    flutter_integration_test(
+        name = "_defines_files_android_it",
+        package_name = _PACKAGE,
+        platform = "android",
+        srcs = [_MAIN],
+        defines = [_VISIBLE_DEFINE],
+        defines_files = [":_defines_files_fixture_json"],
+        deps = ["//flutter/tests/linux_integration_dep:flutter_test_dep"],
+        tags = ["manual"],
+    )
+
+    flutter_integration_test(
+        name = "_defines_files_android_it_baseline",
+        package_name = _PACKAGE,
+        platform = "android",
+        srcs = [_MAIN],
+        defines = [_VISIBLE_DEFINE],
+        deps = ["//flutter/tests/linux_integration_dep:flutter_test_dep"],
+        tags = ["manual"],
+    )
+
     _defines_files_test(
         name = name + "_flagfile_generated_and_ordered",
         size = "small",
@@ -271,11 +334,25 @@ def defines_files_test_suite(name):
         target_compatible_with = HOST_COMPATIBLE,
         target_under_test = ":_defines_files_baseline",
     )
+    _android_it_defines_files_test(
+        name = name + "_android_integration_app_forwards_defines_files",
+        size = "small",
+        target_compatible_with = HOST_COMPATIBLE,
+        target_under_test = ":___defines_files_android_it_app",
+    )
+    _no_defines_files_test(
+        name = name + "_android_integration_app_unchanged_without_defines_files",
+        size = "small",
+        target_compatible_with = HOST_COMPATIBLE,
+        target_under_test = ":___defines_files_android_it_baseline_app",
+    )
 
     native.test_suite(
         name = name,
         tests = [
             ":" + name + "_flagfile_generated_and_ordered",
             ":" + name + "_unchanged_without_defines_files",
+            ":" + name + "_android_integration_app_forwards_defines_files",
+            ":" + name + "_android_integration_app_unchanged_without_defines_files",
         ],
     )
