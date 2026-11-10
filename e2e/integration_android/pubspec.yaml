@@ -10,8 +10,12 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.2
+  federated_greeting:
+    path: federated/federated_greeting
 
 dev_dependencies:
+  federated_greeting_alt:
+    path: federated/federated_greeting_alt
   flutter_test:
     sdk: flutter
   integration_test:

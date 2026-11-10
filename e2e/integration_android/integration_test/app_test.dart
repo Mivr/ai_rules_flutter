@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:android_greeting_plugin/android_greeting_plugin.dart';
 import 'package:cov13font/cov13font.dart';
+import 'package:federated_greeting/federated_greeting.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -62,13 +63,22 @@ void main() {
     },
   );
 
+  testWidgets('calls federated greeting plugin through umbrella', (
+    tester,
+  ) async {
+    final greeting = await const FederatedGreeting().getGreeting();
+    const isAlt = bool.fromEnvironment('USE_ALT_GREETING');
+    if (isAlt) {
+      expect(greeting, 'Hello from alternative federated Android plugin!');
+    } else {
+      expect(greeting, 'Hello from default federated Android plugin!');
+    }
+  });
+
   testWidgets('forwards a define with a comma and an equals sign', (
     tester,
   ) async {
-    expect(
-      const String.fromEnvironment('COV13_GREETING'),
-      'hello, world=ok',
-    );
+    expect(const String.fromEnvironment('COV13_GREETING'), 'hello, world=ok');
   });
 
   testWidgets('renders the generated Spanish message under Locale es', (
@@ -83,9 +93,8 @@ void main() {
             context: context,
             locale: const Locale('es'),
             child: Builder(
-              builder: (context) => Text(
-                Cov13Localizations.of(context).cov13Greeting,
-              ),
+              builder: (context) =>
+                  Text(Cov13Localizations.of(context).cov13Greeting),
             ),
           ),
         ),

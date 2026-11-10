@@ -293,6 +293,47 @@ def _android_registrant_names_the_declared_package_test_impl(ctx):
 
 _t15_test = unittest.make(_android_registrant_names_the_declared_package_test_impl)
 
+def _android_registrant_federated_chosen_implementation_test_impl(ctx):
+    """The generated Android registrant for a chosen implementation names its class and not the default's."""
+    env = unittest.begin(ctx)
+    umbrella = struct(
+        name = "greeting",
+        platforms = {"android": {"default_package": "greeting_android"}},
+        implements = "",
+    )
+    default_impl = struct(
+        name = "greeting_android",
+        platforms = {
+            "android": {
+                "package": "com.example.greeting.android",
+                "pluginClass": "GreetingAndroidPlugin",
+            },
+        },
+        implements = "greeting",
+    )
+    chosen_impl = struct(
+        name = "greeting_alt",
+        platforms = {
+            "android": {
+                "package": "com.example.greeting.alt",
+                "pluginClass": "GreetingAltPlugin",
+            },
+        },
+        implements = "greeting",
+    )
+    content = make_android_registrant_content([umbrella, default_impl, chosen_impl])
+    asserts.true(
+        env,
+        "flutterEngine.getPlugins().add(new com.example.greeting.alt.GreetingAltPlugin());" in content,
+        content,
+    )
+    asserts.false(
+        env,
+        "GreetingAndroidPlugin" in content,
+        content,
+    )
+    return unittest.end(env)
+
 # -- iOS registrants (Swift and ObjC) ------------------------------------------
 #
 # These assert structure (imports, registration calls, exclusions). That the
@@ -409,6 +450,7 @@ _t19_test = unittest.make(_ios_objc_header_test_impl)
 _t20_test = unittest.make(_ios_objc_empty_impl_test_impl)
 _t21_test = unittest.make(_ios_objc_two_plugin_impl_test_impl)
 _t22_test = unittest.make(_ios_objc_exclusion_test_impl)
+_t23_test = unittest.make(_android_registrant_federated_chosen_implementation_test_impl)
 
 def plugin_registrant_test_suite(name):
     small_unittest_suite(
@@ -436,4 +478,5 @@ def plugin_registrant_test_suite(name):
         _t20_test,
         _t21_test,
         _t22_test,
+        _t23_test,
     )
