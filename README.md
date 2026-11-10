@@ -1209,7 +1209,27 @@ bazel build //:my_app_android \
 | `keystore_password_file` | File holding the keystore password, read by apksigner through `--ks-pass file:<path>`. Falls back to the `//flutter:android_release_keystore_password_file` flag. |
 | `key_alias` | Alias of the signing key inside `keystore`. Falls back to the `//flutter:android_release_key_alias` flag. |
 | `key_password_file` | File holding the signing key's own password, read through `--key-pass file:<path>`. When unset, `--key-pass` is omitted and the keystore password unlocks the key. |
+| `analyze_size` | Emit an instructions-size JSON breakdown (`<name>_size.json`) from `gen_snapshot`. Included in default outputs and exposed via the `analyze_size` output group. Default `False`. |
 | `multidex` | Defaults to `"native"`. |
+
+**Code-size analysis.** Set `analyze_size = True` on `flutter_android_app` to pass `--print-instructions-sizes-to` to `gen_snapshot` and produce a `<name>_size.json` instruction-size breakdown. The file is a default output and also readable through the `analyze_size` output group:
+
+```starlark
+flutter_android_app(
+    name = "my_app_android",
+    application = ":my_app",
+    package_name = "com.example.myapp",
+    analyze_size = True,
+)
+```
+
+Fetch it directly with:
+
+```sh
+bazel build //:my_app_android --output_groups=analyze_size
+```
+
+`analyze_size` works in every compilation mode that runs `gen_snapshot` (release and profile builds); in debug mode, where `gen_snapshot` does not run, it fails analysis.
 
 <details>
 <summary>Composable rules</summary>
@@ -1623,7 +1643,7 @@ flutter_application(
 | `language_version` | The Dart language version, matching `pubspec.yaml`. |
 | `obfuscate` | Obfuscate Dart symbols in the AOT output. Pair with `split_debug_info`. Default `False`. |
 | `split_debug_info` | Write debug info to a separate `.symbols` file. Default `False`. |
-| `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`: only the allow-list in `flutter/private/flutter_aot_compile.bzl`. `--no-obfuscate` fails with `obfuscate = True` and `--no-dwarf-stack-traces` fails with `split_debug_info = True`. |
+| `extra_gen_snapshot_options` | Extra flags for `gen_snapshot`: only the allow-list in `flutter/private/flutter_aot_compile.bzl`. Set `analyze_size = True` on the app target to get the size JSON instead of passing `--print-instructions-sizes-to`. `--no-obfuscate` fails with `obfuscate = True` and `--no-dwarf-stack-traces` fails with `split_debug_info = True`. |
 | `track_widget_creation` | Record widget creation locations for the DevTools inspector. Default `False`. |
 | `shaders` | Fragment shaders to compile with impellerc. Each file must sit under the target's package directory; it is bundled at its path relative to that directory, where `FragmentProgram.fromAsset` looks for it. See [Asset keys](#asset-keys). |
 | `shader_includes` | Files the `shaders` may `#include`. |
@@ -1633,7 +1653,7 @@ flutter_application(
 | `license_files` | License and NOTICE files to include in `NOTICES.Z`. |
 | `min_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
 
-**Obfuscated releases.** `obfuscate` renames Dart identifiers and forces `--strip`, so pair it with `split_debug_info` to keep the symbols for deobfuscation. `gen_snapshot` also writes an obfuscation map next to the snapshot; fetch it with `bazel build :my_app --output_groups=obfuscation_map` (or read `FlutterApplicationInfo.obfuscation_map`). `extra_gen_snapshot_options` is an allow-list: only flags that read or write no file and change neither the snapshot kind, outputs, target nor debugging info. `--save-obfuscation-map` and `--save-debugging-info` fail analysis — use `obfuscate` and `split_debug_info` instead — and `--no-strip` fails with `obfuscate`.
+**Obfuscated releases.** `obfuscate` renames Dart identifiers and forces `--strip`, so pair it with `split_debug_info` to keep the symbols for deobfuscation. `gen_snapshot` also writes an obfuscation map next to the snapshot; fetch it with `bazel build :my_app --output_groups=obfuscation_map` (or read `FlutterApplicationInfo.obfuscation_map`). `extra_gen_snapshot_options` is an allow-list: only flags that read or write no file and change neither the snapshot kind, outputs, target nor debugging info. `--save-obfuscation-map` and `--save-debugging-info` fail analysis — use `obfuscate` and `split_debug_info` instead; `--print-instructions-sizes-to` fails analysis — use `analyze_size = True` instead — and `--no-strip` fails with `obfuscate`.
 
 **Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas. When a key is set both by the flag and by the `defines` attribute, the flag wins. Reserved defines (`dart.vm.*`, `dart.library.*`, `dart.tool.*`, `flutter.*`) are set by the build and SDK and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
 

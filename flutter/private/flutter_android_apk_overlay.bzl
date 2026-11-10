@@ -34,6 +34,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_android//providers:providers.bzl", "AndroidFeatureFlagSet", "AndroidInstrumentationInfo", "ApkInfo", "StarlarkApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:common.bzl", "resolve_exec_dart_vm")
+load("//flutter/private:flutter_android_binary_proxy.bzl", _overlay_output_groups = "overlay_output_groups")
 
 _ANDROID_SDK_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android_sdk:toolchain_type")
 _ANDROID_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android:toolchain_type")
@@ -397,26 +398,6 @@ def _run_overlay_deploy_info(ctx, android_toolchain, merged_manifest, signed):
     )
     return deploy_info
 
-def _overlay_output_groups(base_groups, deploy_info, merged_manifest):
-    """Forwards the base output groups, replacing android_deploy_info.
-
-    The fresh group is overlay-owned: the freshly written deploy_info pointing
-    at the overlay signed APK, paired with the merged manifest.
-    """
-    group_kwargs = {}
-    if base_groups:
-        for name in dir(base_groups):
-            if name in ("android_deploy_info", "to_json", "to_proto"):
-                continue
-            artifacts = getattr(base_groups, name, None)
-
-            # dir() may also surface non-field members; only depsets can be
-            # output group values.
-            if type(artifacts) == "depset":
-                group_kwargs[name] = artifacts
-    group_kwargs["android_deploy_info"] = depset([deploy_info, merged_manifest])
-    return group_kwargs
-
 def _flutter_android_apk_overlay_impl(ctx):
     base = ctx.attr.binary
     base_apk_info = base[ApkInfo]
@@ -455,6 +436,8 @@ def _flutter_android_apk_overlay_impl(ctx):
 
     # Forward the base output groups verbatim EXCEPT android_deploy_info.
     group_kwargs = _overlay_output_groups(base_groups, deploy_info, merged_manifest)
+    if ctx.file.size_json:
+        group_kwargs["analyze_size"] = depset([ctx.file.size_json])
 
     keystore = release.keystore if release else (signing_keys[0] if signing_keys else None)
     release_signing_keys = [release.keystore] if release else signing_keys
@@ -502,6 +485,10 @@ flutter_android_apk_overlay = rule(
         "flutter_assets": attr.label(
             doc = "The bundle's flutter_assets directory; archived as assets/flutter_assets/ in the APK.",
             mandatory = True,
+            allow_single_file = True,
+        ),
+        "size_json": attr.label(
+            doc = "The size JSON file from the bundle if analyze_size was enabled.",
             allow_single_file = True,
         ),
         "signing": attr.string(

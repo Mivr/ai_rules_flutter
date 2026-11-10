@@ -148,12 +148,27 @@ def _compile_application_aot(ctx, flutter_sdk_info, is_debug, is_ios, is_macos, 
     flutter_aot_target so the two stay in step). Obfuscation forces
     `--strip`: unstripped DWARF would leak the original names.
     """
+    wants_analyze_size = getattr(ctx.attr, "analyze_size", False) or ("analyze_size" in getattr(ctx, "features", []))
+    if wants_analyze_size and is_debug:
+        fail("%s: analyze_size is not supported in debug mode: gen_snapshot does not run in debug mode" % ctx.label)
     if is_debug:
-        return None, None, None, strip
+        return struct(
+            aot_output = None,
+            debug_info_output = None,
+            obfuscation_map_output = None,
+            size_output = None,
+            strip = strip,
+        )
     extra_flags, extra_outputs, debug_info_output, obfuscation_map_output, strip = flutter_aot_gen_snapshot_flags(
         ctx,
         strip,
     )
+    size_output = None
+    if wants_analyze_size:
+        for f in extra_outputs:
+            if f.basename == ctx.label.name + "_size.json":
+                size_output = f
+                break
     if is_ios or is_macos:
         aot_output = ctx.actions.declare_file(ctx.label.name + ".dylib")
         flutter_aot_macho_action(
@@ -179,7 +194,13 @@ def _compile_application_aot(ctx, flutter_sdk_info, is_debug, is_ios, is_macos, 
             extra_flags = extra_flags,
             extra_outputs = extra_outputs,
         )
-    return aot_output, debug_info_output, obfuscation_map_output, strip
+    return struct(
+        aot_output = aot_output,
+        debug_info_output = debug_info_output,
+        obfuscation_map_output = obfuscation_map_output,
+        size_output = size_output,
+        strip = strip,
+    )
 
 def _collect_application_native_libs(ctx):
     """Collects native shared libraries from native_deps + transitive plugin deps."""
@@ -396,7 +417,8 @@ def _application_default_files(
         bundled_native_libs,
         aot_output,
         is_debug,
-        kernel_dill):
+        kernel_dill,
+        size_output = None):
     """Assembles the DefaultInfo file list, including the manifest-named code assets.
 
     The code-asset libraries join `default_files` with the manifest that names
@@ -411,6 +433,8 @@ def _application_default_files(
     ] + bundled_native_libs.values()
     if aot_output:
         default_files.append(aot_output)
+    if size_output:
+        default_files.append(size_output)
     if is_debug:
         default_files.append(kernel_dill)
     return default_files
@@ -425,6 +449,8 @@ def _application_providers(flutter_sdk_info, is_debug, outputs, plugins):
         output_groups["debug_info"] = depset([outputs.debug_info_output])
     if outputs.obfuscation_map_output:
         output_groups["obfuscation_map"] = depset([outputs.obfuscation_map_output])
+    if outputs.size_output:
+        output_groups["analyze_size"] = depset([outputs.size_output])
     if outputs.link_hook_validation:
         # Every hook runs whenever the app builds, even one that emits no
         # asset, so its verdict on the program is never skipped.
@@ -499,6 +525,7 @@ def _application_default_files_with_dev_config(ctx, flutter_sdk_info, compilatio
         built.aot_output,
         is_debug,
         compilation.kernel_dill,
+        built.size_output,
     )
 
     # Hot-reload dev config (debug only), mirroring flutter_web_application's
@@ -517,6 +544,18 @@ def _application_default_files_with_dev_config(ctx, flutter_sdk_info, compilatio
         )
     return default_files
 
+def _prepare_native_assets(ctx, flutter_sdk_info, target_platform):
+    """Aggregates transitive Native Assets and writes the application manifest."""
+    native_assets_list, transitive_data_assets = _collect_transitive_assets(ctx)
+    target_arch = host_target_arch(ctx, flutter_sdk_info)
+    manifest_file = _write_application_manifest(ctx, native_assets_list, target_platform, target_arch)
+    bundled_code = collect_bundled_code_asset_files(native_assets_list)
+    return struct(
+        manifest_file = manifest_file,
+        transitive_data_assets = transitive_data_assets,
+        bundled_code_assets = bundled_code,
+    )
+
 def _flutter_application_impl(ctx):
     flutter_sdk_info = resolve_flutter_sdk_info(ctx)
 
@@ -529,18 +568,12 @@ def _flutter_application_impl(ctx):
     _check_aot_supported(flutter_sdk_info, is_debug)
 
     platform = _detect_application_platform(ctx)
-    target_platform = platform.target_platform
 
     _fail_on_unreplaced_hooks(ctx)
 
     # Aggregate transitive Native Assets so the manifest exists before
     # kernel compile (the frontend_server reads it via --native-assets).
-    native_assets_list, transitive_data_assets = _collect_transitive_assets(ctx)
-
-    target_arch = host_target_arch(ctx, flutter_sdk_info)
-    native_assets_manifest_file = _write_application_manifest(ctx, native_assets_list, target_platform, target_arch)
-
-    bundled_code_assets = collect_bundled_code_asset_files(native_assets_list)
+    assets = _prepare_native_assets(ctx, flutter_sdk_info, platform.target_platform)
 
     # Declared before the kernel compile that will later feed it, because a
     # debug app carries this path inside itself: `flutter_compile_kernel`
@@ -560,23 +593,21 @@ def _flutter_application_impl(ctx):
     compilation = _compile_application_kernel(
         ctx,
         flutter_sdk_info,
-        target_platform,
+        platform.target_platform,
         platform.is_ios,
-        native_assets_manifest_file,
+        assets.manifest_file,
         flutter_assets,
         recorded_uses,
     )
-    kernel_dill = compilation.kernel_dill
-    package_config = compilation.package_config
 
     # Step 2: AOT compile — choose format based on target platform.
-    aot_output, debug_info_output, obfuscation_map_output, strip = _compile_application_aot(
+    aot = _compile_application_aot(
         ctx,
         flutter_sdk_info,
         is_debug,
         platform.is_ios,
         platform.is_macos,
-        kernel_dill,
+        compilation.kernel_dill,
         strip,
     )
 
@@ -589,7 +620,7 @@ def _flutter_application_impl(ctx):
         ctx,
         run_link_hooks,
         recorded_uses,
-        transitive_data_assets,
+        assets.transitive_data_assets,
     )
 
     # Step 3: Shader compilation + asset bundle. Pass data assets so the
@@ -599,9 +630,9 @@ def _flutter_application_impl(ctx):
         flutter_sdk_info = flutter_sdk_info,
         output_dir = flutter_assets,
         bundle = make_bundle_inputs(
-            target_platform = target_platform,
-            compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, target_platform),
-            kernel_dill = kernel_dill,
+            target_platform = platform.target_platform,
+            compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, platform.target_platform),
+            kernel_dill = compilation.kernel_dill,
             is_debug = is_debug,
             data_assets = transitive_data_assets,
         ),
@@ -615,23 +646,25 @@ def _flutter_application_impl(ctx):
 
     built = struct(
         flutter_assets = flutter_assets,
-        native_assets_manifest_file = native_assets_manifest_file,
+        native_assets_manifest_file = assets.manifest_file,
         native_libs = native_libs,
-        bundled_code_assets = bundled_code_assets,
-        aot_output = aot_output,
+        bundled_code_assets = assets.bundled_code_assets,
+        aot_output = aot.aot_output,
+        size_output = aot.size_output,
     )
     default_files = _application_default_files_with_dev_config(ctx, flutter_sdk_info, compilation, is_debug, built)
 
     outputs = struct(
-        kernel_dill = kernel_dill,
-        package_config = package_config,
-        native_assets_manifest_file = native_assets_manifest_file,
-        bundled_code_assets = bundled_code_assets,
+        kernel_dill = compilation.kernel_dill,
+        package_config = compilation.package_config,
+        native_assets_manifest_file = assets.manifest_file,
+        bundled_code_assets = assets.bundled_code_assets,
         transitive_data_assets = transitive_data_assets,
-        aot_output = aot_output,
-        aot_strip = strip,
-        debug_info_output = debug_info_output,
-        obfuscation_map_output = obfuscation_map_output,
+        aot_output = aot.aot_output,
+        aot_strip = aot.strip,
+        debug_info_output = aot.debug_info_output,
+        obfuscation_map_output = aot.obfuscation_map_output,
+        size_output = aot.size_output,
         link_hook_validation = link_hook_validation,
         flutter_assets = flutter_assets,
         native_libs = native_libs,
@@ -643,7 +676,16 @@ flutter_application = rule(
     implementation = _flutter_application_impl,
     attrs = dicts.add(
         FLUTTER_APPLICATION_ATTRS,
-        {"fonts": FONTS_ATTR},
+        {
+            "analyze_size": attr.bool(
+                default = False,
+                doc = (
+                    "Passes `--print-instructions-sizes-to` to `gen_snapshot` and " +
+                    "writes a size breakdown JSON to `<name>_size.json`."
+                ),
+            ),
+            "fonts": FONTS_ATTR,
+        },
         PLATFORM_CONSTRAINT_ATTRS,
         link_hook_runner_attr(),
         # Simulator-vs-device is an Apple *environment* constraint, not an OS

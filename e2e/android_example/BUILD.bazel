@@ -75,6 +75,14 @@ flutter_android_app(
     permissions = ["android.permission.INTERNET"],
 )
 
+flutter_android_app(
+    name = "app_analyze_size",
+    package_name = "com.example.flutterapp",
+    application = ":app_flutter",
+    analyze_size = True,
+    permissions = ["android.permission.INTERNET"],
+)
+
 # =============================================================================
 # Shared Android targets (used by approaches 2 & 3)
 # =============================================================================
@@ -286,6 +294,13 @@ dart_test(
     size = "medium",
     data = [":app"],
     main = "test/verify_android_permissions_test.dart",
+)
+
+dart_test(
+    name = "verify_android_analyze_size_test",
+    size = "medium",
+    data = [":app_analyze_size"],
+    main = "test/verify_android_analyze_size_test.dart",
 )
 
 dart_test(

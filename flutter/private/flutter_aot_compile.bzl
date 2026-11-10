@@ -162,6 +162,11 @@ _GEN_SNAPSHOT_DEDICATED = {
     "save-debugging-info": "writes a debugging-info file the action does not declare: set `split_debug_info = True` instead of passing `--save-debugging-info`",
     # The rules emit `--save-obfuscation-map` themselves from `obfuscate`.
     "save-obfuscation-map": "writes an obfuscation map the action does not declare: set `obfuscate = True` and read the `obfuscation_map` output group instead of passing `--save-obfuscation-map`",
+    # The rules emit `--print-instructions-sizes-to` themselves from `analyze_size`.
+    "print-instructions-sizes-to": (
+        "writes an instructions-size file the action does not declare: set `analyze_size = True` " +
+        "and read the `<name>_size.json` output instead of passing `--print-instructions-sizes-to`"
+    ),
 }
 
 def _classify_gen_snapshot_entry(label, entry, parts, value):
@@ -345,6 +350,11 @@ def flutter_aot_gen_snapshot_flags(ctx, strip):
     extra_outputs = []
     debug_info_output = None
     obfuscation_map_output = None
+
+    if getattr(ctx.attr, "analyze_size", False) or ("analyze_size" in getattr(ctx, "features", [])):
+        size_output = ctx.actions.declare_file(ctx.label.name + "_size.json")
+        extra_flags.append("--print-instructions-sizes-to=" + size_output.path)
+        extra_outputs.append(size_output)
 
     if ctx.attr.obfuscate and not checked.saw_obfuscate:
         extra_flags.append("--obfuscate")
