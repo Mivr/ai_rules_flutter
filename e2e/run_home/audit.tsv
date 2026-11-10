@@ -112,6 +112,8 @@
 #   built — never `bazel run` — by their own workspaces.
 e2e/hello_world:macos-windows-ios-apps	bundle rules, not executable; built by e2e/hello_world
 e2e/integration_android:android-integration	needs emulator + Android SDK; run by e2e/integration_android
+e2e/android_sharedprefs:android_registrant_build_test	build_test over flutter_android_registrant; analysis-only, no CLI spawn
+e2e/android_sharedprefs:registrants_test	Dart test over generated registrant files; run by e2e/android_sharedprefs, no CLI spawn
 @rules_flutter//tools/doc_check:doc_check	pure-Dart doc checker; reads extract protos only, no CLI spawn and no HOME writes
 @rules_flutter//tools/doc_check:proto_pin_test	pure-Dart pin test; hashes the vendored proto only, no CLI spawn and no HOME writes
 @rules_flutter//tools/doc_check:rules_test	pure-Dart rule test over fixture protos; no CLI spawn and no HOME writes
