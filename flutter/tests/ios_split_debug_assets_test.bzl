@@ -43,19 +43,29 @@ def _split_debug_assets_test_impl(ctx):
     )
     return analysistest.end(env)
 
+_DBG_CONFIG = {
+    "//command_line_option:compilation_mode": "dbg",
+    "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
+    "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
+    "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
+    str(Label("//flutter:profile")): False,
+}
+
+_OPT_CONFIG = {
+    "//command_line_option:compilation_mode": "opt",
+    "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
+    "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
+    "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
+    str(Label("//flutter:profile")): False,
+}
+
 _split_debug_assets_test = analysistest.make(
     _split_debug_assets_test_impl,
     attrs = {
         "expected_assets": attr.string_list(mandatory = True),
         "expected_default_assets": attr.string_list(mandatory = True),
     },
-    config_settings = {
-        "//command_line_option:compilation_mode": "dbg",
-        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
-        "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
-        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
-        str(Label("//flutter:profile")): False,
-    },
+    config_settings = _DBG_CONFIG,
 )
 
 _release_split_assets_test = analysistest.make(
@@ -64,13 +74,7 @@ _release_split_assets_test = analysistest.make(
         "expected_assets": attr.string_list(mandatory = True),
         "expected_default_assets": attr.string_list(mandatory = True),
     },
-    config_settings = {
-        "//command_line_option:compilation_mode": "opt",
-        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
-        "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
-        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
-        str(Label("//flutter:profile")): False,
-    },
+    config_settings = _OPT_CONFIG,
 )
 
 def _xtool_split_refused_impl(ctx):
@@ -160,13 +164,7 @@ _app_resource_selection_test = analysistest.make(
     attrs = {
         "expected": attr.string_list(mandatory = True),
     },
-    config_settings = {
-        "//command_line_option:compilation_mode": "dbg",
-        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
-        "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
-        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
-        str(Label("//flutter:profile")): False,
-    },
+    config_settings = _DBG_CONFIG,
 )
 
 _release_app_resource_selection_test = analysistest.make(
@@ -174,13 +172,204 @@ _release_app_resource_selection_test = analysistest.make(
     attrs = {
         "expected": attr.string_list(mandatory = True),
     },
-    config_settings = {
-        "//command_line_option:compilation_mode": "opt",
-        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
-        "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
-        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
-        str(Label("//flutter:profile")): False,
+    config_settings = _OPT_CONFIG,
+)
+
+def _debug_split_assets_action_test_impl(ctx):
+    """Checks that FlutterIOSDebugAssets has no kernel input and kernel is a separate output."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    actions = analysistest.target_actions(env)
+
+    # 1. kernel_blob.bin is its own separate output produced by a Symlink action
+    symlinks = [
+        a
+        for a in actions
+        if a.mnemonic == "Symlink" and any([f.basename == "kernel_blob.bin" for f in a.outputs.to_list()])
+    ]
+    asserts.equals(env, 1, len(symlinks), "expected a Symlink action for kernel_blob.bin")
+    kernel_inputs = []
+    if symlinks:
+        kernel_inputs = symlinks[0].inputs.to_list()
+        symlink_input_names = [f.basename for f in kernel_inputs]
+        asserts.true(
+            env,
+            any([name.endswith(".dill") for name in symlink_input_names]),
+            "kernel_blob.bin Symlink must take kernel dill as input: %s" % symlink_input_names,
+        )
+
+    # 2. FlutterIOSDebugAssets action has no kernel input and does not output kernel_blob.bin
+    debug_assets = [a for a in actions if a.mnemonic == "FlutterIOSDebugAssets"]
+    asserts.equals(env, 1, len(debug_assets), "expected exactly one FlutterIOSDebugAssets action")
+    if debug_assets:
+        inputs = debug_assets[0].inputs.to_list()
+        input_names = [f.basename for f in inputs]
+        asserts.false(
+            env,
+            "app.dill" in input_names,
+            "FlutterIOSDebugAssets must not take app.dill as input: %s" % input_names,
+        )
+        asserts.false(
+            env,
+            any([k in inputs for k in kernel_inputs]),
+            "FlutterIOSDebugAssets must not take any kernel input: %s" % inputs,
+        )
+        outputs = [f.basename for f in debug_assets[0].outputs.to_list()]
+        asserts.false(
+            env,
+            "kernel_blob.bin" in outputs,
+            "FlutterIOSDebugAssets must not output kernel_blob.bin: %s" % outputs,
+        )
+
+    # 3. OutputGroupInfo.flutter_assets contains both the assets directory and kernel_blob.bin
+    assets_group = [f.short_path for f in tut[OutputGroupInfo].flutter_assets.to_list()]
+    asserts.true(
+        env,
+        any([p.endswith("App.framework/flutter_assets") for p in assets_group]),
+        "flutter_assets output group must contain App.framework/flutter_assets: %s" % assets_group,
+    )
+    asserts.true(
+        env,
+        any([p.endswith("kernel/flutter_assets/kernel_blob.bin") for p in assets_group]),
+        "flutter_assets output group must contain kernel_blob.bin: %s" % assets_group,
+    )
+
+    return analysistest.end(env)
+
+_debug_split_assets_action_test = analysistest.make(
+    _debug_split_assets_action_test_impl,
+    config_settings = _DBG_CONFIG,
+)
+
+def _debug_split_incremental_cutoff_test_impl(ctx):
+    """Checks that a kernel change does not invalidate the assets action (early cut-off)."""
+    env = analysistest.begin(ctx)
+    actions = analysistest.target_actions(env)
+
+    debug_assets = [a for a in actions if a.mnemonic == "FlutterIOSDebugAssets"]
+    asserts.equals(env, 1, len(debug_assets), "expected FlutterIOSDebugAssets action")
+
+    symlinks = [
+        a
+        for a in actions
+        if a.mnemonic == "Symlink" and any([f.basename == "kernel_blob.bin" for f in a.outputs.to_list()])
+    ]
+    asserts.equals(env, 1, len(symlinks), "expected kernel Symlink action")
+
+    if debug_assets and symlinks:
+        asset_inputs = [f.path for f in debug_assets[0].inputs.to_list()]
+        kernel_inputs = [f.path for f in symlinks[0].inputs.to_list()]
+        overlap = [p for p in asset_inputs if p in kernel_inputs]
+        asserts.equals(
+            env,
+            [],
+            overlap,
+            "assets action must not share inputs with kernel action for cut-off: %s" % overlap,
+        )
+
+    return analysistest.end(env)
+
+_debug_split_incremental_cutoff_test = analysistest.make(
+    _debug_split_incremental_cutoff_test_impl,
+    config_settings = _DBG_CONFIG,
+)
+
+def _debug_bundle_contents_path_test_impl(ctx):
+    """Checks that bundle-mapped relative paths match the base bundle layout path by path."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    assets = tut[OutputGroupInfo].flutter_assets.to_list()
+    prefixes = ctx.attr.strip_prefixes
+
+    mapped_paths = []
+    for asset in assets:
+        short = asset.short_path
+        matched = False
+        for prefix in prefixes:
+            pkg_prefix = ctx.label.package + "/" + prefix + "/"
+            if short.startswith(pkg_prefix):
+                mapped_paths.append(short[len(pkg_prefix):])
+                matched = True
+                break
+        asserts.true(
+            env,
+            matched,
+            "asset %s must match one of the strip prefixes %s" % (short, prefixes),
+        )
+
+    expected = sorted(["flutter_assets", "flutter_assets/kernel_blob.bin"])
+    asserts.equals(
+        env,
+        expected,
+        sorted(mapped_paths),
+        "debug bundle contents must place kernel_blob.bin under flutter_assets matching base",
+    )
+    return analysistest.end(env)
+
+_debug_bundle_contents_path_test = analysistest.make(
+    _debug_bundle_contents_path_test_impl,
+    attrs = {
+        "strip_prefixes": attr.string_list(mandatory = True),
     },
+    config_settings = _DBG_CONFIG,
+)
+
+def _aot_and_unsplit_unchanged_test_impl(ctx):
+    """Checks that unsplit debug and AOT builds remain unchanged from the base."""
+    env = analysistest.begin(ctx)
+    tut = analysistest.target_under_test(env)
+    actions = analysistest.target_actions(env)
+
+    assets_group = tut[OutputGroupInfo].flutter_assets.to_list()
+    asserts.equals(
+        env,
+        [],
+        assets_group,
+        "flutter_assets output group must be empty for unsplit/AOT builds: %s" % assets_group,
+    )
+
+    symlinks = [
+        a
+        for a in actions
+        if a.mnemonic == "Symlink" and any([f.basename == "kernel_blob.bin" for f in a.outputs.to_list()])
+    ]
+    asserts.equals(
+        env,
+        [],
+        symlinks,
+        "unsplit/AOT builds must not register kernel Symlink action: %s" % symlinks,
+    )
+
+    if ctx.attr.is_unsplit_debug:
+        debug_assets = [a for a in actions if a.mnemonic == "FlutterIOSDebugAssets"]
+        asserts.equals(env, 1, len(debug_assets), "expected FlutterIOSDebugAssets action in unsplit debug")
+        if debug_assets:
+            inputs = [f.basename for f in debug_assets[0].inputs.to_list()]
+            asserts.true(
+                env,
+                any([name.endswith(".dill") for name in inputs]),
+                "unsplit debug build must keep kernel.dill as input to FlutterIOSDebugAssets: %s" % inputs,
+            )
+    else:
+        debug_assets = [a for a in actions if a.mnemonic == "FlutterIOSDebugAssets"]
+        asserts.equals(env, 0, len(debug_assets), "AOT build must not register FlutterIOSDebugAssets")
+
+    return analysistest.end(env)
+
+_aot_and_unsplit_unchanged_test = analysistest.make(
+    _aot_and_unsplit_unchanged_test_impl,
+    attrs = {
+        "is_unsplit_debug": attr.bool(default = False),
+    },
+    config_settings = _DBG_CONFIG,
+)
+
+_aot_unchanged_test = analysistest.make(
+    _aot_and_unsplit_unchanged_test_impl,
+    attrs = {
+        "is_unsplit_debug": attr.bool(default = False),
+    },
+    config_settings = _OPT_CONFIG,
 )
 
 def _split_debug_asset_fixtures(name):
@@ -227,7 +416,10 @@ def _split_debug_asset_framework_tests(name):
     _split_debug_assets_test(
         name = name + "_debug_split_files",
         target_under_test = ":" + name + "_debug_split",
-        expected_assets = ["flutter/tests/" + name + "_debug_split/App.framework/flutter_assets"],
+        expected_assets = [
+            "flutter/tests/" + name + "_debug_split/App.framework/flutter_assets",
+            "flutter/tests/" + name + "_debug_split/kernel/flutter_assets/kernel_blob.bin",
+        ],
         expected_default_assets = [],
     )
     _release_split_assets_test(
@@ -245,6 +437,32 @@ def _split_debug_asset_framework_tests(name):
     _xtool_split_refused_test(
         name = name + "_xtool_split_refused",
         target_under_test = ":" + name + "_debug_split",
+    )
+    _debug_split_assets_action_test(
+        name = name + "_debug_split_assets_action",
+        target_under_test = ":" + name + "_debug_split",
+    )
+    _debug_split_incremental_cutoff_test(
+        name = name + "_debug_split_incremental_cutoff",
+        target_under_test = ":" + name + "_debug_split",
+    )
+    _debug_bundle_contents_path_test(
+        name = name + "_debug_bundle_contents_paths",
+        target_under_test = ":" + name + "_debug_split",
+        strip_prefixes = [
+            name + "_debug_split/App.framework",
+            name + "_debug_split/kernel",
+        ],
+    )
+    _aot_and_unsplit_unchanged_test(
+        name = name + "_unsplit_unchanged",
+        target_under_test = ":" + name + "_debug_base",
+        is_unsplit_debug = True,
+    )
+    _aot_unchanged_test(
+        name = name + "_aot_unchanged",
+        target_under_test = ":" + name + "_release_split",
+        is_unsplit_debug = False,
     )
 
 def _split_debug_asset_bundles(name):
@@ -314,7 +532,10 @@ def _split_debug_asset_bundle_tests(name, after, debug_app, release_app):
         actual_structured_resources = [str(r) for r in after[group]["structured_resources"]],
         actual_prefixes = after[group]["strip_structured_resources_prefixes"],
         expected_structured_resources = [":" + filegroup],
-        expected_prefixes = ["__%s_app_framework/App.framework" % debug_app],
+        expected_prefixes = [
+            "__%s_app_framework/App.framework" % debug_app,
+            "__%s_app_framework/kernel" % debug_app,
+        ],
     )
 
     # Reuse the exact select expression the macro gave ios_application, so the
@@ -354,5 +575,10 @@ def ios_split_debug_assets_test_suite(name):
             ":" + name + "_debug_root_assets_group",
             ":" + name + "_debug_app_root_assets",
             ":" + name + "_release_app_keeps_framework_assets",
+            ":" + name + "_debug_split_assets_action",
+            ":" + name + "_debug_split_incremental_cutoff",
+            ":" + name + "_debug_bundle_contents_paths",
+            ":" + name + "_unsplit_unchanged",
+            ":" + name + "_aot_unchanged",
         ],
     )

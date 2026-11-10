@@ -207,16 +207,16 @@ def _ios_build_frameworks(name, application, patching, backend, engine, registra
         apple_resource_group(
             name = "__%s_split_debug_assets_group" % name,
             structured_resources = [":__%s_split_debug_assets" % name],
-            strip_structured_resources_prefixes = ["__%s_app_framework/App.framework" % name],
+            strip_structured_resources_prefixes = [
+                "__%s_app_framework/App.framework" % name,
+                "__%s_app_framework/kernel" % name,
+            ],
             tags = internal_tags,
         )
         apple_dynamic_framework_import(
             name = "__%s_app_bundle" % name,
             framework_imports = ["__%s_app_framework" % name],
-            bundle_only = select({
-                Label("@rules_flutter//flutter/private:dbg"): True,
-                "//conditions:default": False,
-            }),
+            bundle_only = select({Label("@rules_flutter//flutter/private:dbg"): True, "//conditions:default": False}),
             tags = internal_tags,
         )
 

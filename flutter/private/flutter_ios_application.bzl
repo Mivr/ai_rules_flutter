@@ -215,12 +215,26 @@ def _assemble_ios_debug_assets(
         flutter_sdk_info,
         flutter_assets,
         kernel_dill,
-        framework_assets):
+        framework_assets,
+        split_assets):
     """Copies flutter_assets and adds kernel_blob.bin + VM snapshots.
 
     The vm_isolate_snapshot.bin and isolate_snapshot.bin are required for
     the Dart VM to bootstrap the kernel service isolate, which enables
     hot reload (reloadSources) and expression evaluation.
+
+    Args:
+        ctx: The rule context.
+        dart_exe: The Dart executable file.
+        dart_vm_files: Depset of Dart VM runtime files.
+        flutter_sdk_info: The resolved FlutterSdkInfo.
+        flutter_assets: The staged app flutter_assets directory.
+        kernel_dill: The compiled Dart kernel dill file.
+        framework_assets: The output App.framework/flutter_assets directory.
+        split_assets: Whether debug assets are split out of the framework.
+
+    Returns:
+        The kernel_blob.bin file if split_assets, or None.
     """
     vm_snapshot = flutter_sdk_info.vm_isolate_snapshot
     iso_snapshot = flutter_sdk_info.isolate_snapshot
@@ -232,17 +246,20 @@ def _assemble_ios_debug_assets(
         flutter_assets.path,
         "--dst",
         framework_assets.path,
-        "--kernel-blob",
-        kernel_dill.path,
     ]
-    copy_inputs = [flutter_assets, kernel_dill, ctx.executable._macho_edit]
+    copy_inputs = [flutter_assets, ctx.executable._macho_edit]
 
-    if vm_snapshot:
-        copy_args.extend(["--vm-snapshot-data", vm_snapshot.path])
-        copy_inputs.append(vm_snapshot)
-    if iso_snapshot:
-        copy_args.extend(["--isolate-snapshot-data", iso_snapshot.path])
-        copy_inputs.append(iso_snapshot)
+    kernel_blob = None
+    if split_assets:
+        kernel_blob = _split_ios_kernel_blob(ctx, kernel_dill)
+    elif kernel_dill:
+        copy_args.extend(["--kernel-blob", kernel_dill.path])
+        copy_inputs.append(kernel_dill)
+
+    for flag, snap in (("--vm-snapshot-data", vm_snapshot), ("--isolate-snapshot-data", iso_snapshot)):
+        if snap:
+            copy_args.extend([flag, snap.path])
+            copy_inputs.append(snap)
 
     ctx.actions.run(
         executable = dart_exe,
@@ -256,8 +273,23 @@ def _assemble_ios_debug_assets(
         progress_message = "Assembling debug App.framework with kernel and VM snapshots",
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
+    return kernel_blob
 
-def _ios_framework_result(ctx, framework_files, framework_binary, split_assets):
+def _split_ios_kernel_blob(ctx, kernel_dill):
+    """Exposes kernel_blob.bin at its own path for split debug assets.
+
+    Args:
+        ctx: The rule context.
+        kernel_dill: The compiled Dart kernel dill file.
+
+    Returns:
+        The declared kernel_blob.bin output file.
+    """
+    kernel_blob = ctx.actions.declare_file("%s/kernel/flutter_assets/kernel_blob.bin" % ctx.label.name)
+    ctx.actions.symlink(output = kernel_blob, target_file = kernel_dill)
+    return kernel_blob
+
+def _ios_framework_result(ctx, framework_files, framework_binary, split_assets, kernel_blob = None):
     """Builds the App.framework providers for the assembled files.
 
     Args:
@@ -267,13 +299,16 @@ def _ios_framework_result(ctx, framework_files, framework_binary, split_assets):
         split_assets: The debug assets directory moved out of the framework, or
             None when the framework keeps its assets. It is published as the
             `flutter_assets` output group so an app can place it at its root.
+        kernel_blob: The debug kernel blob file moved out of the framework, or
+            None when the framework keeps its assets or for an AOT build.
 
     Returns:
         The target's providers.
     """
+    assets = [a for a in [split_assets, kernel_blob] if a]
     return [
         DefaultInfo(files = depset(framework_files)),
-        OutputGroupInfo(flutter_assets = depset([split_assets] if split_assets else [])),
+        OutputGroupInfo(flutter_assets = depset(assets)),
         framework_import_support.framework_import_info_with_dependencies(
             build_archs = [apple_support.target_arch_from_rule_ctx(ctx)],
             deps = [],
@@ -364,11 +399,10 @@ def _flutter_ios_framework_impl(ctx):
 
     _check_ios_simulator_aot(ctx, app_info, is_device)
 
-    ctx.actions.write(framework_plist, _APP_FRAMEWORK_INFO_PLIST.format(
-        minimum_os_version = minimum_os_version,
-    ))
+    ctx.actions.write(framework_plist, _APP_FRAMEWORK_INFO_PLIST.format(minimum_os_version = minimum_os_version))
 
     dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
+    kernel_blob = None
 
     if app_info.aot_output:
         # Release mode: AOT binary + flutter_assets.
@@ -396,7 +430,7 @@ def _flutter_ios_framework_impl(ctx):
             vtool_platform,
             minimum_os_version,
         )
-        _assemble_ios_debug_assets(
+        kernel_blob = _assemble_ios_debug_assets(
             ctx,
             dart_exe,
             dart_vm_files,
@@ -404,12 +438,19 @@ def _flutter_ios_framework_impl(ctx):
             flutter_assets,
             app_info.kernel_dill,
             framework_assets,
+            split_assets,
         )
 
     framework_files = [framework_binary, framework_plist]
     if not split_assets:
         framework_files.append(framework_assets)
-    return _ios_framework_result(ctx, framework_files, framework_binary, framework_assets if split_assets else None)
+    return _ios_framework_result(
+        ctx,
+        framework_files,
+        framework_binary,
+        framework_assets if split_assets else None,
+        kernel_blob,
+    )
 
 flutter_ios_framework = rule(
     implementation = _flutter_ios_framework_impl,
