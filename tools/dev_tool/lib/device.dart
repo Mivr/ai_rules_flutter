@@ -308,10 +308,34 @@ abstract class Device {
   /// (tests, direct use), where discovery falls back to the module logger.
   Logger? discoveryLogger;
 
+  /// Where this device's timed steps take the time from: the system clock,
+  /// or a fake in tests.
+  VmDiscoveryClock clock = const SystemVmDiscoveryClock();
+
   /// The discovery wait this device launches with: its [vmServiceTimeout] as
-  /// the bound, on the system clock.
+  /// the bound, on this device's [clock].
   VmDiscoveryConfig discoveryConfig() =>
-      VmDiscoveryConfig(bound: vmServiceTimeout);
+      VmDiscoveryConfig(bound: vmServiceTimeout, clock: clock);
+
+  /// Runs an iOS install command and logs `iOS install (<kind>): <s>s` once.
+  ///
+  /// Times [install] alone. A command that exits non-zero logs no time; the
+  /// caller reports the failure as before.
+  Future<ProcessResult> timeIosInstall(
+    String kind,
+    Future<ProcessResult> Function() install,
+  ) async {
+    final DateTime started = clock.now();
+    final ProcessResult result = await install();
+    if (result.exitCode == 0) {
+      final double seconds =
+          clock.now().difference(started).inMilliseconds / 1000;
+      activeDiscoveryLogger().info(
+        'iOS install ($kind): ${seconds.toStringAsFixed(1)}s',
+      );
+    }
+    return result;
+  }
 
   /// Where discovery's progress lines go: the run's logger, or the module
   /// logger outside a run.
