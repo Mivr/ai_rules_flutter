@@ -890,24 +890,33 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
     _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled)
     return compiled
 
+def _any_entry_is(entries, file):
+    """Whether any entry in `entries` has `.file == file`."""
+    for entry in entries:
+        if entry.file == file:
+            return True
+    return False
+
+def _any_font_is(entries, file):
+    """Whether any font entry in `entries` lists `file` among its files."""
+    for entry in entries:
+        if file in entry.files:
+            return True
+    return False
+
 def _dep_carries_claim(dep, channel, file):
     """Whether direct `dep` carries `file` in `channel` (`pub`, `shader`, `data`)."""
-    if channel == "pub" and FlutterInfo in dep:
-        for entry in dep[FlutterInfo].pub_assets.to_list():
-            if entry.file == file:
-                return True
-        for entry in dep[FlutterInfo].pub_fonts.to_list():
-            for font_file in entry.files:
-                if font_file == file:
-                    return True
-    elif channel == "shader" and FlutterCompiledShadersInfo in dep:
-        for entry in dep[FlutterCompiledShadersInfo].compiled_shaders.to_list():
-            if entry.file == file:
-                return True
-    elif channel == "data" and FlutterInfo in dep:
-        for entry in dep[FlutterInfo].data_assets.to_list():
-            if entry.file == file:
-                return True
+    if channel == "shader":
+        if FlutterCompiledShadersInfo not in dep:
+            return False
+        return _any_entry_is(dep[FlutterCompiledShadersInfo].compiled_shaders.to_list(), file)
+    if FlutterInfo not in dep:
+        return False
+    info = dep[FlutterInfo]
+    if channel == "pub":
+        return _any_entry_is(info.pub_assets.to_list(), file) or _any_font_is(info.pub_fonts.to_list(), file)
+    if channel == "data":
+        return _any_entry_is(info.data_assets.to_list(), file)
     return False
 
 def _resolve_claim_origin(bundle, channel, file):
