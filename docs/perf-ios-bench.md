@@ -539,6 +539,51 @@ a second small artifact, `ios-profile` (same 3-day retention, no build
 outputs). Medians across repeats recompute the residual from the
 medians, so the parts still sum exactly.
 
+## Two floors for the mobile edit flows (`replay` and `toolchain floor`)
+
+The replay floor (`sol`) re-runs the tool binaries Bazel ran, so it
+includes whatever the rules decided to run: a debug body edit re-runs a
+one-shot kernel compile, an asset copy and a full bundle sign. A gap
+against anything cheaper can never show there. `sol` mode therefore adds
+a second floor, `toolchain_floor`, to each mobile edit flow (iOS
+simulator debug, iOS device release, Android debug, Android release; not
+Web, not `clean`), written by hand in `tools/perf/floor*.py` against the
+SDK and platform tools:
+
+- **Includes (debug edit):** a resident `frontend_server` in incremental
+  mode (first compile untimed), the recompile after the edit, the kernel
+  blob replaced inside a copy of the built package in place, and the
+  least re-signing the platform accepts: iOS seals the changed bundle
+  only (no `--deep`, frameworks keep their signatures); Android signs the
+  package once (v2 only) with no recompression and no realignment of
+  unchanged entries.
+- **Includes (release edit):** the AOT kernel compile, exactly one
+  `gen_snapshot`, the snapshot replaced inside the package, the same
+  minimum re-sign.
+- **Excludes:** Bazel itself, analysis, caching, action setup, asset
+  copies, linking, host-tool builds and anything the chain does not need.
+  Untimed setup (the first resident compile, a throwaway keystore) is not
+  counted. CPU is the same wait4 whole-tree clock as the replay chain; the
+  resident compiler's CPU is its exit total minus its CPU after the first
+  compile.
+
+Tool paths come from the workspace the bench built (its external
+repositories, and Xcode's `codesign` via `xcrun --find`), never from a
+host install; an unfindable tool is named in `floor_reason`. The
+replaced package must pass the platform's own check (iOS: `codesign
+--verify --strict`, `Info.plist` and the executable present; Android:
+`apksigner verify`, `zipalign -c`, `AndroidManifest.xml` and the Dart
+payload present); otherwise the flow has `floor_identical: false`, a
+non-`ok` `floor_reason` and no `toolchain_floor`.
+
+`ios-sol.json` and `android-sol.json` flows carry `toolchain_floor`
+(median CPU seconds, same unit as `sol`), `spread.toolchain_floor`,
+`floor_identical`, `floor_reason` and `bazel_over_toolchain_floor`
+(bazel / toolchain_floor) beside the unchanged `sol` keys. A floor failure
+marks only these fields; it never changes `sol` and never fails the
+replay chain. `sol.py run --floor=off` (default `on`) writes exactly the
+output the base wrote.
+
 ## Cost rules (binding)
 
 `workflow_dispatch` only; `macos-15`; job timeout 300 minutes; artifact
