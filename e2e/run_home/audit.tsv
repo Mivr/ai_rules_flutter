@@ -16,8 +16,8 @@
 @rules_flutter//flutter/private/tools:bundle_app	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:compile_shader	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:const_finder	exec build tool (AOT); outputs only, no CLI spawn
-@rules_flutter//flutter/private/tools:extract_library_tags	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:defines_files	exec build tool (AOT); outputs only, no CLI spawn
+@rules_flutter//flutter/private/tools:extract_library_tags	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:generate_asset_manifest	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:incr_fkc_worker	exec build tool (AOT persistent worker); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:kernel_filter	exec build tool (AOT); outputs only, no CLI spawn
@@ -47,9 +47,9 @@
 @rules_flutter//flutter/private/tools:compile_shader_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:const_finder_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:copy_local_file_test	Dart unit test; no CLI spawn
+@rules_flutter//flutter/private/tools:defines_files_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:extract_library_tags_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_integration_test_android_test	Dart unit test; no CLI spawn
-@rules_flutter//flutter/private/tools:defines_files_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_integration_test_ios_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_integration_test_runner_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_test_runner_test	Dart unit test; no CLI spawn

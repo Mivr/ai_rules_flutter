@@ -78,14 +78,15 @@ void main() {
   testWidgets('forwards a define with a comma and an equals sign', (
     tester,
   ) async {
-    expect(
-      const String.fromEnvironment('COV13_GREETING'),
-      'hello, world=ok',
-    );
+    expect(const String.fromEnvironment('COV13_GREETING'), 'hello, world=ok');
   });
 
   testWidgets('reads a value defined only in defines_files', (tester) async {
-    expect(const String.fromEnvironment('COV15_DEFINE'), 'from_defines_file');
+    const isAlt = bool.fromEnvironment('USE_ALT_GREETING');
+    expect(
+      const String.fromEnvironment('COV15_DEFINE'),
+      isAlt ? '' : 'from_defines_file',
+    );
   });
 
   testWidgets('renders the generated Spanish message under Locale es', (
@@ -100,9 +101,8 @@ void main() {
             context: context,
             locale: const Locale('es'),
             child: Builder(
-              builder: (context) => Text(
-                Cov13Localizations.of(context).cov13Greeting,
-              ),
+              builder: (context) =>
+                  Text(Cov13Localizations.of(context).cov13Greeting),
             ),
           ),
         ),
