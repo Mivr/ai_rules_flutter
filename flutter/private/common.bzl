@@ -9,7 +9,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs", "derive_lib_root", "generate_dev_package_config", _COPY_TO_DIRECTORY_TOOLCHAINS = "COPY_TO_DIRECTORY_TOOLCHAINS")
 load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "synthesize_app_package", "with_root")
+load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "agent_layout_path", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "stage_agent_extensions", "synthesize_app_package", "with_root")
 load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "fail_asset_key_conflict", "is_within_package", "relative_key")
 load("//flutter/private:asset_uri.bzl", "encode_asset_key")
 load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action", "make_bundle_content", "make_tree_shake")
@@ -342,31 +342,6 @@ def _resolve_kernel_platform_dill(platform_dill, aot, mode, flutter_sdk_info):
         )
     return platform_dill
 
-def _stage_agent_extensions(ctx, aot, mode):
-    """Stage the debug-agent sources next to the registrant in debug builds."""
-
-    # AI-agent service-extension injection: in debug builds (non-AOT), if the
-    # rule carries an `_agent_extensions_src` attr, stage the agent source next
-    # to the generated registrant, which registers the extensions from the
-    # engine's pre-main plugin-registrant hook. Release/AOT/profile builds skip
-    # this entirely — profile mode is for performance investigation where added
-    # instrumentation distorts measurements, so it must look the same as
-    # release on the agent surface.
-    agent_src_attr = getattr(ctx.attr, "_agent_extensions_src", None)
-    inject_agent = (not aot) and mode == "debug" and agent_src_attr != None
-    staged_agent = None
-    staged_native_agent = None
-    if inject_agent:
-        staged_agent = ctx.actions.declare_file(ctx.label.name + ".agent_extensions.dart")
-        ctx.actions.symlink(output = staged_agent, target_file = ctx.file._agent_extensions_src)
-
-        # The native-only half (`dart:ffi`): loading a native hot patch. A
-        # kernel compile is always native — web stages `agent.dart` alone, in
-        # its own rule.
-        staged_native_agent = ctx.actions.declare_file(ctx.label.name + ".native_agent_extensions.dart")
-        ctx.actions.symlink(output = staged_native_agent, target_file = ctx.file._native_agent_extensions_src)
-    return struct(agent = staged_agent, native_agent = staged_native_agent)
-
 def _build_info_json(ctx, plan, inputs, target_platform):
     """The JSON build record of a debug app, or None when the app carries none."""
 
@@ -411,6 +386,7 @@ def _kernel_registrant(ctx, target_platform, agent, emit_dev_config, build_info)
         agent_import = agent.agent.basename if agent.agent else None,
         native_agent_import = agent.native_agent.basename if agent.native_agent else None,
         build_info_json = build_info if agent.agent else None,
+        declared_path = agent_layout_path(ctx, "plugin_registrant.dart") if agent.constant else None,
     )
     registrant_location = app_scheme_location(registrant) if registrant else None
 
@@ -424,8 +400,8 @@ def _kernel_registrant(ctx, target_platform, agent, emit_dev_config, build_info)
         dev_plugin_registrants = generate_dev_plugin_registrants(
             ctx,
             plugins,
-            agent_import = agent.agent.basename if agent.agent else None,
-            native_agent_import = agent.native_agent.basename if agent.native_agent else None,
+            agent_import = agent.dev_agent,
+            native_agent_import = agent.dev_native_agent,
         )
     return struct(registrant = registrant, location = registrant_location, dev_registrants = dev_plugin_registrants)
 
@@ -654,7 +630,7 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, target, inputs):
     if aot == None:
         aot = mode != "debug"
     platform_dill = _resolve_kernel_platform_dill(target.platform_dill, aot, mode, flutter_sdk_info)
-    agent = _stage_agent_extensions(ctx, aot, mode)
+    agent = stage_agent_extensions(ctx, aot, mode)
     build_info = _build_info_json(ctx, struct(mode = mode, aot = aot), inputs, target.target_platform)
     reg = _kernel_registrant(ctx, target.target_platform, agent, dev.emit, build_info)
     flags = _kernel_compile_flags(ctx, inputs.track_widget_creation, mode, aot)

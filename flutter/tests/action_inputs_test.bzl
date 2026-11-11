@@ -336,9 +336,9 @@ def _kernel_target_dbg_test_impl(ctx):
         env,
         _input_paths(compile_action),
         [
-            "_inputs_kernel_target.agent_extensions.dart",
-            "_inputs_kernel_target.native_agent_extensions.dart",
-            "_inputs_kernel_target_plugin_registrant.dart",
+            "_flutter_debug_agent/agent_extensions.dart",
+            "_flutter_debug_agent/native_agent_extensions.dart",
+            "_flutter_debug_agent/plugin_registrant.dart",
             "flutter_patched_sdk/platform_strong.dill",
         ],
         "debug non-AOT flutter_kernel_target",

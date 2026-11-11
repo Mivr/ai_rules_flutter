@@ -3,6 +3,7 @@ load("@rules_dart//dart:defs.bzl", "dart_library", "dart_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load(":action_inputs_test.bzl", "action_inputs_test_suite")
+load(":agent_uris_test.bzl", "agent_uris_test_suite")
 load(":analyze_size_test.bzl", "analyze_size_test_suite")
 load(":android_aar_test.bzl", "android_aar_test_suite")
 load(":android_debug_signing_test.bzl", "android_debug_signing_test_suite")
@@ -619,6 +620,8 @@ starlark_hygiene_test_suite(name = "starlark_hygiene_test")
 profile_mode_test_suite(name = "profile_mode_test")
 
 app_entrypoint_test_suite(name = "app_entrypoint_test")
+
+agent_uris_test_suite(name = "agent_uris_test")
 
 apple_objc_deps_test_suite(name = "apple_objc_deps_test")
 
