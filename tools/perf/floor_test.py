@@ -372,6 +372,7 @@ class FrontendTest(unittest.TestCase):
         try:
             server.compile("file:///m.dart")
         finally:
+            server.errlog.close()
             floor_run.process_cpu = orig
         self.assertEqual("compile file:///m.dart\n", written[0])
         self.assertEqual("accept\n", written[1])
@@ -395,9 +396,12 @@ class FrontendDiagTest(unittest.TestCase):
 
     def failure(self, lines, stderr=""):
         server = self.server(lines, stderr)
-        with self.assertRaises(floor.FloorError) as ctx:
-            server._checked()
-        return str(ctx.exception)
+        try:
+            with self.assertRaises(floor.FloorError) as ctx:
+                server._checked()
+            return str(ctx.exception)
+        finally:
+            server.errlog.close()
 
     def test_fields_and_diagnostics(self):
         msg = self.failure(["result K\n", "bad one\n", "bad two\n",
@@ -409,6 +413,26 @@ class FrontendDiagTest(unittest.TestCase):
         msg = self.failure(["result K\n", "oops\n", "K\n"])
         self.assertIn("no output file", msg)
         self.assertIn("oops", msg)
+
+    def test_pre_result_lines_kept(self):
+        msg = self.failure(["warn one\n", "result K\n", "K\n"])
+        self.assertIn("warn one", msg)
+        self.assertIn("no output file", msg)
+        self.assertIn("before result:", msg)
+
+    def test_no_diagnostics_and_no_stderr(self):
+        msg = self.failure(["result K\n", "K\n"])
+        self.assertTrue(
+            msg.endswith("the server printed no diagnostics and no stderr"))
+
+    def test_many_pre_result_bounded(self):
+        lines = (["pre%03d %s\n" % (i, "x" * 60) for i in range(100)]
+                 + ["result K\n", "K\n"])
+        msg = self.failure(lines)
+        self.assertIn("pre000", msg)
+        self.assertNotIn("pre030", msg)
+        self.assertLess(len(msg), 4000)
+        self.assertIn("no output file", msg)
 
     def test_stderr_tail_is_last_20(self):
         err = "".join("err%d\n" % i for i in range(50))
@@ -431,9 +455,17 @@ class FrontendDiagTest(unittest.TestCase):
         self.assertIn("without a result", msg)
         self.assertIn("last", msg)
 
+    def test_ended_without_result_keeps_pre_result(self):
+        msg = self.failure(["orphan prelude\n"])
+        self.assertIn("orphan prelude", msg)
+        self.assertIn("without a result", msg)
+
     def test_passing_compile_unchanged(self):
         server = self.server(["result K\n", "K out.dill 0\n"])
-        server._checked()
+        try:
+            server._checked()
+        finally:
+            server.errlog.close()
 
 
 class FlowTest(unittest.TestCase):
