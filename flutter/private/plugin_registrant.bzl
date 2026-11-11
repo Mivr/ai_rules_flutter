@@ -759,21 +759,21 @@ def generate_dart_plugin_registrant(
         target_platform = None,
         agent_import = None,
         native_agent_import = None,
-        build_info_json = None):
+        build_info_json = None,
+        declared_path = None):
     """Generate a Dart plugin registrant source file via ctx.actions.write.
 
     Args:
         ctx: The rule context of the rule implementation that calls this helper.
         plugins: List of plugin structs.
         target_platform: Optional platform string to filter plugins by.
-        agent_import: Optional relative import for the staged agent-extensions
-            library, registered from the registrant (debug builds).
+        agent_import: Optional relative import for the staged agent library.
         native_agent_import: The same, for the native-only agent extensions.
         build_info_json: Optional JSON build record handed to the agent from `register()`.
+        declared_path: Optional package-relative path to declare it at.
 
     Returns:
-        File: The generated registrant .dart file, or None if there are no
-        Dart plugins and no agent to register.
+        File: The registrant, or None with no Dart plugins and no agent.
     """
     content = make_registrant_content(
         plugins,
@@ -784,6 +784,6 @@ def generate_dart_plugin_registrant(
     )
     if not content:
         return None
-    registrant = ctx.actions.declare_file(ctx.label.name + "_plugin_registrant.dart")
+    registrant = ctx.actions.declare_file(declared_path or ctx.label.name + "_plugin_registrant.dart")
     ctx.actions.write(registrant, content)
     return registrant

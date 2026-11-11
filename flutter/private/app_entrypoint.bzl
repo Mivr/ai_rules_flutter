@@ -28,8 +28,14 @@ load("@rules_dart//dart:utils.bzl", "generate_stable_package_config", "package_o
 # second name to choose.
 APP_SCHEME = "org-dartlang-app"
 
+# The fixed directory the three files sit in; part of their constant URIs.
+AGENT_DIR = "_flutter_debug_agent"
+
 def app_scheme_rel_path(file):
     """The path of `file` under `APP_SCHEME` (without leading slash).
+
+    A file inside `AGENT_DIR` is named from that directory on, which makes its
+    URI independent of the label and the package.
 
     Args:
         file: The source or generated `File` whose path is mapped under `APP_SCHEME`.
@@ -38,9 +44,68 @@ def app_scheme_rel_path(file):
         Workspace-relative path (`external/<repo>/...` for external repos).
     """
     rel = file.short_path
+    marker = "/" + AGENT_DIR + "/"
+    if marker in rel:
+        return AGENT_DIR + "/" + rel.split(marker)[-1]
     if rel.startswith("../"):
         rel = "external/" + rel[len("../"):]
     return rel
+
+def agent_layout_path(ctx, name):
+    """Where the debug agent file `name` is declared for this target.
+
+    Args:
+        ctx: The rule context.
+        name: The file's fixed name.
+
+    Returns:
+        Path relative to the target's package.
+    """
+    return "%s.debug_agent/%s/%s" % (ctx.label.name, AGENT_DIR, name)
+
+def stage_agent_extensions(ctx, aot, mode):
+    """Stage the debug-agent sources next to the registrant in debug builds.
+
+    In debug builds (non-AOT), if the rule carries an `_agent_extensions_src`
+    attr, the agent source is staged next to the generated registrant, which
+    registers the extensions from the engine's pre-main plugin-registrant hook.
+    Release/AOT/profile builds skip this entirely: profile mode is for
+    performance investigation where added instrumentation distorts
+    measurements, so it must look the same as release on the agent surface.
+
+    Args:
+        ctx: The rule context.
+        aot: Whether the compile is AOT.
+        mode: The build mode.
+
+    Returns:
+        struct(agent, native_agent, constant, dev_agent, dev_native_agent):
+        the staged files (None when not injected), whether the constant layout
+        applies, and the imports the dev registrants use to reach the files.
+    """
+    constant = (not aot) and mode == "debug"
+    agent_src_attr = getattr(ctx.attr, "_agent_extensions_src", None)
+    staged_agent = None
+    staged_native_agent = None
+    if constant and agent_src_attr != None:
+        staged_agent = ctx.actions.declare_file(agent_layout_path(ctx, "agent_extensions.dart"))
+        ctx.actions.symlink(output = staged_agent, target_file = ctx.file._agent_extensions_src)
+
+        # The native-only half (`dart:ffi`): loading a native hot patch. A
+        # kernel compile is always native; web stages `agent.dart` alone.
+        staged_native_agent = ctx.actions.declare_file(agent_layout_path(ctx, "native_agent_extensions.dart"))
+        ctx.actions.symlink(output = staged_native_agent, target_file = ctx.file._native_agent_extensions_src)
+    return struct(
+        agent = staged_agent,
+        native_agent = staged_native_agent,
+        constant = constant,
+        dev_agent = _dev_import(ctx, staged_agent),
+        dev_native_agent = _dev_import(ctx, staged_native_agent),
+    )
+
+def _dev_import(ctx, staged):
+    """The import a dev registrant (beside the package's outputs) uses for `staged`."""
+    return agent_layout_path(ctx, staged.basename) if staged else None
 
 def app_scheme_location(file):
     """Where `file` sits under `APP_SCHEME`, and the root it sits under.

@@ -23,7 +23,7 @@ def _registrant_source(env, optional = False):
     writes = [
         a
         for a in analysistest.target_actions(env)
-        if a.mnemonic == "FileWrite" and a.outputs.to_list()[0].basename.endswith("_plugin_registrant.dart")
+        if a.mnemonic == "FileWrite" and a.outputs.to_list()[0].basename.endswith("plugin_registrant.dart")
     ]
     if optional:
         asserts.true(env, len(writes) <= 1, "expected at most one registrant write")

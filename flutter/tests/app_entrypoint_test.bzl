@@ -142,8 +142,8 @@ def _assert_registrant_on_app_scheme(env, action):
     )
     asserts.true(
         env,
-        registrant.startswith("org-dartlang-app:///flutter/tests/"),
-        "the registrant is named by its workspace path under the app scheme, got %r" % registrant,
+        registrant == "org-dartlang-app:///_flutter_debug_agent/plugin_registrant.dart",
+        "the registrant is named by a constant URI under the app scheme, got %r" % registrant,
     )
     _assert_multi_root_and_package_config(env, action)
 
