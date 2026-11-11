@@ -37,6 +37,13 @@ _CONFIGS = {
     "android": ("android_release", "android_debug"),
     "web": ("web_release", "web_debug"),
 }
+_STEP_SCRIPT_INPUTS = {
+    "Generate pristine monorepo": ("target_loc", "seed"),
+    "Generate committed lockfile": ("platform",),
+    "Measure speed-of-light": ("repeats", "platform"),
+    "Summarize speed-of-light": (
+        "repeats", "target_loc", "seed", "lockfile", "platform"),
+}
 
 
 def workflow_path():
@@ -162,26 +169,25 @@ def mapping_entries(lines):
 
 
 def parse_step(block):
-    """One workflow step as a dict, with `with:` fields nested."""
+    """One workflow step as a dict, with `with:` and `env:` fields nested."""
     entries = mapping_entries(block)
     if not entries:
         return {}
     base = min(entry[1] for entry in entries)
     step = {}
-    with_entry = None
+    nested = {}
     for index, indent, key, rest in entries:
         if indent != base:
             continue
         value = rest.strip()
-        if key == "with":
-            with_entry = (index, indent)
+        if key in ("with", "env"):
+            nested[key] = (index, indent)
         elif value in ("|", ">", "|-", ">-"):
             step[key] = text_under(block, index, indent)
         else:
             step[key] = value
-    if with_entry is not None:
-        step["with"] = parse_fields(block, with_entry[0],
-                                    with_entry[1])
+    for key, (index, indent) in nested.items():
+        step[key] = parse_fields(block, index, indent)
     return step
 
 
@@ -330,19 +336,69 @@ class PerfLinuxWorkflowTest(unittest.TestCase):
                 self.assertIn(pair, script)
 
     def test_generates_head_and_summarizes_to_platform_file(self):
-        scripts = [step.get("run", "") for step in steps(self.lines)
-                   if step.get("run")]
-        generate = [script for script in scripts
-                    if "gen_monorepo.py" in script]
+        all_steps = steps(self.lines)
+        generate = [step.get("run", "") for step in all_steps
+                    if "gen_monorepo.py" in step.get("run", "")]
         self.assertEqual(len(generate), 1)
         self.assertIn("--rules-flutter", generate[0])
         self.assertIn("rules-head", generate[0])
-        summarize = [script for script in scripts
-                     if re.search(r"sol\.py[^\n]*\s+summarize\b", script)]
+        summarize = [step for step in all_steps
+                     if re.search(r"sol\.py[^\n]*\s+summarize\b",
+                                  step.get("run", ""))]
         self.assertEqual(len(summarize), 1)
+        self.assertEqual(summarize[0].get("env", {}).get("PLATFORM"),
+                         "${{ inputs.platform }}")
         self.assertIn(
-            '--out "$GITHUB_WORKSPACE/${{ inputs.platform }}-sol.json"',
-            summarize[0])
+            '--out "$GITHUB_WORKSPACE/$PLATFORM-sol.json"',
+            summarize[0]["run"])
+
+    def test_no_workflow_inputs_in_run_blocks(self):
+        violations = []
+        for step in steps(self.lines):
+            script = step.get("run", "")
+            if not script:
+                continue
+            step_name = step.get("name", "<unnamed>")
+            for match in re.finditer(
+                r"\$\{\{\s*(?:github\.event\.)?inputs\.([A-Za-z0-9_]+)"
+                r"|github\.event\.inputs\.([A-Za-z0-9_]+)",
+                script,
+            ):
+                input_name = match.group(1) or match.group(2)
+                violations.append(
+                    "step %r contains input %r in run: script"
+                    % (step_name, input_name))
+        self.assertEqual(violations, [])
+
+    def test_script_inputs_bound_in_env_and_referenced_as_variables(self):
+        step_map = {step.get("name"): step for step in steps(self.lines)
+                    if step.get("name")}
+        for step_name, expected_inputs in _STEP_SCRIPT_INPUTS.items():
+            self.assertIn(step_name, step_map)
+            step = step_map[step_name]
+            env = step.get("env", {})
+            script = step.get("run", "")
+            self.assertTrue(script, "step %r has run: script" % step_name)
+            for input_name in expected_inputs:
+                var_name = input_name.upper()
+                with self.subTest(step=step_name, input=input_name):
+                    self.assertIn(
+                        var_name, env,
+                        "step %r missing env: entry %r"
+                        % (step_name, var_name))
+                    self.assertEqual(
+                        env[var_name],
+                        "${{ inputs.%s }}" % input_name,
+                        "step %r env[%r] must bind inputs.%s"
+                        % (step_name, var_name, input_name))
+                    self.assertIn(
+                        "$%s" % var_name, script,
+                        "step %r script must reference $%s"
+                        % (step_name, var_name))
+                    self.assertNotIn(
+                        "inputs.%s" % input_name, script,
+                        "step %r script must not reference inputs.%s"
+                        % (step_name, input_name))
 
     def mapping_entries(self):
         """Every mapping line in the workflow, nested ones included."""

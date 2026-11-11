@@ -88,11 +88,14 @@ jobs:
           echo "build --repo_env=ANDROID_HOME=$ANDROID_HOME" >> ~/.bazelrc
           echo "build --repo_env=ANDROID_NDK_HOME=$ndk" >> ~/.bazelrc
       - name: Generate pristine monorepo
+        env:
+          SEED: ${{ inputs.seed }}
+          TARGET_LOC: ${{ inputs.target_loc }}
         run: |
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/gen_monorepo.py" generate \
-            --target-loc "${{ inputs.target_loc }}" \
-            --seed "${{ inputs.seed }}" \
+            --target-loc "$TARGET_LOC" \
+            --seed "$SEED" \
             --rules-flutter "$GITHUB_WORKSPACE/rules-head" \
             --out "$RUNNER_TEMP/ws-head-pristine"
       - name: Generate committed lockfile
@@ -100,11 +103,13 @@ jobs:
         # MODULE.bazel.lock into the pristine workspace before measuring.
         # Without this the generated workspace has no lock (lockfile=none).
         if: inputs.lockfile == 'committed'
+        env:
+          PLATFORM: ${{ inputs.platform }}
         run: |
           set -euo pipefail
           ws="$RUNNER_TEMP/ws-head-pristine"
           out="$RUNNER_TEMP/lock-out"
-          target="//app:app_${{ inputs.platform }}"
+          target="//app:app_$PLATFORM"
           rm -rf "$out"
           for flags in "-c opt" "-c dbg"; do
             (cd "$ws" && bazel --output_base="$out" build $flags "$target" --nobuild)
@@ -119,6 +124,9 @@ jobs:
         # and shuts its server down. A failing config is recorded and the
         # loop continues; the step then exits non-zero, but summarize and
         # upload still run.
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          REPEATS: ${{ inputs.repeats }}
         run: |
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
@@ -132,12 +140,12 @@ jobs:
               "$@"
           }
           failed=0
-          for rep in $(seq 1 "${{ inputs.repeats }}"); do
+          for rep in $(seq 1 "$REPEATS"); do
             rm -rf "$RUNNER_TEMP/sol-out-$rep" "$RUNNER_TEMP/sol-run-$rep"
-            case "${{ inputs.platform }}" in
+            case "$PLATFORM" in
               android) run_sol --config android_release --config android_debug || failed=1 ;;
               web) run_sol --config web_release --config web_debug || failed=1 ;;
-              *) echo "unknown platform: ${{ inputs.platform }}"; exit 1 ;;
+              *) echo "unknown platform: $PLATFORM"; exit 1 ;;
             esac
           done
           exit "$failed"
@@ -145,6 +153,12 @@ jobs:
         # Runs even when measuring failed, so <platform>-sol.json (with the
         # finished flows and the recorded reasons) is always written.
         if: ${{ !cancelled() }}
+        env:
+          LOCKFILE: ${{ inputs.lockfile }}
+          PLATFORM: ${{ inputs.platform }}
+          REPEATS: ${{ inputs.repeats }}
+          SEED: ${{ inputs.seed }}
+          TARGET_LOC: ${{ inputs.target_loc }}
         run: |
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
@@ -152,14 +166,14 @@ jobs:
           python3 "$tools/sol.py" summarize \
             --results "$GITHUB_WORKSPACE/sol-results" \
             --sha "$sha" \
-            --repeats "${{ inputs.repeats }}" \
-            --target-loc "${{ inputs.target_loc }}" \
-            --seed "${{ inputs.seed }}" \
-            --lockfile "${{ inputs.lockfile }}" \
-            --out "$GITHUB_WORKSPACE/${{ inputs.platform }}-sol.json"
+            --repeats "$REPEATS" \
+            --target-loc "$TARGET_LOC" \
+            --seed "$SEED" \
+            --lockfile "$LOCKFILE" \
+            --out "$GITHUB_WORKSPACE/$PLATFORM-sol.json"
           {
             echo '```json'
-            cat "$GITHUB_WORKSPACE/${{ inputs.platform }}-sol.json"
+            cat "$GITHUB_WORKSPACE/$PLATFORM-sol.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload platform sol
