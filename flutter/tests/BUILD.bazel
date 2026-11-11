@@ -29,6 +29,7 @@ load(":defines_files_test.bzl", "defines_files_test_suite")
 load(":dev_incremental_serialization_test.bzl", "dev_incremental_serialization_test_suite")
 load(":flutter_apple_xcframework_import_test.bzl", "flutter_apple_xcframework_import_test_suite")
 load(":flutter_application_test.bzl", "flutter_application_test_suite")
+load(":flutter_drive_test_test.bzl", "flutter_drive_test_test_suite")
 load(":flutter_info_test.bzl", "flutter_info_test_suite")
 load(":flutter_integration_test_test.bzl", "flutter_integration_test_test_suite")
 load(":flutter_library_test.bzl", "flutter_library_test_suite")
@@ -244,6 +245,20 @@ dart_test(
         "external",
         "no-sandbox",
     ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
+# README text check for `flutter_drive_test`: a section, its `load` from
+# `flutter/android.bzl`, the attributes, the driver environment and the scope.
+# The README is a declared input, so a cached pass tracks its content.
+dart_test(
+    name = "flutter_drive_readme_test",
+    size = "small",
+    data = ["//:README.md"],
+    env = {"README_PATH": "$(rlocationpath //:README.md)"},
+    main = "flutter_drive_readme_test.dart",
     deps = [
         "@dev_tool_deps//:test",
     ],
@@ -532,6 +547,8 @@ web_test_suite(name = "web_test")
 flutter_info_test_suite(name = "flutter_info_test")
 
 flutter_integration_test_test_suite(name = "flutter_integration_test_test")
+
+flutter_drive_test_test_suite(name = "flutter_drive_test_test")
 
 flutter_library_test_suite(name = "flutter_library_test")
 

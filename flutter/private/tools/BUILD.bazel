@@ -58,6 +58,7 @@ exports_files(
         "zlib_raw_tables.dart",
         "zlib_raw_trees.dart",
         "flutter_test_runner.dart",
+        "flutter_drive_runner.dart",
         "flutter_integration_test_runner.dart",
         "flutter_integration_test_launcher.dart",
         "flutter_integration_test_web_serve.dart",
@@ -156,6 +157,24 @@ dart_binary(
     ],
     compile_mode = "exe",
     main = "flutter_integration_test_runner.dart",
+    target_compatible_with = HOST_COMPATIBLE,
+    visibility = ["//flutter:__subpackages__"],
+    deps = [
+        "@dev_tool_deps//:boolean_selector",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
+dart_binary(
+    name = "flutter_drive_runner",
+    srcs = [
+        "flutter_integration_test_android.dart",
+        "flutter_integration_test_launcher.dart",
+        "run_home.dart",
+        "test_support.dart",
+    ],
+    compile_mode = "exe",
+    main = "flutter_drive_runner.dart",
     target_compatible_with = HOST_COMPATIBLE,
     visibility = ["//flutter:__subpackages__"],
     deps = [
@@ -428,6 +447,13 @@ _UNIT_TESTS = {
             "@rules_dart//dart/runfiles",
         ],
     ),
+    "flutter_drive_runner_test": (
+        "flutter_drive_runner.dart",
+        [
+            "@dev_tool_deps//:boolean_selector",
+            "@rules_dart//dart/runfiles",
+        ],
+    ),
     "flutter_integration_test_android_test": (
         "flutter_integration_test_android.dart",
         [
@@ -544,6 +570,12 @@ _TOOL_SRCS = {
         "test_support.dart",
         "zip_reader.dart",
         "zip_writer.dart",
+    ],
+    "flutter_drive_runner.dart": [
+        "flutter_integration_test_android.dart",
+        "flutter_integration_test_launcher.dart",
+        "run_home.dart",
+        "test_support.dart",
     ],
     "flutter_integration_test_android.dart": [
         "flutter_integration_test_launcher.dart",

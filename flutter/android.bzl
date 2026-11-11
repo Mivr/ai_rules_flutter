@@ -72,10 +72,12 @@ load(
 )
 load(
     "//flutter/private:flutter_android_binary_proxy.bzl",
+    _ANDROIDX_EMBEDDING_DEPS = "ANDROIDX_EMBEDDING_DEPS",
     _FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = "FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS",
     _build_overlay_kwargs = "build_overlay_kwargs",
     _flutter_android_aab_emit = "flutter_android_aab_emit",
     _flutter_android_binary_proxy = "flutter_android_binary_proxy",
+    _flutter_drive_test = "flutter_drive_test",
 )
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
@@ -91,36 +93,6 @@ load(
 # Re-export constants for user BUILD files.
 ANDROID_MIN_SDK_VERSION = _ANDROID_MIN_SDK_VERSION
 ANDROID_TARGET_SDK_VERSION = _ANDROID_TARGET_SDK_VERSION
-
-# AndroidX deps of flutter.jar, mirroring the dependency list of Flutter's
-# official io.flutter:flutter_embedding_* Maven POM (the deps every
-# Gradle-built Flutter app ships): lifecycle for FlutterActivity's
-# LifecycleRegistry, window/window-java for foldable display features, core
-# for ContextCompat/ViewCompat/input, tracing for the engine's TraceSection,
-# fragment for FlutterFragment(Activity), exifinterface for image decoding,
-# and relinker for engine .so loading. The POM's lifecycle-common-java8 and
-# lifecycle-process entries are omitted: at the lifecycle version pinned here
-# their classes live in lifecycle-common, and the embedding never references
-# lifecycle-process types.
-#
-# `flutter_android_engine` *exports* these: the POM declares them at compile
-# scope, so in Gradle builds everything that compiles against the embedding
-# AAR — runner sources, the plugin registrant, and every Flutter plugin —
-# sees them on its compile classpath transitively. Exporting reproduces
-# that contract. It adds nothing to the APK that the engine target wasn't
-# already carrying at runtime.
-_ANDROIDX_EMBEDDING_DEPS = [
-    "@rules_android_maven//:androidx_annotation_annotation",
-    "@rules_android_maven//:androidx_core_core",
-    "@rules_android_maven//:androidx_exifinterface_exifinterface",
-    "@rules_android_maven//:androidx_fragment_fragment",
-    "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
-    "@rules_android_maven//:androidx_lifecycle_lifecycle_runtime",
-    "@rules_android_maven//:androidx_tracing_tracing",
-    "@rules_android_maven//:androidx_window_window",
-    "@rules_android_maven//:androidx_window_window_java",
-    "@rules_android_maven//:com_getkeepsafe_relinker_relinker",
-]
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 
@@ -139,6 +111,9 @@ flutter_android_apk_overlay = _flutter_android_apk_overlay
 # The aapt2 default no-compress extension list that both the overlay tool and
 # android_binary's own packaging apply.
 FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = _FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS
+
+# Runs a host-side driver script against an app launched on the Android emulator.
+flutter_drive_test = _flutter_drive_test
 
 # Merges a variant AndroidManifest.xml overlay (e.g. flutter create's
 # android/app/src/debug/AndroidManifest.xml) into a base manifest — the
