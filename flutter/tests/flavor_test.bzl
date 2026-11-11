@@ -423,6 +423,88 @@ def _declare_invalid_flavor_targets(name):
         ],
     )
 
+def _declare_default_flavor_targets(name):
+    """Declares applications whose flavor comes from `default_flavor`."""
+    flutter_application(
+        name = name + "_app_default_flavor",
+        default_flavor = "prod",
+        main = _MAIN,
+        package_name = _PACKAGE,
+        deps = [":" + name + "_fixture_lib"],
+        target_compatible_with = HOST_COMPATIBLE,
+        tags = ["manual"],
+    )
+    flutter_application(
+        name = name + "_app_both_flavors",
+        flavor = "dev",
+        default_flavor = "prod",
+        main = _MAIN,
+        package_name = _PACKAGE,
+        deps = [":" + name + "_fixture_lib"],
+        target_compatible_with = HOST_COMPATIBLE,
+        tags = ["manual"],
+    )
+    for suffix, test in (("dbg", _flavored_compile_defines_test), ("opt", _flavored_opt_defines_test), ("profile", _flavored_profile_defines_test)):
+        test(
+            name = name + "_default_flavor_" + suffix + "_test",
+            size = "small",
+            target_under_test = ":" + name + "_app_default_flavor",
+            expected_flavor = "prod",
+        )
+    _flavored_compile_defines_test(
+        name = name + "_both_flavors_defines_test",
+        size = "small",
+        target_under_test = ":" + name + "_app_both_flavors",
+        expected_flavor = "dev",
+    )
+    _bundle_filtering_test(
+        name = name + "_default_flavor_bundle_test",
+        size = "small",
+        target_under_test = ":" + name + "_app_default_flavor",
+        expected_present_copies = [
+            "packages/" + _PACKAGE + "/assets/prod.txt",
+            "packages/" + _PACKAGE + "/assets/any.txt",
+        ],
+        expected_present_inputs = ["prod.frag.iplr", "any.frag.iplr"],
+    )
+    _bundle_filtering_test(
+        name = name + "_both_flavors_bundle_test",
+        size = "small",
+        target_under_test = ":" + name + "_app_both_flavors",
+        expected_present_copies = ["packages/" + _PACKAGE + "/assets/any.txt"],
+        expected_absent_copies = ["packages/" + _PACKAGE + "/assets/prod.txt"],
+        expected_absent_shader_compiles = [name + "_prod.frag"],
+    )
+    flutter_application(
+        name = name + "_default_flavor_invalid",
+        default_flavor = "dev flavor",
+        main = _MAIN,
+        package_name = _PACKAGE,
+        target_compatible_with = HOST_COMPATIBLE,
+        tags = ["manual"],
+    )
+    _failure_test(
+        name = name + "_default_flavor_invalid_test",
+        size = "small",
+        target_under_test = ":" + name + "_default_flavor_invalid",
+        expected_messages = [name + "_default_flavor_invalid", "\"dev flavor\"", "whitespace, '=' or ','"],
+    )
+    flutter_application(
+        name = name + "_default_flavor_conflict",
+        default_flavor = "dev",
+        defines = ["FLUTTER_APP_FLAVOR=prod"],
+        main = _MAIN,
+        package_name = _PACKAGE,
+        target_compatible_with = HOST_COMPATIBLE,
+        tags = ["manual"],
+    )
+    _failure_test(
+        name = name + "_default_flavor_conflict_test",
+        size = "small",
+        target_under_test = ":" + name + "_default_flavor_conflict",
+        expected_messages = [name + "_default_flavor_conflict", "\"prod\"", "\"dev\"", "does not match"],
+    )
+
 def _declare_bundle_files(name):
     """Declares source files and library for bundle tests."""
     write_file(
@@ -548,6 +630,7 @@ def flavor_test_suite(name):
     _declare_conflict_targets(name)
     _declare_invalid_flavor_targets(name)
     _declare_bundle_targets(name)
+    _declare_default_flavor_targets(name)
 
     native.test_suite(
         name = name,
@@ -565,5 +648,13 @@ def flavor_test_suite(name):
             ":" + name + "_invalid_comma_test",
             ":" + name + "_prod_bundle_test",
             ":" + name + "_dev_bundle_test",
+            ":" + name + "_default_flavor_dbg_test",
+            ":" + name + "_default_flavor_opt_test",
+            ":" + name + "_default_flavor_profile_test",
+            ":" + name + "_both_flavors_defines_test",
+            ":" + name + "_default_flavor_bundle_test",
+            ":" + name + "_both_flavors_bundle_test",
+            ":" + name + "_default_flavor_invalid_test",
+            ":" + name + "_default_flavor_conflict_test",
         ],
     )

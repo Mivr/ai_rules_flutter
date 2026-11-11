@@ -1729,6 +1729,7 @@ flutter_application(
 | `deps` | `dart_library` or `flutter_library` targets. Add `@rules_flutter//flutter:material_icons` to bundle the Material icon font. |
 | `assets` | Asset files for the bundle. Each file must sit under the target's package directory; it is bundled at its path relative to that directory. See [Asset keys](#asset-keys). |
 | `flavor` | The application flavor, e.g. `"dev"` or `"prod"`. Sets `FLUTTER_APP_FLAVOR` and filters pub assets and shaders by flavor. Default `""` (no flavor). |
+| `default_flavor` | Repeats the pubspec's `default-flavor`. Used as the flavor only when `flavor` is unset; an explicit `flavor` wins. rules_flutter does not check it against the pubspec. Default `""`. |
 | `fonts` | The app's font families, as `flutter_font_family` targets. Families and assets are bundled bare (`HelloSans`, `fonts/...`), in declaration order. See [Font families](#font-families). |
 | `native_deps` | Shared libraries to bundle for `dart:ffi`. |
 | `defines` | Dart environment defines, the `-D` flags. |
@@ -1770,6 +1771,8 @@ flutter_application(
 ```
 
 The flavor is set by the `flavor` attribute only: declaring `FLUTTER_APP_FLAVOR` in `defines` or via `--@rules_flutter//flutter:extra_dart_defines` with a value other than `flavor` fails analysis, as does setting `FLUTTER_APP_FLAVOR` on an unflavored target, naming the target and both values. A `flavor` containing whitespace, `=`, or `,` is not a valid Dart define value and also fails analysis.
+
+`default_flavor` repeats the `default-flavor` of the application's `pubspec.yaml`, which Bazel cannot read. When `flavor` is unset, the application behaves exactly as if `flavor` were the `default_flavor` value; an explicit `flavor` wins, whatever `default_flavor` holds. rules_flutter does not check that `default_flavor` agrees with the pubspec, so keep the two in step. The flavor rules above apply to the effective flavor.
 
 **Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas. When a key is set both by the flag and by the `defines` attribute, the flag wins. Reserved defines (`dart.vm.*`, `dart.library.*`, `dart.tool.*`, `flutter.*`) are set by the build and SDK and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
 

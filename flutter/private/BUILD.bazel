@@ -393,6 +393,7 @@ bzl_library(
     deps = [
         ":common",
         ":flutter_aot_compile",
+        ":flutter_defines_files",
         ":flutter_font_family",
         ":flutter_info",
         ":flutter_native_assets",

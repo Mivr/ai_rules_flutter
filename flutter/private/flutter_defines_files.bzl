@@ -45,6 +45,13 @@ DEFINES_FILES_APPLICATION_ATTRS = {
     "defines_files": DEFINES_FILES_ATTR,
     "define_flagfiles": DEFINE_FLAGFILES_ATTR,
     "_defines_files_tool": DEFINES_FILES_TOOL_ATTR,
+    "default_flavor": attr.string(
+        default = "",
+        doc = "Repeats the `default-flavor` of the application's `pubspec.yaml`. " +
+              "It is not checked against the pubspec. It applies only when " +
+              "`flavor` is unset, and then the application behaves exactly as " +
+              "if `flavor` were this value; an explicit `flavor` always wins.",
+    ),
 }
 
 EXTRA_DART_DEFINES_ATTR = {
@@ -53,6 +60,21 @@ EXTRA_DART_DEFINES_ATTR = {
         default = Label("//flutter:extra_dart_defines"),
     ),
 }
+
+def effective_flavor(ctx):
+    """The flavor an application builds with: `flavor`, else `default_flavor`.
+
+    Args:
+        ctx: Rule context; either attribute may be undeclared.
+
+    Returns:
+        The flavor string (`""` when neither is set), or None when the rule
+        declares no `flavor` attribute.
+    """
+    if not hasattr(ctx.attr, "flavor"):
+        return None
+    default_flavor = ctx.attr.default_flavor if hasattr(ctx.attr, "default_flavor") else ""
+    return ctx.attr.flavor or default_flavor
 
 def merge_dart_defines(ctx):
     """Merge a target's `defines` attr with the extra_dart_defines flag and flavor.
@@ -71,7 +93,7 @@ def merge_dart_defines(ctx):
         ctx.label,
         ctx.attr.defines,
         ctx.attr._extra_dart_defines[BuildSettingInfo].value,
-        ctx.attr.flavor if hasattr(ctx.attr, "flavor") else None,
+        effective_flavor(ctx),
     )
 
 def collect_define_flagfiles(ctx, user_defines):
