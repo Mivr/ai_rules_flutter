@@ -145,6 +145,7 @@ class DriveSession {
   Process? _emulator;
   Process? _logcat;
   int? _hostPort;
+  bool _disposed = false;
 
   Future<ProcessResult> _adb(
     List<String> args, {
@@ -235,7 +236,7 @@ class DriveSession {
   }
 
   Future<void> _waitBooted() async {
-    while (true) {
+    while (!_disposed) {
       final ProcessResult r = await _adb(<String>[
         '-s',
         _serial,
@@ -343,6 +344,7 @@ class DriveSession {
 
   /// Removes the forward, stops the app and the emulator, drops the scratch.
   Future<void> dispose() async {
+    _disposed = true;
     final int? hostPort = _hostPort;
     if (hostPort != null) {
       await teardownQuietly(() async {
