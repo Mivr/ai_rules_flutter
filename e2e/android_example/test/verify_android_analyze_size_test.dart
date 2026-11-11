@@ -13,11 +13,11 @@ void main() {
     exit(1);
   }
 
-  final defaultSizePath =
-      '$testSrcDir/$testWorkspace/app_analyze_size_size.json';
+  final workspaceDir = '$testSrcDir/$testWorkspace';
+  final defaultSizePath = '$workspaceDir/app_analyze_size_size.json';
   var sizeFile = File(defaultSizePath);
   if (!sizeFile.existsSync()) {
-    final candidate = Directory('$testSrcDir/$testWorkspace')
+    final candidate = Directory(workspaceDir)
         .listSync()
         .whereType<File>()
         .where((f) => f.path.endsWith('_size.json'))
@@ -29,17 +29,17 @@ void main() {
 
   if (!sizeFile.existsSync()) {
     stderr.writeln(
-      'FAIL: size JSON not found at $defaultSizePath or in $testSrcDir/$testWorkspace',
+      'FAIL: size JSON not found at $defaultSizePath or in $workspaceDir',
     );
     exit(1);
   }
 
   stdout.writeln('Reading size JSON from ${sizeFile.path}');
   final content = sizeFile.readAsStringSync();
-  final dynamic decoded;
+  final Object? decoded;
   try {
     decoded = json.decode(content);
-  } catch (e) {
+  } on FormatException catch (e) {
     stderr.writeln('FAIL: size JSON is not valid JSON: $e');
     exit(1);
   }
@@ -52,7 +52,8 @@ void main() {
   final found = _containsAppLibrary(decoded, 'package:android_example/');
   if (!found) {
     stderr.writeln(
-      'FAIL: size JSON does not list the app library (package:android_example/...)',
+      'FAIL: size JSON does not list the app library '
+      '(package:android_example/...)',
     );
     exit(1);
   }
@@ -62,11 +63,11 @@ void main() {
   );
 }
 
-bool _containsAppLibrary(dynamic obj, String prefix) {
+bool _containsAppLibrary(Object? obj, String prefix) {
   if (obj is String) {
     return obj.startsWith(prefix);
   }
-  if (obj is List) {
+  if (obj is List<Object?>) {
     for (final item in obj) {
       if (_containsAppLibrary(item, prefix)) {
         return true;
@@ -74,7 +75,7 @@ bool _containsAppLibrary(dynamic obj, String prefix) {
     }
     return false;
   }
-  if (obj is Map) {
+  if (obj is Map<Object?, Object?>) {
     for (final entry in obj.entries) {
       if (_containsAppLibrary(entry.key, prefix) ||
           _containsAppLibrary(entry.value, prefix)) {
