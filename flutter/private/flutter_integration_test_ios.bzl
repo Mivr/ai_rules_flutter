@@ -277,6 +277,7 @@ IOS_APP_KWARG_KEYS = (
     "track_widget_creation",
     "language_version",
     "defines",
+    "flavor",
     "native_deps",
 )
 

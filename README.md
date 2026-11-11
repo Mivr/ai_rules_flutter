@@ -267,7 +267,7 @@ Dropping an edge is safe only when the dependency is reached through a condition
 
 ### Platform- and flavor-conditional assets
 
-A pub package's `flutter.assets` entries may carry `platforms` and `flavors` lists, and the bundle keeps exactly what `flutter_tools` keeps (verified against Flutter 3.47.7: `asset.dart` `matchesFlavor` at line 1532 runs before `matchesPlatform` at line 1544 in `ManifestAssetBundle`, lines 1119–1128; `TargetPlatform.osName` in `build_info.dart`, line 701). Flavor is checked first: a flavor-restricted entry bundles only when a flavor is selected, and rules_flutter selects none yet, so flavor-restricted entries bundle nowhere — on every platform, `tester` included. Then platform: an empty list or the `tester` platform keeps the asset, anything else must name the target platform. So an Android build bundles `android`-listed entries but not `web`-listed ones, while a widget test bundles every platform's entries (but still no flavor-restricted ones).
+A pub package's `flutter.assets` entries may carry `platforms` and `flavors` lists, and the bundle keeps exactly what `flutter_tools` keeps (verified against Flutter 3.47.7: `asset.dart` `matchesFlavor` at line 1532 runs before `matchesPlatform` at line 1544 in `ManifestAssetBundle`, lines 1119–1128; `TargetPlatform.osName` in `build_info.dart`, line 701). Flavor is checked first: a flavor-restricted entry bundles only when a flavor is selected by `flutter_application.flavor`, and rules_flutter drops flavor-restricted entries when no flavor is selected — on every platform, `tester` included. Then platform: an empty list or the `tester` platform keeps the asset, anything else must name the target platform. So an Android build bundles `android`-listed entries but not `web`-listed ones, while a widget test bundles every platform's entries (but still no flavor-restricted ones).
 
 An entry naming a platform Flutter does not know fails the package fetch, naming the package, the asset entry, and every valid name (`android`, `ios`, `linux`, `macos`, `web`, `windows` — the `_kValidPluginPlatforms` set `flutter_manifest.dart` validates against, lines 20 and 909). A misspelled platform would otherwise bundle nowhere on every target, silently. Directory entries (a trailing-slash `path`) expand to every file underneath at fetch time, each file inheriting the entry's conditions. When several entries expand to the same file, the file bundles on the union of the entries' platforms: any entry without `platforms` makes the file unconditional, otherwise the file ships wherever any of its entries ships. Entries for one file whose `flavors` sets differ fail the package fetch, naming the package, the file and both flavor lists (equal sets in a different order agree). Packages without conditions emit no extra attributes, so their spokes are byte-identical to before.
 
@@ -1709,6 +1709,7 @@ flutter_application(
 | `srcs` | Other Dart sources in the app package, including generated ones. List here any file a `main` outside `lib/` imports by relative path. |
 | `deps` | `dart_library` or `flutter_library` targets. Add `@rules_flutter//flutter:material_icons` to bundle the Material icon font. |
 | `assets` | Asset files for the bundle. Each file must sit under the target's package directory; it is bundled at its path relative to that directory. See [Asset keys](#asset-keys). |
+| `flavor` | The application flavor, e.g. `"dev"` or `"prod"`. Sets `FLUTTER_APP_FLAVOR` and filters pub assets and shaders by flavor. Default `""` (no flavor). |
 | `fonts` | The app's font families, as `flutter_font_family` targets. Families and assets are bundled bare (`HelloSans`, `fonts/...`), in declaration order. See [Font families](#font-families). |
 | `native_deps` | Shared libraries to bundle for `dart:ffi`. |
 | `defines` | Dart environment defines, the `-D` flags. |
@@ -1728,6 +1729,28 @@ flutter_application(
 | `min_os_version` | Minimum Apple deployment target, passed to `gen_snapshot` as `--macho-min-os-version`. |
 
 **Obfuscated releases.** `obfuscate` renames Dart identifiers and forces `--strip`, so pair it with `split_debug_info` to keep the symbols for deobfuscation. `gen_snapshot` also writes an obfuscation map next to the snapshot; fetch it with `bazel build :my_app --output_groups=obfuscation_map` (or read `FlutterApplicationInfo.obfuscation_map`). `extra_gen_snapshot_options` is an allow-list: only flags that read or write no file and change neither the snapshot kind, outputs, target nor debugging info. `--save-obfuscation-map` and `--save-debugging-info` fail analysis — use `obfuscate` and `split_debug_info` instead; `--print-instructions-sizes-to` fails analysis — use `analyze_size = True` instead — and `--no-strip` fails with `obfuscate`.
+
+**Application flavors.** The `flavor` attribute selects the application flavor, defining `FLUTTER_APP_FLAVOR=<flavor>` in every compile mode (read via `appFlavor` from `package:flutter/services.dart`) and filtering pub assets and shaders by flavor (unconditional entries and matching flavor entries are kept; non-matching entries are omitted). Declare one target per flavor, and let platform app targets wrap each flavor's application target:
+
+```starlark
+flutter_application(
+    name = "app_dev",
+    package_name = "my_app",
+    main = "lib/main.dart",
+    flavor = "dev",
+    deps = [":my_lib", "@deps//:flutter"],
+)
+
+flutter_application(
+    name = "app_prod",
+    package_name = "my_app",
+    main = "lib/main.dart",
+    flavor = "prod",
+    deps = [":my_lib", "@deps//:flutter"],
+)
+```
+
+The flavor is set by the `flavor` attribute only: declaring `FLUTTER_APP_FLAVOR` in `defines` or via `--@rules_flutter//flutter:extra_dart_defines` with a value other than `flavor` fails analysis, as does setting `FLUTTER_APP_FLAVOR` on an unflavored target, naming the target and both values. A `flavor` containing whitespace, `=`, or `,` is not a valid Dart define value and also fails analysis.
 
 **Defines from the command line.** The repeatable flag `--@rules_flutter//flutter:extra_dart_defines=KEY=VALUE` adds a define to every Dart compile: native kernel, `flutter_test`, dart2wasm, and dart2js. Each occurrence of the flag is one define, so values may contain commas. When a key is set both by the flag and by the `defines` attribute, the flag wins. Reserved defines (`dart.vm.*`, `dart.library.*`, `dart.tool.*`, `flutter.*`) are set by the build and SDK and cannot be passed. The dev tool's `--dart-define` forwards to this flag and replays the defines on hot reload and restart, matching `flutter run --dart-define`.
 
@@ -1903,6 +1926,7 @@ The bundle id defaults to `com.example.<package path>.<name>.<label hash>` — t
 | `app_srcs` | Application Dart source files compiled alongside the integration test. |
 | `deps` | `dart_library`, `flutter_library`, or `flutter_plugin` targets (`@deps//:flutter`, `@deps//:flutter_test`, `@deps//:integration_test`, or application libraries and plugins). |
 | `assets` | Asset files bundled into `flutter_assets/`, keyed as on `flutter_application`. See [Asset keys](#asset-keys). |
+| `flavor` | Application flavor (`"dev"`, `"prod"`, etc.). Sets `FLUTTER_APP_FLAVOR` and filters pub assets and shaders by flavor. Defaults to `""` (no flavor). |
 | `package_name` | Dart package name matching `pubspec.yaml`. |
 | `compiler` | Web compiler (`"dart2js"` or `"dart2wasm"`). Defaults to `"dart2js"`. |
 | `renderer` | Web renderer (`"canvaskit"` or `"skwasm"`). Defaults to matching `compiler`. |

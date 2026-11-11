@@ -459,7 +459,8 @@ def integration_test_assets(ctx, flutter_sdk_info, target_platform, kernel_dill,
     Returns:
         The declared `flutter_assets` directory.
     """
-    compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, target_platform)
+    flavor = ctx.attr.flavor if hasattr(ctx.attr, "flavor") and ctx.attr.flavor else None
+    compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, target_platform, flavor = flavor)
     flutter_assets = declare_flutter_assets_dir(ctx)
     flutter_build_assets(
         ctx = ctx,
@@ -471,6 +472,7 @@ def integration_test_assets(ctx, flutter_sdk_info, target_platform, kernel_dill,
             kernel_dill = kernel_dill,
             is_debug = is_debug,
             data_assets = data_assets,
+            flavor = flavor,
         ),
     )
     return flutter_assets
@@ -542,6 +544,10 @@ COMMON_INTEGRATION_TEST_ATTRS["platform"] = attr.string(
 COMMON_INTEGRATION_TEST_ATTRS["profile"] = attr.bool(
     doc = "Whether to compile in profile mode.",
     default = False,
+)
+COMMON_INTEGRATION_TEST_ATTRS["flavor"] = attr.string(
+    doc = "The application flavor the integration test compiles and bundles for.",
+    default = "",
 )
 COMMON_INTEGRATION_TEST_ATTRS["data"] = attr.label_list(
     allow_files = True,

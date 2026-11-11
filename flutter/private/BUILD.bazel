@@ -170,6 +170,7 @@ bzl_library(
         ":flutter_shader_compile",
         ":native_sources",
         ":plugin_registrant",
+        ":validation",
         "//flutter:providers",
         "@bazel_skylib//rules:common_settings",
         "@rules_dart//dart:providers",

@@ -1,7 +1,7 @@
 """Defines files parsing and flagfile generation for flutter_application."""
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("//flutter/private:validation.bzl", "validate_dart_defines")
+load("//flutter/private:validation.bzl", "merge_dart_defines_with_flavor")
 
 DEFINES_FILES_DOC = (
     "Files of Dart environment defines in `.json` or `.env` format. " +
@@ -55,7 +55,7 @@ EXTRA_DART_DEFINES_ATTR = {
 }
 
 def merge_dart_defines(ctx):
-    """Merge a target's `defines` attr with the extra_dart_defines flag.
+    """Merge a target's `defines` attr with the extra_dart_defines flag and flavor.
 
     Flag values come after attr values, so on a duplicated key the command
     line wins (the compilers take the last -D). The flag validates its own
@@ -67,8 +67,12 @@ def merge_dart_defines(ctx):
     Returns:
         The merged list of KEY=VALUE define strings.
     """
-    validate_dart_defines(ctx.attr.defines, "defines attribute of %s" % ctx.label)
-    return list(ctx.attr.defines) + list(ctx.attr._extra_dart_defines[BuildSettingInfo].value)
+    return merge_dart_defines_with_flavor(
+        ctx.label,
+        ctx.attr.defines,
+        ctx.attr._extra_dart_defines[BuildSettingInfo].value,
+        ctx.attr.flavor if hasattr(ctx.attr, "flavor") else "",
+    )
 
 def collect_define_flagfiles(ctx, user_defines):
     """Collects user define_flagfiles and prepends a generated flagfile if defines_files is set.

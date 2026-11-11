@@ -170,4 +170,5 @@ ANDROID_APP_KWARG_KEYS = (
     "defines",
     "defines_files",
     "native_deps",
+    "flavor",
 )

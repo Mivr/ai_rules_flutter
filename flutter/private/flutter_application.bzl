@@ -625,16 +625,18 @@ def _flutter_application_impl(ctx):
 
     # Step 3: Shader compilation + asset bundle. Pass data assets so the
     # bundler places them under flutter_assets/packages/<pkg>/<name>.
+    flavor = ctx.attr.flavor if ctx.attr.flavor else None
     flutter_build_assets(
         ctx = ctx,
         flutter_sdk_info = flutter_sdk_info,
         output_dir = flutter_assets,
         bundle = make_bundle_inputs(
             target_platform = platform.target_platform,
-            compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, platform.target_platform),
+            compiled_shaders = flutter_compile_shaders(ctx, flutter_sdk_info, platform.target_platform, flavor),
             kernel_dill = compilation.kernel_dill,
             is_debug = is_debug,
             data_assets = transitive_data_assets,
+            flavor = flavor,
         ),
     )
 

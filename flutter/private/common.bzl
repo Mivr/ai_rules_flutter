@@ -39,8 +39,10 @@ load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "bu
 load("//flutter/private:flutter_shader_compile.bzl", "flutter_shader_compile_action", "shader_compile_tools")
 load("//flutter/private:native_sources.bzl", "native_sources_aspect")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "generate_dev_plugin_registrants")
+load("//flutter/private:validation.bzl", _detect_target_platform = "detect_target_platform")
 
 COPY_TO_DIRECTORY_TOOLCHAINS = _COPY_TO_DIRECTORY_TOOLCHAINS
+detect_target_platform = _detect_target_platform
 resolve_exec_dart = _resolve_exec_dart
 resolve_exec_dart_vm = _resolve_exec_dart_vm
 resolve_flutter_sdk_info = _resolve_flutter_sdk_info
@@ -723,7 +725,7 @@ def collect_sdk_shader_srcs(deps):
         return depset(transitive = transitive_depsets).to_list()
     return []
 
-def _shader_jobs(ctx, target_platform = None):
+def _shader_jobs(ctx, target_platform = None, flavor = None):
     """Every shader this target bundles, as struct(bundle_path, file, includes).
 
     The target's own shaders are keyed like its assets: relative to the
@@ -749,6 +751,7 @@ def _shader_jobs(ctx, target_platform = None):
             `label` attributes.
         target_platform: The bundle's platform (`android`, `ios`, ...), or
             None to list shaders for every platform.
+        flavor: Active flavor string, or None when no flavor is selected.
 
     Returns:
         The deduplicated shader jobs, in first-reached order.
@@ -777,7 +780,7 @@ def _shader_jobs(ctx, target_platform = None):
     # first-reached order, so bundles without a repeat keep today's jobs.
     pub_shaders = [dep[FlutterInfo].pub_shaders for dep in ctx.attr.deps if FlutterInfo in dep]
     for entry in depset(transitive = pub_shaders).to_list():
-        if not pub_shader_matches_target(entry, target_platform):
+        if not pub_shader_matches_target(entry, target_platform, flavor = flavor):
             continue
         prefix = "packages/{}/".format(entry.package_name) if entry.package_name else ""
         jobs.append(struct(
@@ -790,7 +793,7 @@ def _shader_jobs(ctx, target_platform = None):
     # the same bundle path is one shader.
     return dedupe_shader_jobs(ctx, jobs).values()
 
-def shader_sources(ctx, target_platform = None):
+def shader_sources(ctx, target_platform = None, flavor = None):
     """The workspace files behind each bundled shader, for the dev tool.
 
     `{bundle path: [workspace-relative path]}`: the shader and what it may
@@ -804,6 +807,7 @@ def shader_sources(ctx, target_platform = None):
         target_platform: The bundle's platform, so shaders restricted to other
             platforms stay out just as they are not compiled; None lists
             every shader.
+        flavor: Active flavor string, or None when no flavor is selected.
 
     Returns:
         The bundle-path-to-source-paths map.
@@ -814,7 +818,7 @@ def shader_sources(ctx, target_platform = None):
             for f in [job.file] + list(job.includes)
             if f.is_source and not f.short_path.startswith("../")
         ]
-        for job in _shader_jobs(ctx, target_platform)
+        for job in _shader_jobs(ctx, target_platform, flavor = flavor)
     }
 
 def _collect_dep_compiled_shaders(ctx, target_platform, compiled):
@@ -842,14 +846,14 @@ def _collect_dep_compiled_shaders(ctx, target_platform, compiled):
                         ))
     return require_sksl
 
-def _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled):
+def _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled, flavor = None):
     """Compile each `_shader_jobs` entry missing from `compiled`, in place."""
     tools = shader_compile_tools(
         impellerc = flutter_sdk_info.impellerc,
         shader_lib = flutter_sdk_info.shader_lib,
         compile_tool = ctx.executable._shader_compile_tool,
     )
-    for job in _shader_jobs(ctx, target_platform):
+    for job in _shader_jobs(ctx, target_platform, flavor = flavor):
         if job.bundle_path not in compiled:
             # Named by the bundle path, which is unique, so no two outputs meet.
             out_path = job.bundle_path.replace("../", "_external/")
@@ -866,7 +870,7 @@ def _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sks
             )
             compiled[job.bundle_path] = output
 
-def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
+def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform, flavor = None):
     """Compile every shader this target bundles for the target platform.
 
     The shaders are the target's own (`shaders`), the SDK's (collected from
@@ -883,6 +887,7 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
         ctx: Rule context (must have shaders attr and deps attr).
         flutter_sdk_info: FlutterSdkInfo from the toolchain.
         target_platform: Target platform string ("ios", "macos", "android", "linux", "windows", "web").
+        flavor: Active flavor string, or None when no flavor is selected.
 
     Returns:
         Dict mapping bundle destination path → compiled File. Pass to
@@ -893,22 +898,16 @@ def flutter_compile_shaders(ctx, flutter_sdk_info, target_platform):
 
     compiled = {}
     require_sksl = _collect_dep_compiled_shaders(ctx, target_platform, compiled)
-    _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled)
+    _compile_missing_shaders(ctx, flutter_sdk_info, target_platform, require_sksl, compiled, flavor = flavor)
     return compiled
 
 def _any_entry_is(entries, file):
     """Whether any entry in `entries` has `.file == file`."""
-    for entry in entries:
-        if entry.file == file:
-            return True
-    return False
+    return any([entry.file == file for entry in entries])
 
 def _any_font_is(entries, file):
     """Whether any font entry in `entries` lists `file` among its files."""
-    for entry in entries:
-        if file in entry.files:
-            return True
-    return False
+    return any([file in entry.files for entry in entries])
 
 def _dep_carries_claim(dep, channel, file):
     """Whether direct `dep` carries `file` in `channel` (`pub`, `shader`, `data`)."""
@@ -1019,7 +1018,8 @@ def make_bundle_inputs(
         kernel_dills = [],
         tree_shake_key = "",
         is_debug = False,
-        data_assets = None):
+        data_assets = None,
+        flavor = None):
     """One `flutter_build_assets` call's inputs: what to bundle and how its icons shake.
 
     Args:
@@ -1039,10 +1039,11 @@ def make_bundle_inputs(
             placed at `flutter_assets/packages/<package>/<name>` and listed in
             the asset manifest under that key, as flutter_tools bundles a
             hook's data asset.
+        flavor: Active flavor string, or None when no flavor is selected.
 
     Returns:
         A struct with `target_platform`, `compiled_shaders`, `kernel_dill`,
-        `kernel_dills`, `tree_shake_key`, `is_debug` and `data_assets`.
+        `kernel_dills`, `tree_shake_key`, `is_debug`, `data_assets` and `flavor`.
     """
     return struct(
         target_platform = target_platform,
@@ -1052,17 +1053,11 @@ def make_bundle_inputs(
         tree_shake_key = tree_shake_key,
         is_debug = is_debug,
         data_assets = data_assets,
+        flavor = flavor,
     )
 
 def _own_font_targets(ctx):
-    """The rule's own `fonts` targets when its `attrs` declare `fonts`.
-
-    Args:
-        ctx: The rule context of the rule implementation that calls this helper.
-
-    Returns:
-        List of `flutter_font_family` targets, or `[]` for rules without `fonts`.
-    """
+    """The rule's own `fonts` targets when its `attrs` declare `fonts`."""
     return ctx.attr.fonts if hasattr(ctx.attr, "fonts") else []
 
 def _bundle_tree_shake(ctx, flutter_sdk_info, bundle, fonts):
@@ -1142,6 +1137,7 @@ def flutter_build_assets(ctx, flutter_sdk_info, output_dir, bundle):
         bundle.target_platform,
         extra_claims,
         _own_font_targets(ctx),
+        flavor = getattr(bundle, "flavor", None),
     )
     extra_asset_copies = dict(bundle.compiled_shaders.items() + pub_extra_asset_copies.items())
 
@@ -1353,37 +1349,6 @@ def host_target_arch(ctx, flutter_sdk_info):
     if "armv7" in bin_dir or "arm-" in bin_dir:
         return "arm"
     return ""
-
-def detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android):
-    """Detect the Flutter target platform from constraint booleans.
-
-    Args:
-        is_ios: True if target platform is iOS.
-        is_macos: True if target platform is macOS.
-        is_linux: True if target platform is Linux.
-        is_windows: True if target platform is Windows.
-        is_android: True if target platform is Android.
-
-    Returns:
-        Platform string: "ios", "macos", "linux", "windows", or "android".
-        Fails if no platform matches.
-    """
-    if is_ios:
-        return "ios"
-    elif is_macos:
-        return "macos"
-    elif is_linux:
-        return "linux"
-    elif is_windows:
-        return "windows"
-    elif is_android:
-        return "android"
-    else:
-        fail(
-            "No supported Flutter target platform detected. " +
-            "Supported platforms: android, ios, macos, linux, windows. " +
-            "Use --platforms= to set the target platform.",
-        )
 
 # Shared platform constraint attrs used by rules that need to check target platform.
 PLATFORM_CONSTRAINT_ATTRS = {
@@ -1809,6 +1774,12 @@ FLUTTER_DEPS_DOC = (
 
 # Shared attrs for all flutter application rules.
 FLUTTER_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | DEFINES_FILES_APPLICATION_ATTRS | {
+    "flavor": attr.string(
+        default = "",
+        doc = "The application flavor (e.g. 'dev', 'prod'). When set, sets the " +
+              "FLUTTER_APP_FLAVOR Dart environment define and filters pub " +
+              "assets and shaders by flavor.",
+    ),
     "deps": attr.label_list(
         doc = FLUTTER_DEPS_DOC,
         providers = [DartInfo],
