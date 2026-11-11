@@ -122,19 +122,18 @@ Future<ServiceExtensionResponse> _handleRenderState(
   });
 }
 
-/// The build configuration `flutter_compile_kernel` baked into this app.
-///
-/// Empty outside a debug build, and empty in any app whose rule supplies no
-/// assets tree — see `assets_dir` in `flutter/private/common.bzl`.
-const String _buildInfoJson = String.fromEnvironment(
-  'rules_flutter.build_info',
-);
+/// The build record of a debug app: the compile-time define of a dev-tool
+/// recompile, replaced by the one the generated registrant supplies.
+String _buildInfo = const String.fromEnvironment('rules_flutter.build_info');
+
+/// Called by the generated registrant, before the extensions are registered.
+void setRulesFlutterBuildInfo(String json) => _buildInfo = json;
 
 Future<ServiceExtensionResponse> _handleBuildInfo(
   String method,
   Map<String, String> params,
 ) async {
-  if (_buildInfoJson.isEmpty) {
+  if (_buildInfo.isEmpty) {
     return _err(
       'this app carries no rules_flutter.build_info: it was not built in '
       '-c dbg by a rule that bundles assets, or its kernel was recompiled '
@@ -142,7 +141,7 @@ Future<ServiceExtensionResponse> _handleBuildInfo(
       'it, so it will not guess one.',
     );
   }
-  return ServiceExtensionResponse.result(_buildInfoJson);
+  return ServiceExtensionResponse.result(_buildInfo);
 }
 
 /// Wrap a handler so a [TimeoutException] from the settle/idle-wait (see

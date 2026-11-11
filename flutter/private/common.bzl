@@ -367,7 +367,37 @@ def _stage_agent_extensions(ctx, aot, mode):
         ctx.actions.symlink(output = staged_native_agent, target_file = ctx.file._native_agent_extensions_src)
     return struct(agent = staged_agent, native_agent = staged_native_agent)
 
-def _kernel_registrant(ctx, target_platform, agent, emit_dev_config):
+def _build_info_json(ctx, plan, inputs, target_platform):
+    """The JSON build record of a debug app, or None when the app carries none."""
+
+    # A debug app describes its own build to itself. `ext.rules_flutter.buildInfo`
+    # hands this straight back to the dev tool, which needs it because
+    # `flutter_bazel attach` starts from nothing but a VM service URL: it has no
+    # `-d` device, no knowledge of the configuration, and no way to ask the user
+    # for flags they never typed. Debug only: profile mode must look like
+    # release on the agent surface, and there is no dev loop to serve in AOT.
+    #
+    # It reaches the app through the generated registrant, never as a compile-time
+    # define, so it is no argument of the kernel compile. It is deliberately NOT
+    # part of `user_defines` either: that list is replayed by the dev tool's own
+    # frontend_server, which runs against the host-configured dev build. The dev
+    # tool re-injects the value it read from the running app instead.
+    assets_dir = inputs.assets_dir
+    if assets_dir == None or plan.aot or plan.mode != "debug":
+        return None
+    return json.encode({
+        "label": str(ctx.label),
+        "compilationMode": ctx.var["COMPILATION_MODE"],
+        "platformBuildArgs": inputs.platform_build_args,
+        "dartDefines": merge_dart_defines(ctx),
+        "assetsDir": assets_dir.path,
+        # The platform this kernel was compiled for. The dev tool's own
+        # build runs in the host configuration, so only the app can say
+        # which platform-filtered plugin registrant its reloads need.
+        "targetPlatform": target_platform,
+    })
+
+def _kernel_registrant(ctx, target_platform, agent, emit_dev_config, build_info):
     """Collect plugins and generate the registrant plus dev-loop registrants."""
 
     # Collect plugins from deps and generate the registrant. The registrant is
@@ -380,6 +410,7 @@ def _kernel_registrant(ctx, target_platform, agent, emit_dev_config):
         target_platform = target_platform,
         agent_import = agent.agent.basename if agent.agent else None,
         native_agent_import = agent.native_agent.basename if agent.native_agent else None,
+        build_info_json = build_info if agent.agent else None,
     )
     registrant_location = app_scheme_location(registrant) if registrant else None
 
@@ -398,7 +429,7 @@ def _kernel_registrant(ctx, target_platform, agent, emit_dev_config):
         )
     return struct(registrant = registrant, location = registrant_location, dev_registrants = dev_plugin_registrants)
 
-def _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, platform_build_args, target_platform):
+def _kernel_compile_flags(ctx, track_widget_creation, mode, aot):
     """Merge frontend flags and defines for a kernel compile."""
 
     # Collect extra frontend_server flags from build flag attrs.
@@ -418,30 +449,6 @@ def _kernel_compile_flags(ctx, track_widget_creation, mode, aot, assets_dir, pla
     mode_defines = ["dart.vm.profile=true"] if mode == "profile" else ["dart.vm.product=true"] if aot else []
     all_defines.extend(mode_defines)
 
-    # A debug app describes its own build to itself. `ext.rules_flutter.buildInfo`
-    # hands this straight back to the dev tool, which needs it because
-    # `flutter_bazel attach` starts from nothing but a VM service URL: it has no
-    # `-d` device, no knowledge of the configuration, and no way to ask the user
-    # for flags they never typed. Debug only — profile mode must look like
-    # release on the agent surface, and there is no dev loop to serve in AOT.
-    #
-    # Deliberately NOT added to `user_defines`: that list is replayed by the dev
-    # tool's own frontend_server, which runs against the host-configured dev
-    # build. Replaying this one would have the app start reporting the dev
-    # pipeline's configuration as its launch truth. The dev tool re-injects the
-    # value it read from the running app instead.
-    if assets_dir != None and not aot and mode == "debug":
-        all_defines.append("rules_flutter.build_info=" + json.encode({
-            "label": str(ctx.label),
-            "compilationMode": ctx.var["COMPILATION_MODE"],
-            "platformBuildArgs": platform_build_args,
-            "dartDefines": user_defines,
-            "assetsDir": assets_dir.path,
-            # The platform this kernel was compiled for. The dev tool's own
-            # build runs in the host configuration, so only the app can say
-            # which platform-filtered plugin registrant its reloads need.
-            "targetPlatform": target_platform,
-        }))
     return struct(
         extra_frontend = extra_frontend_flags,
         user_defines = user_defines,
@@ -648,16 +655,9 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, target, inputs):
         aot = mode != "debug"
     platform_dill = _resolve_kernel_platform_dill(target.platform_dill, aot, mode, flutter_sdk_info)
     agent = _stage_agent_extensions(ctx, aot, mode)
-    reg = _kernel_registrant(ctx, target.target_platform, agent, dev.emit)
-    flags = _kernel_compile_flags(
-        ctx,
-        inputs.track_widget_creation,
-        mode,
-        aot,
-        inputs.assets_dir,
-        inputs.platform_build_args,
-        target.target_platform,
-    )
+    build_info = _build_info_json(ctx, struct(mode = mode, aot = aot), inputs, target.target_platform)
+    reg = _kernel_registrant(ctx, target.target_platform, agent, dev.emit, build_info)
+    flags = _kernel_compile_flags(ctx, inputs.track_widget_creation, mode, aot)
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     config_file = _run_kernel_compile(
