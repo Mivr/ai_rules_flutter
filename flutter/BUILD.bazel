@@ -334,6 +334,7 @@ bzl_library(
         "//flutter/private:flutter_apple_plugin_library",
         "//flutter/private:flutter_apple_plugins_aggregator",
         "//flutter/private:flutter_apple_xcframework_import",
+        "//flutter/private:flutter_drive_test",
         "//flutter/private:flutter_ios_application",
         "//flutter/private:flutter_ios_registrant",
         "//flutter/private:flutter_ios_xcframework",
