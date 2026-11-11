@@ -423,6 +423,24 @@ dart_test(
     ],
 )
 
+# Build test for the debug split APKs: a kernel blob edit changes only the
+# payload split, and each split is reproducible.
+dart_test(
+    name = "android_split_apk_test",
+    size = "small",
+    data = [
+        "//flutter/private/tools:android_bundle",
+    ],
+    env = {
+        "ANDROID_BUNDLE": "$(rlocationpath //flutter/private/tools:android_bundle)",
+    },
+    main = "android_split_apk_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 # Inspects the AAR `flutter_android_aar` produces: it builds the Dart AOT
 # library for Android, so it runs on Linux CI.
 dart_test(

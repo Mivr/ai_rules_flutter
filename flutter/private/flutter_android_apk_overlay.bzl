@@ -33,11 +33,17 @@ payload entries come last).
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_android//providers:providers.bzl", "AndroidFeatureFlagSet", "AndroidInstrumentationInfo", "ApkInfo", "StarlarkApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
+load(
+    "//flutter/private:flutter_android_apk_sign.bzl",
+    "run_apksign",
+    "run_zipalign",
+    _release_execution_requirements = "release_execution_requirements",
+)
+load("//flutter/private:flutter_android_apk_split.bzl", "run_overlay_tool", "split_apk_groups")
 load("//flutter/private:flutter_android_binary_proxy.bzl", _overlay_output_groups = "overlay_output_groups")
 
 _ANDROID_SDK_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android_sdk:toolchain_type")
 _ANDROID_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android:toolchain_type")
-_DART_EXEC_TOOLCHAIN_TYPE = Label("@rules_dart//dart:exec_tools_toolchain_type")
 
 # The flags' default targets: "unset" is label identity with these, never an
 # empty file list, so a flag pointing at an empty or multi-file target fails
@@ -45,29 +51,8 @@ _DART_EXEC_TOOLCHAIN_TYPE = Label("@rules_dart//dart:exec_tools_toolchain_type")
 _RELEASE_KEYSTORE_UNSET = Label("//flutter:_android_release_keystore_none")
 _RELEASE_KEYSTORE_PASSWORD_FILE_UNSET = Label("//flutter:_android_release_keystore_password_file_none")
 
-def release_execution_requirements(release):
-    """Execution requirements for the `ApkSignerTool` action.
-
-    Public (no leading underscore) so the analysis suite can pin it:
-    `analysistest` actions expose argv, inputs, env and outputs but not
-    execution requirements.
-
-    The release signer reads the keystore and the password files. Under a
-    remote executor Bazel would upload those secrets, and under any remote or
-    disk cache their digests would land in the shared action cache — an
-    offline brute-force oracle for a human-chosen password. Release signing
-    therefore always runs locally. The debug keystore is public, so debug
-    signing keeps the default requirements.
-
-    Args:
-      release: The resolved release-signing struct, or None for debug signing.
-
-    Returns:
-      `{"no-remote": "1"}` when the signer reads release secrets, else `{}`.
-    """
-    if release == None:
-        return {}
-    return {"no-remote": "1"}
+# Public so the analysis suite can pin it (see the sign module).
+release_execution_requirements = _release_execution_requirements
 
 def overlay_signing_select(min_sdk_version):
     """Selects the APK signature scheme based on minimum SDK and compilation mode.
@@ -200,48 +185,13 @@ def _overlay_merged_manifest(ctx, base):
 
 def _run_apk_overlay(ctx, base_unsigned, native_libs_jar, flutter_assets):
     """Splices the Flutter payload into a copy of the base unsigned APK."""
-    overlay_unsigned = ctx.actions.declare_file(ctx.label.name + "_overlay_unsigned.apk")
-    overlay_args = ctx.actions.args()
-    overlay_args.add("apk-overlay")
-    overlay_args.add("--base", base_unsigned.path)
-    overlay_args.add("--native-libs-jar", native_libs_jar.path)
-    overlay_args.add("--flutter-assets", flutter_assets.path)
-    overlay_args.add("--output", overlay_unsigned.path)
-    if ctx.attr.nocompress_extensions:
-        overlay_args.add_joined("--nocompress-extensions", ctx.attr.nocompress_extensions, join_with = ",")
-    if ctx.var.get("COMPILATION_MODE", "") == "dbg":
-        overlay_args.add("--debug")
-    ctx.actions.run(
-        executable = ctx.executable._overlay_tool,
-        arguments = [overlay_args],
-        inputs = depset(
-            direct = [ctx.executable._overlay_tool, base_unsigned, native_libs_jar, flutter_assets],
-        ),
-        outputs = [overlay_unsigned],
-        mnemonic = "FlutterApkOverlay",
-        progress_message = "Injecting Flutter payload into base APK %s" % ctx.label,
-        toolchain = _DART_EXEC_TOOLCHAIN_TYPE,
+    return run_overlay_tool(
+        ctx,
+        ctx.label.name + "_overlay_unsigned.apk",
+        [("--base", base_unsigned), ("--native-libs-jar", native_libs_jar), ("--flutter-assets", flutter_assets)],
+        [base_unsigned, native_libs_jar, flutter_assets],
+        "Injecting Flutter payload into base APK %s",
     )
-    return overlay_unsigned
-
-def _run_zipalign(ctx, sdk, overlay_unsigned):
-    """Aligns the overlaid APK, exactly as android_binary does (`-P 16`)."""
-    aligned = ctx.actions.declare_file("zipaligned_" + ctx.label.name + ".apk")
-    align_args = ctx.actions.args()
-    align_args.add("-P", "16")
-    align_args.add(str(ctx.attr.zipalign_alignment))
-    align_args.add(overlay_unsigned)
-    align_args.add(aligned)
-    ctx.actions.run(
-        executable = sdk.zip_align,
-        arguments = [align_args],
-        inputs = [overlay_unsigned],
-        outputs = [aligned],
-        mnemonic = "AndroidZipAlign",
-        progress_message = "Zipaligning APK with Flutter payload %s" % ctx.label,
-        toolchain = _ANDROID_SDK_TOOLCHAIN_TYPE,
-    )
-    return aligned
 
 def _overlay_signing_keys(ctx):
     """Collects the debug signing keys, falling back to the debug keystore."""
@@ -290,85 +240,6 @@ def _resolve_release_signing(ctx):
         key_pass = _resolve_release_key_password(ctx),
     )
 
-def _release_sign_args(sign_args, release):
-    """Adds the caller's keystore to the apksigner arguments.
-
-    Both passwords travel as `file:` references to password-file inputs, so
-    their text never appears on the command line. Without a key password
-    file `--key-pass` is omitted and apksigner unlocks the key with the
-    keystore password.
-    """
-    sign_args.add("--ks", release.keystore)
-    sign_args.add("--ks-key-alias", release.alias)
-    sign_args.add("--ks-pass", "file:" + release.ks_pass.path)
-    if release.key_pass:
-        sign_args.add("--key-pass", "file:" + release.key_pass.path)
-
-def _run_apksign(ctx, sdk, aligned, signing_keys, lineage, rotation_min_sdk, release):
-    """Signs the aligned APK with the keystore and scheme android_binary would use.
-
-    `lineage` is the File passed with `--lineage`, or None: the caller drops
-    the debug lineage under release signing, so a release APK never carries
-    it. `signing` mirrors `@rules_android//flags:apk_signing_method` (wired by
-    the macro via select); v4 (fs-verity) stays with android_binary — route
-    it there. With `release` set, apksigner signs with the caller's keystore
-    instead of the debug keys; without it every argument below is exactly the
-    debug invocation.
-    """
-    signing = ctx.attr.signing
-    if signing == "v4":
-        fail(
-            "flutter_android_apk_overlay %s: apk_signing_method=v4 is not " % ctx.label +
-            "supported for apps whose Flutter payload is injected after " +
-            "resource linking. Sign the android_binary directly (Tier 2) instead.",
-        )
-    v1_enabled = signing in ("v1", "v1_v2")
-    v2_enabled = signing in ("v2", "v1_v2")
-
-    signed = ctx.actions.declare_file(ctx.label.name + ".apk")
-    sign_args = ctx.actions.args()
-    sign_args.add("sign")
-    sign_args.add("--alignment-preserved", "true")
-    if lineage:
-        sign_args.add("--lineage", lineage)
-    if release:
-        _release_sign_args(sign_args, release)
-    else:
-        for i, key in enumerate(signing_keys):
-            if i > 0:
-                sign_args.add("--next-signer")
-            sign_args.add("--ks", key)
-            sign_args.add("--ks-pass", "pass:android")
-    sign_args.add("--v1-signing-enabled", v1_enabled)
-    sign_args.add("--v1-signer-name", "CERT")
-    sign_args.add("--v2-signing-enabled", v2_enabled)
-
-    # L-4: pass --v4-signing-enabled explicitly so apksigner never writes an
-    # undeclared .idsig sidecar next to the APK output. V4 stays unsupported
-    # (see the fail() above); the value here is always false.
-    sign_args.add("--v4-signing-enabled", False)
-    if rotation_min_sdk:
-        sign_args.add("--rotation-min-sdk-version", rotation_min_sdk)
-    sign_args.add("--out", signed)
-    sign_args.add(aligned)
-    if release:
-        sign_inputs = [aligned, release.keystore, release.ks_pass]
-        if release.key_pass:
-            sign_inputs.append(release.key_pass)
-    else:
-        sign_inputs = [aligned] + signing_keys
-    ctx.actions.run(
-        executable = sdk.apk_signer,
-        arguments = [sign_args],
-        inputs = sign_inputs + ([lineage] if lineage else []),
-        outputs = [signed],
-        mnemonic = "ApkSignerTool",
-        progress_message = "Signing APK with Flutter payload %s" % ctx.label,
-        execution_requirements = release_execution_requirements(release),
-        toolchain = _ANDROID_SDK_TOOLCHAIN_TYPE,
-    )
-    return signed
-
 def _run_overlay_deploy_info(ctx, android_toolchain, merged_manifest, signed):
     """Regenerates deploy info against the overlay's own signed APK and manifest.
 
@@ -411,7 +282,7 @@ def _flutter_android_apk_overlay_impl(ctx):
     overlay_unsigned = _run_apk_overlay(ctx, base_unsigned, native_libs_jar, flutter_assets)
 
     # 2. Align, exactly as android_binary does (`-P 16`, same alignment).
-    aligned = _run_zipalign(ctx, sdk, overlay_unsigned)
+    aligned = run_zipalign(ctx, sdk, overlay_unsigned)
 
     # 3. Sign with the same keystore and scheme selection android_binary
     # would have used — or the caller's release keystore when configured.
@@ -424,7 +295,7 @@ def _flutter_android_apk_overlay_impl(ctx):
     release = _resolve_release_signing(ctx)
     effective_lineage = None if release else lineage
     effective_rotation = rotation_min_sdk if rotation_min_sdk else None
-    signed = _run_apksign(ctx, sdk, aligned, signing_keys, effective_lineage, rotation_min_sdk, release)
+    signed = run_apksign(ctx, sdk, aligned, signing_keys, effective_lineage, rotation_min_sdk, release)
 
     # 4. Regenerate deploy info against the overlay's own signed APK and
     # merged manifest.
@@ -432,6 +303,19 @@ def _flutter_android_apk_overlay_impl(ctx):
 
     # Forward the base output groups verbatim EXCEPT android_deploy_info.
     group_kwargs = _overlay_output_groups(base_groups, deploy_info, merged_manifest)
+
+    # Debug builds also expose the base and the Dart payload as separate signed splits.
+    group_kwargs.update(split_apk_groups(
+        ctx,
+        sdk,
+        struct(
+            base_unsigned = base_unsigned,
+            native_libs_jar = native_libs_jar,
+            flutter_assets = flutter_assets,
+            merged_manifest = merged_manifest,
+        ),
+        struct(keys = signing_keys, lineage = effective_lineage, rotation = rotation_min_sdk, release = release),
+    ))
     if ctx.file.size_json:
         group_kwargs["analyze_size"] = depset([ctx.file.size_json])
 

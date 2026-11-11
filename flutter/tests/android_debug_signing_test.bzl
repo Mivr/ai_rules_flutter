@@ -70,17 +70,44 @@ _EXTRA_TOOLCHAINS = [
     str(Label("//flutter/tests:_debug_signing_stub_android_toolchain")),
 ]
 
+def _is_split(action):
+    """Whether `action` writes (or reads) one of the debug split APKs."""
+    return any([
+        f.basename.endswith(("_base.apk", "_payload.apk", "_base_unsigned.apk", "_payload_unsigned.apk"))
+        for f in list(action.outputs.to_list())
+    ])
+
 def _sign_action(env):
-    """Extracts the unique ApkSignerTool action from target actions."""
-    actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "ApkSignerTool"]
+    """Extracts the unique full-APK ApkSignerTool action from target actions."""
+    actions = [
+        a
+        for a in analysistest.target_actions(env)
+        if a.mnemonic == "ApkSignerTool" and not _is_split(a)
+    ]
     asserts.equals(
         env,
         1,
         len(actions),
-        "expected exactly one ApkSignerTool action, got %s" %
+        "expected exactly one full-APK ApkSignerTool action, got %s" %
         [a.mnemonic for a in analysistest.target_actions(env)],
     )
     return actions[0] if actions else None
+
+def _split_actions(env, mnemonic):
+    """Maps `base`/`payload` to the split's `mnemonic` action."""
+    found = {}
+    for a in analysistest.target_actions(env):
+        if a.mnemonic != mnemonic:
+            continue
+        for kind in ("base", "payload"):
+            names = [f.basename for f in a.outputs.to_list()]
+            if any([n.endswith(("_%s.apk" % kind, "_%s_unsigned.apk" % kind)) for n in names]):
+                found[kind] = a
+    return found
+
+def _input_names(action):
+    """The basenames of an action's inputs."""
+    return [f.basename for f in action.inputs.to_list()]
 
 def _flag_value(argv, flag):
     """Returns the value following `flag` in `argv`, or None."""
@@ -156,6 +183,94 @@ _debug_explicit_flag_test = analysistest.make(
 
 _release_equals_base_test = analysistest.make(
     _release_equals_base_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "opt",
+        "//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS,
+    },
+)
+
+def _split_outputs_test_impl(ctx):
+    """Debug: base_apk and payload_apk are one signed .apk each, outside the default outputs."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    groups = target[OutputGroupInfo]
+    full = _sign_action(env)
+    signers = _split_actions(env, "ApkSignerTool")
+    for kind in ("base", "payload"):
+        files = getattr(groups, kind + "_apk").to_list()
+        asserts.equals(env, 1, len(files), "%s_apk must hold one file" % kind)
+        asserts.true(env, files[0].basename.endswith(".apk"))
+        asserts.true(env, files[0] not in target[DefaultInfo].files.to_list(), "%s_apk is not a default output" % kind)
+        signer = signers.get(kind)
+        asserts.true(env, signer != None, "no ApkSignerTool for the %s split" % kind)
+        if signer:
+            asserts.equals(env, [files[0].path], [f.path for f in signer.outputs.to_list()])
+
+            # The same keystore and signing flags as the full APK.
+            asserts.equals(env, _flag_value(full.argv, "--ks"), _flag_value(signer.argv, "--ks"))
+            asserts.equals(env, "pass:android", _flag_value(signer.argv, "--ks-pass"))
+            for flag in ("--v1-signing-enabled", "--v2-signing-enabled", "--v4-signing-enabled"):
+                asserts.equals(env, _flag_value(full.argv, flag), _flag_value(signer.argv, flag))
+            keystore = _flag_value(signer.argv, "--ks")
+            asserts.true(
+                env,
+                keystore in [f.path for f in signer.inputs.to_list()],
+                "the keystore %s is a signing input" % keystore,
+            )
+    return analysistest.end(env)
+
+def _split_isolation_test_impl(ctx):
+    """Debug: only the payload split depends on flutter_assets; only the base on the native libs."""
+    env = analysistest.begin(ctx)
+    overlays = _split_actions(env, "FlutterApkOverlay")
+    asserts.true(env, "base" in overlays and "payload" in overlays, "both split overlays exist")
+    if "base" in overlays and "payload" in overlays:
+        base_inputs = _input_names(overlays["base"])
+        payload_inputs = _input_names(overlays["payload"])
+        assets = ctx.attr.assets_name
+        asserts.false(env, assets in base_inputs, "the base split must not read flutter_assets: %s" % base_inputs)
+        asserts.true(env, assets in payload_inputs, "the payload split reads flutter_assets: %s" % payload_inputs)
+        asserts.true(env, "--no-flutter-assets" in overlays["base"].argv)
+        asserts.false(env, ctx.attr.libs_name in payload_inputs, "the payload split must not read the native libs")
+    return analysistest.end(env)
+
+def _release_no_splits_test_impl(ctx):
+    """Release: no split action is registered and both split groups are empty."""
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    for a in analysistest.target_actions(env):
+        asserts.false(env, _is_split(a), "release registered a split action: %s" % a.mnemonic)
+    counts = {}
+    for a in analysistest.target_actions(env):
+        counts[a.mnemonic] = counts.get(a.mnemonic, 0) + 1
+    for mnemonic in ("FlutterApkOverlay", "AndroidZipAlign", "ApkSignerTool", "WriteDeployInfo"):
+        asserts.equals(env, 1, counts.get(mnemonic, 0), "release registers one %s" % mnemonic)
+    asserts.equals(env, [], target[OutputGroupInfo].base_apk.to_list())
+    asserts.equals(env, [], target[OutputGroupInfo].payload_apk.to_list())
+    return analysistest.end(env)
+
+_split_outputs_test = analysistest.make(
+    _split_outputs_test_impl,
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        "//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS,
+    },
+)
+
+_split_isolation_test = analysistest.make(
+    _split_isolation_test_impl,
+    attrs = {
+        "assets_name": attr.string(),
+        "libs_name": attr.string(),
+    },
+    config_settings = {
+        "//command_line_option:compilation_mode": "dbg",
+        "//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS,
+    },
+)
+
+_release_no_splits_test = analysistest.make(
+    _release_no_splits_test_impl,
     config_settings = {
         "//command_line_option:compilation_mode": "opt",
         "//command_line_option:extra_toolchains": _EXTRA_TOOLCHAINS,
@@ -240,9 +355,27 @@ def android_debug_signing_test_suite(name):
         target_under_test = ":" + name + "_overlay_sdk_24",
     )
 
+    _split_outputs_test(
+        name = name + "_split_outputs",
+        target_under_test = ":" + name + "_overlay_sdk_24",
+    )
+    _split_isolation_test(
+        name = name + "_split_isolation",
+        target_under_test = ":" + name + "_overlay_sdk_24",
+        assets_name = name + "_flutter_assets.zip",
+        libs_name = name + "_native_libs.jar",
+    )
+    _release_no_splits_test(
+        name = name + "_release_no_splits",
+        target_under_test = ":" + name + "_overlay_sdk_24",
+    )
+
     native.test_suite(
         name = name,
         tests = [
+            ":" + name + "_split_outputs",
+            ":" + name + "_split_isolation",
+            ":" + name + "_release_no_splits",
             ":" + name + "_min_sdk_24_v2",
             ":" + name + "_min_sdk_21_v1_v2",
             ":" + name + "_flag_override_v1",
