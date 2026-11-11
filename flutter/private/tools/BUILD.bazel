@@ -26,7 +26,6 @@ exports_files(
         "incr_fkc_server.dart",
         "incr_fkc_worker.dart",
         "sha256.dart",
-        "split_manifest.dart",
         "macho_cli.dart",
         "macho_codesign.dart",
         "macho_constants.dart",
@@ -97,7 +96,6 @@ dart_binary(
     srcs = [
         "apk_overlay.dart",
         "crc32.dart",
-        "split_manifest.dart",
         "zip_reader.dart",
         "zip_writer.dart",
         "zlib_raw_match.dart",
@@ -465,7 +463,6 @@ _TOOL_SRCS = {
     "android_bundle.dart": [
         "apk_overlay.dart",
         "crc32.dart",
-        "split_manifest.dart",
         "zip_reader.dart",
         "zip_writer.dart",
         "zlib_raw_match.dart",
@@ -475,7 +472,6 @@ _TOOL_SRCS = {
     ],
     "apk_overlay.dart": [
         "crc32.dart",
-        "split_manifest.dart",
         "zip_reader.dart",
         "zip_writer.dart",
         "zlib_raw_match.dart",
