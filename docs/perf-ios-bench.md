@@ -701,6 +701,22 @@ samples, an execution log whose executed spawns carry no
 `metrics.userTime`/`systemTime` (the Linux sandbox runner reports none),
 or whose spawns list no outputs (`listedOutputs`/`actualOutputs`), or
 whose spawns list no `inputs` (needed for `by_repo_owner`).
+
+When executed spawns carry no `metrics.userTime`/`systemTime` (as on the
+macOS runner) but do carry `metrics.executionWallTime`, `attribute_flow`
+returns `"ok": false` naming the missing CPU metrics and carries a sibling
+record `host_tools_wall`:
+`{"unit": "wall_s", "total": ..., "by_mnemonic": {...}, "by_repo": {...}, "by_repo_owner": {...}}`.
+Its unit is summed spawn wall seconds (`"unit": "wall_s"`) across executed
+host-tool spawns and not CPU (because concurrent spawns add up, the sum can
+exceed elapsed wall time), and it is never part of `parts`. Its `total`,
+`by_mnemonic` and `by_repo` are medians over repeats of the ten largest then
+`other`, and `by_repo_owner` maps each repository in `by_repo` to its owner
+targets (`[]` plus a warning in `warnings` when no owner target is found).
+When neither CPU metrics nor `executionWallTime` are present, or the log
+lists no spawn inputs, `attribution` returns `{"ok": false, "error": ...}`
+with no `host_tools_wall`.
+
 `--strict-attribution` makes `summarize` exit non-zero when a flow's
 `ok` is false (default off). Once this lands, the bench step in the
 iOS perf workflow that runs `sol.py summarize` must pass
