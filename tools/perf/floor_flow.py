@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from floor import FLOOR_CONFIGS  # noqa: E402
 from floor import FloorError  # noqa: E402
 from floor import FloorSpec  # noqa: E402
-from floor import find_tool  # noqa: E402
+from floor import APP_SCHEME  # noqa: E402
+from floor import find_package_config  # noqa: E402
 from floor_run import run_floor  # noqa: E402
 from floor_sources import SourceSwap  # noqa: E402
 from run_rep import make_writable_tree  # noqa: E402
@@ -91,15 +92,20 @@ def apple_roots(find=subprocess.run):
     return [os.path.dirname(path)] if proc.returncode == 0 and path else []
 
 
-def build_spec(config, built, work, scratch):
-    """The FloorSpec for a flow from its build's declared outputs."""
+def build_spec(config, built, work, scratch, name="app"):
+    """The FloorSpec for a flow from its build's declared outputs.
+
+    ``name`` is the app target whose ``<name>.package_config.json`` the
+    rules wrote; the compile mounts the work tree (sources) and the exec
+    root (generated files, external repositories) under the app scheme.
+    """
     platform, mode = _PLATFORM[config]
-    packages = find_tool("package_config.json", [built.bazel_out],
-                         hint="app")
-    entry = "file://" + os.path.join(os.path.abspath(work), "app", "lib",
-                                     "main.dart")
+    packages = find_package_config([built.bazel_out], name)
+    work = os.path.abspath(work)
+    entry = "%s:///app/lib/main.dart" % APP_SCHEME
+    roots = (work, os.path.abspath(built.execroot))
     return FloorSpec(platform, mode, copy_package(built.plan, scratch),
-                     entry, packages, scratch)
+                     entry, packages, scratch, roots)
 
 
 def floor_fields(args, config, scenario, built, swap, runner=run_floor):

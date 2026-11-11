@@ -2149,7 +2149,7 @@ class SolEndToEndTest(unittest.TestCase):
     def run_argv(self, configs):
         argv = ["run", "--tools", self.tools, "--pristine", self.pristine,
                 "--work", self.work, "--out-base", self.out_base,
-                "--results", self.results, "--rep", "1",
+                "--results", self.results, "--rep", "1", "--floor=off",
                 "--min-clean-actions", "1",
                 "--time-bin", os.path.join(self.tmp, "absent")]
         for config in configs:

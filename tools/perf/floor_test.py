@@ -351,7 +351,7 @@ class FlowTest(unittest.TestCase):
     def test_success_fields(self):
         args = self.args()
         tmp = tempfile.mkdtemp()
-        pc = os.path.join(tmp, "app", "package_config.json")
+        pc = os.path.join(tmp, "bin", "app", "app.package_config.json")
         touch(pc, b"{}")
         apk = os.path.join(tmp, "x.apk")
         make_apk(apk)
@@ -365,6 +365,82 @@ class FlowTest(unittest.TestCase):
             runner=lambda spec, roots, swap: result)
         self.assertEqual(1.5, fields["toolchain_floor"]["cpu_s"])
         self.assertTrue(fields["floor_identical"])
+
+    def built(self, tmp):
+        return argparse.Namespace(bazel_out=tmp, execroot=tmp, plan=None)
+
+    def test_build_spec_finds_named_package_config(self):
+        tmp = tempfile.mkdtemp()
+        pc = os.path.join(tmp, "bin", "app", "app.package_config.json")
+        touch(pc, b"{}")
+        apk = os.path.join(tmp, "x.apk")
+        make_apk(apk)
+        built = argparse.Namespace(bazel_out=tmp, execroot=tmp,
+                                   plan=("archives", [apk], tmp))
+        spec = floor_flow.build_spec("android_debug", built, tmp, tmp)
+        self.assertEqual(pc, spec.packages)
+        self.assertEqual("org-dartlang-app:///app/lib/main.dart", spec.entry)
+
+    def test_build_spec_rejects_bare_package_config(self):
+        for names in ((), ("package_config.json",)):
+            tmp = tempfile.mkdtemp()
+            for name in names:
+                touch(os.path.join(tmp, "app", name), b"{}")
+            with self.assertRaises(floor.MissingToolError) as ctx:
+                floor_flow.build_spec("android_debug", self.built(tmp),
+                                      tmp, tmp)
+            self.assertIn("app.package_config.json", str(ctx.exception))
+            self.assertIn(tmp, str(ctx.exception))
+
+
+class FrontendArgvTest(unittest.TestCase):
+    def test_multi_root_options_and_app_entry(self):
+        tmp = tempfile.mkdtemp()
+        roots = fake_sdk(tmp)
+        for mode in ("debug", "release"):
+            spec = floor.FloorSpec(
+                "android", mode, "/pkg", "org-dartlang-app:///app/lib/main.dart",
+                "/pc.json", tmp, ("/work", "/exec"))
+            argv = floor.frontend_argv(
+                spec, floor.resolve_tools(spec, roots), "/o.dill",
+                incremental=mode == "debug")
+            self.assertEqual(["/work", "/exec"], [
+                argv[i + 1] for i, a in enumerate(argv)
+                if a == "--filesystem-root"])
+            self.assertEqual("org-dartlang-app", argv[
+                argv.index("--filesystem-scheme") + 1])
+            if mode == "release":
+                self.assertEqual(spec.entry, argv[-1])
+
+
+class FloorExitTest(unittest.TestCase):
+    def summaries(self, **flows):
+        return {"ios": {"flows": flows}}
+
+    def test_failed_floor_exits_nonzero_and_names_flow(self):
+        out = io.StringIO()
+        flows = self.summaries(
+            good={"floor_identical": True}, bad={
+                "floor_identical": False, "floor_reason": "floor: nope"})
+        old, sys.stdout = sys.stdout, out
+        try:
+            code = floor_summary.floor_failure_exit(flows)
+        finally:
+            sys.stdout = old
+        self.assertEqual(1, code)
+        self.assertIn("flow=bad", out.getvalue())
+        self.assertNotIn("flow=good", out.getvalue())
+
+    def test_run_exit_keeps_attribution_exit(self):
+        flows = self.summaries(a={"floor_identical": True})
+        self.assertEqual(0, floor_summary.run_exit(flows, True))
+        flows["ios"]["flows"]["a"]["attribution"] = {"ok": False}
+        self.assertEqual(0, floor_summary.run_exit(flows, False))
+        self.assertEqual(1, floor_summary.run_exit(flows, True))
+
+    def test_held_or_absent_floor_exits_zero(self):
+        self.assertEqual(0, floor_summary.floor_failure_exit(self.summaries(
+            a={"floor_identical": True}, b={"identical": True})))
 
 
 def sol_record(floor_cpu=None, reason="ok", with_floor=True):

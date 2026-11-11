@@ -109,9 +109,9 @@ from run_rep import (  # noqa: E402
 from traceprofile import parse_jvm_profile  # noqa: E402
 import warm_server  # noqa: E402
 from floor_flow import floor_fields  # noqa: E402
+from floor_summary import run_exit  # noqa: E402
 from sol_errors import error_record  # noqa: E402,F401
 from sol_errors import write_error_records  # noqa: E402
-from attribution import strict_attribution_exit  # noqa: E402
 from sol_summary import print_flow_lines  # noqa: E402
 from floor_flow import snapshot_sources  # noqa: E402
 from sol_summary import (  # noqa: E402
@@ -1386,7 +1386,7 @@ def main_summarize(cmd):
         primary = summaries.get("ios", summary)
     write_summary(cmd.out, primary)
     print_flow_lines(summary)
-    return strict_attribution_exit(summaries, cmd.strict_attribution)
+    return run_exit(summaries, cmd.strict_attribution)
 
 
 def build_parser():

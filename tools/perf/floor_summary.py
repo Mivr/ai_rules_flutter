@@ -8,6 +8,7 @@ floor keys (``--floor=off``, web flows, the base writer) add nothing, so
 the file is the base's.
 """
 
+from attribution import strict_attribution_exit
 from summarize import summarize_values
 
 
@@ -36,3 +37,24 @@ def summarize_floor(records, bazel_median):
             "floor_reason": "ok" if ok else "; ".join(reasons),
             "bazel_over_toolchain_floor": ratio}
     return flow, [stats["min"], stats["max"]] if ok else None
+
+
+def floor_failure_exit(summaries):
+    """Exit code 1 when a flow that has a floor failed it (named on stdout).
+
+    A flow without ``floor_identical`` requested no floor and is ignored.
+    """
+    failed = []
+    for summary in summaries.values():
+        for flow, entry in sorted(summary["flows"].items()):
+            if "floor_identical" in entry and not entry["floor_identical"]:
+                failed.append((flow, entry.get("floor_reason")))
+    for flow, reason in failed:
+        print("flow=%s floor failed: %s" % (flow, reason))
+    return 1 if failed else 0
+
+
+def run_exit(summaries, strict_attribution):
+    """The summarize exit code: the attribution verdict, else the floor's."""
+    return (strict_attribution_exit(summaries, strict_attribution)
+            or floor_failure_exit(summaries))
