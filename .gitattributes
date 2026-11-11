@@ -35,6 +35,7 @@
 /e2e/package.json export-ignore
 /e2e/package-lock.json export-ignore
 /e2e/android_example/ export-ignore
+/e2e/android_sharedprefs/ export-ignore
 /e2e/android_no_go_sdk/ export-ignore
 /e2e/codegen/ export-ignore
 /e2e/cross_compile_example/ export-ignore
