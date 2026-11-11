@@ -13,7 +13,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
-const _emitter = 'flutter/private/flutter_android_aab.bzl';
+const _emitter = 'flutter/private/flutter_android_binary_proxy.bzl';
 const _macro = 'flutter/android.bzl';
 const _lock = 'e2e/android_example/rules_android_maven_install.json';
 
@@ -38,6 +38,14 @@ String _root() {
 
 String _read(String relative) =>
     File('${_root()}/$relative').readAsStringSync();
+
+/// The AAB section of the shared emitter file: from its marker comment on.
+String _aabSection() {
+  final String source = _read(_emitter);
+  final int start = source.indexOf('# Android App Bundle');
+  expect(start, isNonNegative, reason: 'AAB section marker not found');
+  return source.substring(start);
+}
 
 /// The text of `def <name>(` up to the next top-level statement.
 String _function(String source, String name) {
@@ -67,13 +75,13 @@ void main() {
       );
     }
     expect(
-      emitter,
+      _aabSection(),
       isNot(matches(RegExp(r'bundletool\.bzl|busybox\.bzl|ctx\.actions\.run'))),
     );
   });
 
   test('is unsigned and runs no host tool', () {
-    final String emitter = _read(_emitter);
+    final String emitter = _aabSection();
     expect(emitter, isNot(contains('jarsigner')));
     expect(emitter, isNot(contains('keystore')));
     expect(emitter, isNot(contains('use_default_shell_env')));
