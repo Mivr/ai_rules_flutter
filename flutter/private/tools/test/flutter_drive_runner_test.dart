@@ -1,4 +1,8 @@
 /// Unit tests for `flutter_drive_runner.dart` helpers and configuration.
+///
+/// Tagged `runfiles`: `flutter_drive_runner.dart` imports `package:runfiles`,
+/// which Bazel supplies via `@rules_dart//dart/runfiles` on its `dart_test`.
+@Tags(['runfiles'])
 library;
 
 import 'dart:async';
