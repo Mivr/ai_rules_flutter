@@ -13,8 +13,8 @@ def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None)
 
     Mirrors flutter_tools' `_Asset` (`packages/flutter_tools/lib/src/asset.dart`):
     `matchesFlavor` runs first — a flavor-restricted entry bundles only when
-    the selected flavor is listed (rules_flutter selects no flavor yet, so
-    such entries bundle nowhere) — then `matchesPlatform`: an empty list or
+    the selected flavor is listed (`flutter_application.flavor`) — then
+    `matchesPlatform`: an empty list or
     the `tester` platform keeps the asset, anything else must name the
     target's `osName` (`build_info.dart` `TargetPlatform.osName`: `android`,
     `ios`, `macos`, `linux`, `windows`, `web`).
@@ -23,7 +23,7 @@ def pub_asset_matches_target(flavors, platforms, target_platform, flavor = None)
         flavors: The entry's `flavors` list (empty = unconditional).
         platforms: The entry's `platforms` list (empty = every platform).
         target_platform: The bundle's platform (`tester` for test bundles).
-        flavor: The selected flavor, or None (always None for now).
+        flavor: The selected flavor, or None when no flavor is selected.
 
     Returns:
         True when the entry belongs in the bundle.
@@ -476,21 +476,14 @@ def _collect_pub_fonts(deps, pub_fonts, extra_asset_copies, pub_claims, self_ori
         )
     return fonts
 
-def _collect_pub_assets(pub_assets, target_platform, extra_asset_copies, pub_claims):
-    """Copies and claims for one flattened pub_assets channel.
-
-    Args:
-        pub_assets: The flattened pub asset contributions, in bundle order.
-        target_platform: The bundle's platform; entries whose `platforms` /
-            `flavors` conditions exclude it are skipped.
-        extra_asset_copies: Dict to record each asset's bundle dest in.
-        pub_claims: Optional list to append each asset's claim to.
-    """
+def _collect_pub_assets(pub_assets, target_platform, extra_asset_copies, pub_claims, flavor = None):
+    """Copies and claims for one flattened pub_assets channel filtered by platform/flavor."""
     for entry in pub_assets:
         if not pub_asset_matches_target(
             getattr(entry, "flavors", []),
             getattr(entry, "platforms", []),
             target_platform,
+            flavor = flavor,
         ):
             continue
         prefix = _pub_prefix(entry.package_name)
@@ -498,7 +491,7 @@ def _collect_pub_assets(pub_assets, target_platform, extra_asset_copies, pub_cla
         if pub_claims != None:
             pub_claims.append(struct(key = prefix + entry.asset_path, file = entry.file, channel = "pub"))
 
-def aggregate_pub_contributions(deps, target_platform, pub_claims = None, own_font_targets = []):
+def aggregate_pub_contributions(deps, target_platform, pub_claims = None, own_font_targets = [], flavor = None):
     """Walk transitive `FlutterInfo.pub_fonts` / `pub_assets` from deps.
 
     Each contribution carries `package_name` — the empty string sentinel
@@ -541,6 +534,7 @@ def aggregate_pub_contributions(deps, target_platform, pub_claims = None, own_fo
             copies (`flutter_web_application`'s font-only read) pass nothing.
         own_font_targets: The bundling rule's own `flutter_font_family`
             targets, in declaration order, ahead of the deps' families.
+        flavor: Active flavor string, or None when no flavor is selected.
 
     Returns:
         Tuple of:
@@ -556,7 +550,7 @@ def aggregate_pub_contributions(deps, target_platform, pub_claims = None, own_fo
 
     extra_asset_copies = {}
     fonts = _collect_pub_fonts(deps, pub_fonts, extra_asset_copies, pub_claims)
-    _collect_pub_assets(pub_assets, target_platform, extra_asset_copies, pub_claims)
+    _collect_pub_assets(pub_assets, target_platform, extra_asset_copies, pub_claims, flavor = flavor)
 
     return (fonts, extra_asset_copies)
 
@@ -824,7 +818,7 @@ flutter_library = rule(
             doc = "Per-entry `platforms` conditions (mirrors the `platforms` key of `flutter.assets` and `flutter.shaders` entries). Maps the `\":\" + path` label string of a `pkg_assets` or `pkg_shaders` entry to its platform list. An entry listed here bundles and compiles only on those platforms (`tester` keeps every platform entry); an entry absent here is unconditional.",
         ),
         "pkg_asset_flavors": attr.string_list_dict(
-            doc = "Per-entry `flavors` conditions (mirrors the `flavors` key of `flutter.assets` and `flutter.shaders` entries). Same shape as `pkg_asset_platforms`. Rules_flutter selects no flavor yet, so an entry listed here bundles nowhere.",
+            doc = "Per-entry `flavors` conditions (mirrors the `flavors` key of `flutter.assets` and `flutter.shaders` entries). Same shape as `pkg_asset_platforms`. An entry listed here bundles and compiles only when `flutter_application.flavor` matches one of its listed flavors; an entry absent here is unconditional.",
         ),
         "_sky_engine": SKY_ENGINE_ATTR,
         "shader_includes": attr.label_list(

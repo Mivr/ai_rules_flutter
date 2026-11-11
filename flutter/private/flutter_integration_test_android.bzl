@@ -316,6 +316,7 @@ _ANDROID_INTEGRATION_APP_ATTRS["package_name"] = COMMON_INTEGRATION_TEST_ATTRS["
 _ANDROID_INTEGRATION_APP_ATTRS["app_srcs"] = COMMON_INTEGRATION_TEST_ATTRS["app_srcs"]
 _ANDROID_INTEGRATION_APP_ATTRS["tree_shake_icons"] = COMMON_INTEGRATION_TEST_ATTRS["tree_shake_icons"]
 _ANDROID_INTEGRATION_APP_ATTRS["profile"] = COMMON_INTEGRATION_TEST_ATTRS["profile"]
+_ANDROID_INTEGRATION_APP_ATTRS["flavor"] = attr.string(default = "", doc = "The application flavor.")
 _ANDROID_INTEGRATION_APP_ATTRS["deps"] = attr.label_list(
     doc = FLUTTER_DEPS_DOC,
     providers = [DartInfo],

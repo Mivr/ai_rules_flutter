@@ -237,6 +237,109 @@ RESERVED_DART_DEFINE_PREFIXES = ("dart.vm.", "dart.library.", "dart.tool.", "flu
 RESERVED_DART_DEFINE_NAMESPACES = ("dart.vm.*", "dart.library.*", "dart.tool.*", "flutter.*")
 RESERVED_DART_DEFINE_KEYS = ("dart.vm.profile", "dart.vm.product", "flutter.dart_plugin_registrant")
 
+def validate_flavor(target_label, flavor):
+    """Validate that flavor contains no whitespace, '=' or ','.
+
+    Args:
+        target_label: The target label for error messages.
+        flavor: The flavor string to validate (empty string or None is allowed).
+    """
+    if not flavor:
+        return
+    for c in flavor.elems():
+        if c.isspace() or c == "=" or c == ",":
+            fail(
+                ("%s: invalid flavor %r (not a valid Dart define value): " +
+                 "flavor must not contain whitespace, '=' or ','") % (target_label, flavor),
+            )
+
+def validate_flavor_defines(target_label, flavor, defines):
+    """Validate that defines do not conflict with the target's flavor.
+
+    Args:
+        target_label: The target label for error messages.
+        flavor: The flavor string (or empty string/None if unflavored).
+        defines: List of define strings (KEY=VALUE or KEY).
+    """
+    effective_flavor = flavor if flavor else ""
+    for define in defines:
+        parts = define.split("=", 1)
+        key = parts[0]
+        val = parts[1] if len(parts) > 1 else ""
+        if key == "FLUTTER_APP_FLAVOR":
+            if not effective_flavor:
+                fail(
+                    ("%s: conflicting FLUTTER_APP_FLAVOR define %r (%r) on unflavored target " +
+                     "(flavor %r, none); the flavor is set by the flavor attribute only") % (
+                        target_label,
+                        val,
+                        define,
+                        effective_flavor,
+                    ),
+                )
+            if val != effective_flavor:
+                fail(
+                    ("%s: conflicting FLUTTER_APP_FLAVOR define %r (%r) does not match " +
+                     "flavor %r; the flavor is set by the flavor attribute only") % (
+                        target_label,
+                        val,
+                        define,
+                        effective_flavor,
+                    ),
+                )
+
+def merge_dart_defines_with_flavor(target_label, defines, extra_defines, flavor = ""):
+    """Validate and merge Dart defines with extra defines and flavor.
+
+    Args:
+        target_label: The target label for error messages.
+        defines: Target's declared `defines` list.
+        extra_defines: Values from `extra_dart_defines` build setting.
+        flavor: Target's flavor string (empty or None for unflavored).
+
+    Returns:
+        List of merged define strings.
+    """
+    validate_dart_defines(defines, "defines attribute of %s" % target_label)
+    validate_flavor(target_label, flavor)
+    merged = list(defines) + list(extra_defines)
+    validate_flavor_defines(target_label, flavor, merged)
+    if flavor:
+        flavor_define = "FLUTTER_APP_FLAVOR=" + flavor
+        if flavor_define not in merged:
+            merged.append(flavor_define)
+    return merged
+
+def detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android):
+    """Detect the Flutter target platform from constraint booleans.
+
+    Args:
+        is_ios: True if target platform is iOS.
+        is_macos: True if target platform is macOS.
+        is_linux: True if target platform is Linux.
+        is_windows: True if target platform is Windows.
+        is_android: True if target platform is Android.
+
+    Returns:
+        Platform string: "ios", "macos", "linux", "windows", or "android".
+        Fails if no platform matches.
+    """
+    if is_ios:
+        return "ios"
+    if is_macos:
+        return "macos"
+    if is_linux:
+        return "linux"
+    if is_windows:
+        return "windows"
+    if is_android:
+        return "android"
+    fail(
+        "No supported Flutter target platform detected. " +
+        "Supported platforms: android, ios, macos, linux, windows. " +
+        "Use --platforms= to set the target platform.",
+    )
+
 def validate_dart_defines(defines, what):
     """Validate a list of Dart environment defines (KEY=VALUE strings).
 
