@@ -660,16 +660,32 @@ the report.
 (a sibling of `profile`) to `ios-debug-clean`, `ios-debug-body`,
 `android-debug-body` and `android-release-noop`. It reads each repeat's
 saved `trace.json.gz` and `execlog.json.gz`, so no extra Bazel run is
-needed, and reports the median over repeats, in CPU seconds:
-`parts.fetch_extract`, `module_resolution`, `loading_analysis`,
-`host_tools` (`total`, `by_mnemonic`, `by_repo`: ten largest, then
-`other`), `target_actions` (execution-log `userTime` + `systemTime` of
-non-host spawns), `sandbox`, and `unattributed`. Trace-derived parts are
-thread time of the profile's events by category (nested events count
-once); a Linux sandbox runner reports no spawn CPU, which shows up in
-`unattributed`. `total_s` is the flow's `bazel` median and `gap_s` is
-`total_s` minus parts one to six, equal to `unattributed` with its sign
-(never clamped). `ok` is `abs(gap_s) <= 0.05 * total_s`; a repeat
-directory missing either file gives `{"ok": false, "error": ...}`.
+needed, and reports the median over repeats, in CPU seconds (the unit of
+the flow's `bazel` total):
+
+- `parts.fetch_extract`, `module_resolution`, `loading_analysis` and
+  `sandbox` are CPU seconds of the `bazel` process: the profile's
+  "CPU usage (Bazel)" counter (cores) integrated over the wall-clock
+  time each category is active. Each instant goes once, to the most
+  specific category active on any thread (sandbox, then fetch, then
+  module resolution, then loading/analysis), so nested events and
+  events that overlap on parallel threads are split, never counted in
+  both.
+- `host_tools` (`total`, `by_mnemonic`, `by_repo`: ten largest, then
+  `other`) is the execution log's `userTime` + `systemTime` of executed
+  spawns whose listed outputs land in an exec configuration.
+- `target_actions` is the same CPU of the remaining executed spawns.
+- `unattributed` is `total_s` minus the six parts above; `gap_s` equals
+  it (never clamped). `ok` is `abs(gap_s) <= 0.05 * total_s`.
+
+When the data is missing the flow's `attribution` is
+`{"ok": false, "error": "<what is missing>"}` with no parts: a repeat
+directory without `trace.json.gz` or `execlog.json.gz`, a trace with no
+fetch/module/loading/analysis events or no "CPU usage (Bazel)" counter
+samples, an execution log whose executed spawns carry no
+`metrics.userTime`/`systemTime` (the Linux sandbox runner reports none),
+or whose spawns list no outputs (`listedOutputs`/`actualOutputs`).
 `--strict-attribution` makes `summarize` exit non-zero when a flow's
-`ok` is false (default off).
+`ok` is false (default off). Once this lands, the bench step in the
+iOS perf workflow that runs `sol.py summarize` must pass
+`--strict-attribution`; the workflow is not changed here.

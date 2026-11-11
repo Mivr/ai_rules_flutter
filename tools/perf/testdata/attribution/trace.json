@@ -42,7 +42,7 @@
     },
     {
       "cat": "configured target",
-      "dur": 10000000,
+      "dur": 35000000,
       "name": "analyze //app",
       "ph": "X",
       "tid": 2,
@@ -63,6 +63,14 @@
       "name": "CPU usage (Bazel)",
       "ph": "C",
       "ts": 0
+    },
+    {
+      "args": {
+        "cpu": 0.0
+      },
+      "name": "CPU usage (Bazel)",
+      "ph": "C",
+      "ts": 35000000
     }
   ]
 }

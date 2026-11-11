@@ -5,7 +5,9 @@ Splits a flow's ``bazel`` CPU into fetch/extract, module resolution,
 loading/analysis, host-tool builds (by mnemonic and by repository),
 target actions, sandbox and a shown remainder, from the saved
 ``trace.json.gz`` (activity by category, see attribution_trace) and
-``execlog.json.gz`` (userTime + systemTime of each spawn). No Bazel run
+``execlog.json.gz`` (userTime + systemTime of each spawn). A log without
+spawn CPU metrics or listed outputs, or an empty trace, gives
+``{"ok": false, "error": ...}`` instead of zeros. No Bazel run
 and no command lines. The remainder is total minus parts 1 to 6, never
 clamped; ``ok`` holds while it is within 5% of the total.
 """
@@ -14,11 +16,13 @@ import gzip
 import os
 import tempfile
 
+from attribution_trace import MissingData
 from attribution_trace import TRACE_PARTS
 from attribution_trace import trace_part_seconds
 from execlog import load_spawns
 from execlog import parse_duration
 from replay import builds_host_tool
+from replay import spawn_output_strings
 from summarize import summarize_values
 
 ATTRIBUTED_FLOWS = frozenset([
@@ -50,8 +54,27 @@ def spawn_cpu(spawn):
             + parse_duration(metrics.get("systemTime")))
 
 
+def check_spawn_data(spawns):
+    """Raises MissingData unless the log can be split into host/target.
+
+    Looks at executed (non cache-hit) spawns only: they must carry
+    userTime/systemTime and list their outputs, or every cost reads 0.
+    """
+    executed = [s for s in spawns if not s.get("cacheHit")]
+    if not executed:
+        return
+    if not any((s.get("metrics") or {}).get(key) is not None
+               for s in executed for key in ("userTime", "systemTime")):
+        raise MissingData("execution log has no spawn CPU metrics "
+                          "(metrics.userTime/systemTime)")
+    if not any(spawn_output_strings(s) for s in executed):
+        raise MissingData("execution log lists no spawn outputs "
+                          "(listedOutputs/actualOutputs)")
+
+
 def spawn_costs(spawns):
     """{"target_actions", "host": {"total","by_mnemonic","by_repo"}}."""
+    check_spawn_data(spawns)
     host = {"total": 0.0, "by_mnemonic": {}, "by_repo": {}}
     target = 0.0
     for spawn in spawns:
@@ -87,7 +110,10 @@ def rep_parts(rep_dir):
     with tempfile.TemporaryDirectory() as tmp:
         log = os.path.join(tmp, "execlog.json")
         _gunzip_to(os.path.join(rep_dir, _EXECLOG), log)
-        costs = spawn_costs(load_spawns(log))
+        try:
+            costs = spawn_costs(load_spawns(log))
+        except MissingData as exc:
+            raise MissingData("%s (in %s)" % (exc, rep_dir))
     seconds = trace_part_seconds(os.path.join(rep_dir, _TRACE))
     parts = {name: seconds[name] for name in TRACE_PARTS}
     parts["target_actions"] = costs["target_actions"]
@@ -148,6 +174,8 @@ def attribute_flow(rep_dirs, total):
         return {"ok": False, "error": absent}
     try:
         reps = [rep_parts(rep_dir) for rep_dir in rep_dirs]
+    except MissingData as exc:
+        return {"ok": False, "error": str(exc)}
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": "unreadable input: %s" % (exc,)}
     return build_attribution(median_parts(reps), total)
