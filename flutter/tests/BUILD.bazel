@@ -237,6 +237,23 @@ dart_test(
     ],
 )
 
+# Pin tripwire: every `git_override` of `ai_rules_dart` in MODULE.bazel and
+# e2e workspaces must name the same commit and exclude the old pin.
+dart_test(
+    name = "rules_dart_pin_guard_test",
+    size = "small",
+    data = ["rules_dart_pin_guard_test.dart"],
+    env = {"PIN_GUARD_ANCHOR": "$(rlocationpath :rules_dart_pin_guard_test.dart)"},
+    main = "rules_dart_pin_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 # Floor tripwire: `RULES_DART_FLOOR` must equal MODULE.bazel's ai_rules_dart
 # floor. Same discovery mechanism as above.
 dart_test(
