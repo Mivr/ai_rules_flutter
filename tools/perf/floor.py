@@ -28,6 +28,7 @@ builds the chain (pure data); ``floor_run.py`` executes it and
 import dataclasses
 import os
 
+APP_SCHEME = "org-dartlang-app"
 FLOOR_CONFIGS = ("sim_debug", "device_release", "android_debug",
                  "android_release")
 _DEBUG_PASS = "floorpass"
@@ -48,7 +49,9 @@ class FloorSpec:
     platform is ``ios`` or ``android``, mode ``debug`` or ``release``.
     package is the built ``.app``/``App.framework`` directory or the APK
     (a copy in scratch, never Bazel's output); entry is the root library
-    URI, packages the package_config.json, scratch a writable directory.
+    ``org-dartlang-app:///`` URI, packages the ``<name>.package_config.json``
+    the rules write, roots the directories mounted under that scheme (first
+    wins), scratch a writable directory.
     """
 
     platform: str
@@ -57,6 +60,7 @@ class FloorSpec:
     entry: str
     packages: str
     scratch: str
+    roots: tuple = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,6 +104,25 @@ def find_tool(name, roots, hint=None):
     return sorted(found)[0]
 
 
+def find_package_config(roots, name):
+    """Path of the ``<name>.package_config.json`` the rules write.
+
+    Only a file named exactly that matches; a bare ``package_config.json``
+    is never produced by the rules. Raises MissingToolError naming the file
+    and the roots searched.
+    """
+    wanted = name + ".package_config.json"
+    found = []
+    for root in roots:
+        for dirpath, _, filenames in os.walk(root):
+            if wanted in filenames:
+                found.append(os.path.join(dirpath, wanted))
+    if not found:
+        raise MissingToolError("floor package config %r not found under %s"
+                               % (wanted, ", ".join(roots) or "(no roots)"))
+    return sorted(found)[0]
+
+
 def _tool_names(spec):
     """(name, hint) pairs the chain of this spec needs, by tool key."""
     sdk = ("flutter_patched_sdk_product" if spec.mode == "release"
@@ -132,6 +155,9 @@ def frontend_argv(spec, tools, output, incremental):
             "--sdk-root", sdk_root, "--platform", tools["platform"],
             "--target=flutter", "--packages", spec.packages,
             "--output-dill", output]
+    for root in spec.roots:
+        argv += ["--filesystem-root", root]
+    argv += ["--filesystem-scheme", APP_SCHEME]
     if incremental:
         argv += ["--incremental", "--track-widget-creation",
                  "--enable-asserts"]
