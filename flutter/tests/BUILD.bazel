@@ -85,6 +85,7 @@ load(":podspec_xcconfig_defines_test.bzl", "podspec_xcconfig_defines_test_suite"
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pubspec_errors_test.bzl", "pubspec_errors_test_suite")
+load(":registrant_twin_test.bzl", "registrant_twin_test_suite")
 load(":repo_metadata_test.bzl", "repo_metadata_test_suite")
 load(":rules_dart_floor_test.bzl", "rules_dart_floor_test_suite")
 load(":sdk_source_and_ios_engine_repos_test.bzl", "sdk_source_and_ios_engine_repos_test_suite")
@@ -604,6 +605,28 @@ objc_drift_test_suite(name = "objc_drift_test")
 path_android_maven_test_suite(name = "path_android_maven_test")
 
 path_package_test_suite(name = "path_package_test")
+
+registrant_twin_test_suite(name = "registrant_twin_test")
+
+# The twin and the plain module both link: the swapped dill holds the constant
+# registrant URI where the SDK constant is read, the plain one does not.
+dart_test(
+    name = "registrant_twin_link_test",
+    size = "small",
+    data = [
+        ":registrant_twin_plain",
+        ":registrant_twin_swapped",
+    ],
+    env = {
+        "PLAIN_DILL": "$(rlocationpath :registrant_twin_plain)",
+        "SWAPPED_DILL": "$(rlocationpath :registrant_twin_swapped)",
+    },
+    main = "registrant_twin_link_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
 
 repo_metadata_test_suite(name = "repo_metadata_test")
 
