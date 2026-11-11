@@ -320,6 +320,7 @@ def _android_registrant_federated_chosen_implementation_test_impl(ctx):
             },
         },
         implements = "greeting",
+        direct = True,
     )
     content = make_android_registrant_content([umbrella, default_impl, chosen_impl])
     asserts.true(

@@ -21,7 +21,7 @@ so we skip the frontend_server kernel compilation step used by desktop/mobile.
 
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_TOOLCHAINS", "collect_packages", "collect_transitive_srcs", "colocate_packages", "dart_analyzable_info_with_package", "dart_package_identity", "derive_lib_root", "generate_dev_package_config", "generate_package_config")
-load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeLibraryInfo")
+load("//flutter:providers.bzl", "FlutterNativeLibraryInfo")
 load(
     "//flutter/private:app_entrypoint.bzl",
     "APP_SCHEME",
@@ -52,7 +52,7 @@ load(
     "resolve_flutter_sdk_info",
     "shader_sources",
 )
-load("//flutter/private:flutter_info.bzl", "dedup_plugins")
+load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
 load(
     "//flutter/private:flutter_kernel_module.bzl",
     "MODULAR_KERNEL_ATTRS",
@@ -363,11 +363,7 @@ def _web_inject_registrant(ctx, packages, all_srcs):
     Returns:
       A `(plugins, registrant, packages, all_srcs)` tuple.
     """
-    all_dep_plugins = []
-    for dep in ctx.attr.deps:
-        if FlutterInfo in dep:
-            all_dep_plugins.extend(dep[FlutterInfo].plugins)
-    plugins = dedup_plugins(all_dep_plugins)
+    plugins = collect_flutter_plugin_deps(ctx.attr.deps).all_plugins
     registrant = generate_dart_plugin_registrant(ctx, plugins, target_platform = "web")
 
     has_real_web_plugins = any([p.package_name == "flutter_web_plugins" for p in packages])

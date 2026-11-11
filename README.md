@@ -232,17 +232,16 @@ Permissions a plugin declares in its own manifest, such as `record_android`'s `R
 
 ### Federated plugins
 
-Federated plugin resolution follows Flutter's `resolvePlatformImplementation` rules per target platform:
+Federated plugin resolution follows Flutter's `resolvePlatformImplementation` rules per target platform. A plugin is **direct** when its `flutter_plugin` or pub-package target is in the `deps` of the `flutter_application` itself, or in the `deps` of one of that application's first-level pub libraries. A plugin reached only through deeper dependencies is not direct. A plugin reached both ways is direct; deduplication by name never loses the direct mark.
 
-- **App-chosen override**: An umbrella plugin whose entry for a platform specifies `default_package` is
-  replaced for that platform by an app-chosen implementation when another plugin in the list declares
-  `implements` equal to the umbrella's name and has an entry for that platform. The default implementation
-  is dropped for that platform, and the remaining plugin order is preserved.
-- **Default implementation**: With no non-default implementation for that platform, the default package
-  stays registered. A plugin with no `implements` and no `default_package` is untouched.
-- **Conflict refusal**: Two or more non-default implementations of one umbrella for the same platform
-  fail closed with an error naming all conflicting implementations and the default package. A plugin set
-  with multiple implementations is accepted on any platform where only one of them has an entry.
+For one umbrella and platform, resolution follows Flutter's order and nothing else:
+
+1. **Single candidate**: Exactly one candidate implementation is registered.
+2. **Direct candidate**: Else the one candidate that is direct is registered, and the other candidates and the default are not. An umbrella that implements itself inline counts as a candidate, and yields to a direct alternative.
+3. **Endorsed default**: Else the endorsed `default_package` is registered.
+4. **Error**: Else a build-time error names the umbrella, the platform, and every candidate.
+
+Two or more candidates that are direct (conflicting direct implementations), and several candidates without a default and none direct, fail closed with an error naming the umbrella, the platform, and every candidate. A plugin set with no federated plugin resolves to the same list in the same order as before.
 
 ### Path dependencies
 

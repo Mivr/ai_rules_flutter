@@ -209,11 +209,41 @@ def _normalize_shader_srcs(shader_srcs):
         for s in shader_srcs
     ]
 
+def _copy_plugin_with_direct(p, direct):
+    """Copies a plugin struct with an updated direct flag."""
+    return struct(
+        name = p.name,
+        platforms = p.platforms,
+        implements = getattr(p, "implements", ""),
+        direct = direct,
+        _depth = getattr(p, "_depth", 0),
+    )
+
+def _copy_plugin_with_depth(p, depth):
+    """Copies a plugin struct with an updated depth value."""
+    return struct(
+        name = p.name,
+        platforms = p.platforms,
+        implements = getattr(p, "implements", ""),
+        direct = getattr(p, "direct", False),
+        _depth = depth,
+    )
+
+def _is_direct_plugin(is_plugin_target, p):
+    """Determines whether a plugin struct should be marked direct."""
+    if getattr(p, "direct", False):
+        return True
+    depth = getattr(p, "_depth", 0)
+    if is_plugin_target:
+        return depth == 0
+    return depth == 1
+
 def dedup_plugins(all_plugins):
     """Deduplicates plugin structs by name, keeping first occurrence.
 
     A plugin reached through two paths in the dependency graph — the common
-    case for a federated pub plugin — must be registered once.
+    case for a federated pub plugin — must be registered once. Deduplication
+    never loses the direct mark.
 
     Args:
         all_plugins: List of plugin structs.
@@ -225,8 +255,13 @@ def dedup_plugins(all_plugins):
     unique = []
     for p in all_plugins:
         if p.name not in seen:
-            seen[p.name] = True
+            seen[p.name] = len(unique)
             unique.append(p)
+        elif getattr(p, "direct", False):
+            idx = seen[p.name]
+            existing = unique[idx]
+            if not getattr(existing, "direct", False):
+                unique[idx] = _copy_plugin_with_direct(existing, True)
     return unique
 
 def collect_flutter_plugin_deps(deps):
@@ -253,7 +288,13 @@ def collect_flutter_plugin_deps(deps):
         if FlutterInfo not in dep:
             continue
         info = dep[FlutterInfo]
-        all_dep_plugins.extend(info.plugins)
+        is_plugin_target = any([getattr(p, "_depth", 0) == 0 for p in info.plugins])
+        for p in info.plugins:
+            direct = _is_direct_plugin(is_plugin_target, p)
+            if direct != getattr(p, "direct", False):
+                all_dep_plugins.append(_copy_plugin_with_direct(p, direct))
+            else:
+                all_dep_plugins.append(p)
         apple_plugin_lib_depsets.append(info.apple_plugin_libraries)
         android_plugin_lib_depsets.append(info.android_plugin_libraries)
         linux_plugin_lib_depsets.append(info.linux_plugin_libraries)
@@ -324,7 +365,13 @@ def flutter_info(
 
     dep_plugins = []
     for info in dep_infos:
-        dep_plugins.extend(info.plugins)
+        for p in info.plugins:
+            d = getattr(p, "_depth", 0)
+            dep_plugins.append(_copy_plugin_with_depth(p, d + 1))
+
+    own_plugins = []
+    for p in plugins:
+        own_plugins.append(_copy_plugin_with_depth(p, 0))
 
     assets = _merge_asset_channels(dep_infos, asset_channels)
     libraries = _merge_plugin_libraries(dep_infos, plugin_libraries)
@@ -338,7 +385,7 @@ def flutter_info(
         # A list, not a depset: the structs carry a `platforms` dict, which is
         # unhashable. Order is meaningful to the registrant generators, and
         # this target's own plugins come first.
-        plugins = dedup_plugins(plugins + dep_plugins),
+        plugins = dedup_plugins(own_plugins + dep_plugins),
         transitive_native_libs = native.transitive_native_libs,
         native_lib_sources = native.native_lib_sources,
         binding_contracts = native.binding_contracts,
