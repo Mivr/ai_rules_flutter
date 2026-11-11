@@ -28,6 +28,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'split_manifest.dart' show buildSplitManifest;
 import 'zip_reader.dart'
     show ZipRawEntry, decodeZipEntryName, findEocdOffset, readZipRawEntries;
 import 'zip_writer.dart' show crc32;
@@ -530,20 +531,73 @@ Uint8List _centralRecord(
 /// defaults always apply. Matching is a case-sensitive suffix match.
 void spliceApkOverlay({
   required String baseApkPath,
-  required String nativeLibsJarPath,
+  required String? nativeLibsJarPath,
+  required String? flutterAssetsDirPath,
+  required String outputApkPath,
+  Set<String> nocompressExtensions = const {},
+  bool debug = false,
+}) {
+  final payload = <_PayloadEntry>[
+    if (nativeLibsJarPath != null)
+      ..._payloadFromNativeLibsJar(File(nativeLibsJarPath).readAsBytesSync()),
+    if (flutterAssetsDirPath != null)
+      ..._payloadFromFlutterAssets(Directory(flutterAssetsDirPath)),
+  ];
+  _writeSplicedApk(
+    base: File(baseApkPath).readAsBytesSync(),
+    payload: payload,
+    outputApkPath: outputApkPath,
+    nocompressExtensions: nocompressExtensions,
+    debug: debug,
+  );
+}
+
+/// Writes a split APK that carries only the Dart payload.
+///
+/// The split is a manifest-only archive (a generated binary
+/// `AndroidManifest.xml` naming the package and version code of the merged
+/// manifest at [mergedManifestPath], plus `split="[splitName]"` and no code)
+/// with the `flutter_assets/` tree of [flutterAssetsDirPath] added under
+/// `assets/flutter_assets/`. Installed next to the base APK with
+/// `adb install-multiple`, the runtime serves those assets through the app's
+/// asset manager exactly as if they were in the base.
+void spliceSplitApk({
+  required String mergedManifestPath,
+  required String splitName,
   required String flutterAssetsDirPath,
   required String outputApkPath,
   Set<String> nocompressExtensions = const {},
   bool debug = false,
 }) {
-  final Uint8List base = File(baseApkPath).readAsBytesSync();
-  final ({int cdOffset, int count, Set<String> names, Uint8List records})
-  central = _readCentral(base);
+  final Uint8List manifest = buildSplitManifest(
+    mergedManifest: File(mergedManifestPath).readAsStringSync(),
+    splitName: splitName,
+  );
+  _writeSplicedApk(
+    base: null,
+    payload: [
+      _PayloadEntry('AndroidManifest.xml', manifest),
+      ..._payloadFromFlutterAssets(Directory(flutterAssetsDirPath)),
+    ],
+    outputApkPath: outputApkPath,
+    nocompressExtensions: nocompressExtensions,
+    debug: debug,
+  );
+}
 
-  final payload = <_PayloadEntry>[
-    ..._payloadFromNativeLibsJar(File(nativeLibsJarPath).readAsBytesSync()),
-    ..._payloadFromFlutterAssets(Directory(flutterAssetsDirPath)),
-  ];
+/// Writes [base] (or an empty archive when null) plus [payload] to
+/// [outputApkPath], keeping every base entry byte-for-byte.
+void _writeSplicedApk({
+  required Uint8List? base,
+  required List<_PayloadEntry> payload,
+  required String outputApkPath,
+  required Set<String> nocompressExtensions,
+  required bool debug,
+}) {
+  final ({int cdOffset, int count, Set<String> names, Uint8List records})
+  central = base == null
+      ? (cdOffset: 0, count: 0, names: <String>{}, records: Uint8List(0))
+      : _readCentral(base);
   for (final entry in payload) {
     if (central.names.contains(entry.path)) {
       throw ArgumentError(
@@ -552,10 +606,14 @@ void spliceApkOverlay({
       );
     }
   }
-  _refuseSignedBase(base, central);
+  if (base != null) _refuseSignedBase(base, central);
 
   final out = BytesBuilder(copy: false)
-    ..add(Uint8List.sublistView(base, 0, central.cdOffset));
+    ..add(
+      base == null
+          ? Uint8List(0)
+          : Uint8List.sublistView(base, 0, central.cdOffset),
+    );
   final newCentral = BytesBuilder(copy: false);
   final int offset = _appendPayloadEntries(
     out: out,
@@ -702,59 +760,107 @@ Uint8List _encodeEndOfCentralDirectory(
   return eocd.buffer.asUint8List();
 }
 
-/// Dispatches the CLI arguments for the `apk-overlay` subcommand.
-void runApkOverlay(List<String> args) {
+/// Parsed `apk-overlay` command line.
+class _OverlayCli {
+  new(List<String> args) {
+    for (var i = 0; i < args.length; i++) {
+      final String arg = args[i];
+      if (arg == '--debug') {
+        debug = true;
+      } else if (arg == '--no-flutter-assets') {
+        noFlutterAssets = true;
+      } else {
+        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
+        _setOption(arg, args[++i]);
+      }
+    }
+  }
+
   String? base;
   String? nativeLibsJar;
   String? flutterAssets;
   String? output;
+  String? splitName;
+  String? manifest;
+  bool noFlutterAssets = false;
+  bool debug = false;
   final nocompressExtensions = <String>{};
-  var debug = false;
 
-  for (var i = 0; i < args.length; i++) {
-    final String arg = args[i];
+  void _setOption(String arg, String value) {
     switch (arg) {
-      case '--debug':
-        debug = true;
       case '--base':
-        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
-        base = args[++i];
+        base = value;
       case '--native-libs-jar':
-        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
-        nativeLibsJar = args[++i];
+        nativeLibsJar = value;
       case '--flutter-assets':
-        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
-        flutterAssets = args[++i];
+        flutterAssets = value;
       case '--output':
-        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
-        output = args[++i];
+        output = value;
+      case '--split-name':
+        splitName = value;
+      case '--manifest':
+        manifest = value;
       case '--nocompress-extensions':
-        if (i + 1 >= args.length) throw ArgumentError('Missing value for $arg');
         nocompressExtensions.addAll(
-          args[++i].split(',').where((e) => e.isNotEmpty),
+          value.split(',').where((e) => e.isNotEmpty),
         );
       default:
         throw ArgumentError('Unknown option for apk-overlay: $arg');
     }
   }
 
-  if (base == null ||
-      nativeLibsJar == null ||
-      flutterAssets == null ||
-      output == null) {
+  bool get _isSplit => splitName != null;
+
+  bool get _valid {
+    if (output == null) return false;
+    if (_isSplit) {
+      return manifest != null &&
+          flutterAssets != null &&
+          base == null &&
+          nativeLibsJar == null &&
+          !noFlutterAssets;
+    }
+    return base != null &&
+        nativeLibsJar != null &&
+        manifest == null &&
+        (flutterAssets != null) != noFlutterAssets;
+  }
+}
+
+/// Dispatches the CLI arguments for the `apk-overlay` subcommand.
+///
+/// Two shapes: the base shape splices `--native-libs-jar` and either
+/// `--flutter-assets` or `--no-flutter-assets` into `--base`; the split shape
+/// (`--split-name` with `--manifest` and `--flutter-assets`) writes a
+/// manifest-only split APK that carries the Flutter assets.
+void runApkOverlay(List<String> args) {
+  final cli = _OverlayCli(args);
+  if (!cli._valid) {
     throw ArgumentError(
       'Usage: android_bundle.dart apk-overlay --base <unsigned.apk> '
-      '--native-libs-jar <jar> --flutter-assets <dir> --output <unsigned.apk> '
-      '[--nocompress-extensions <csv>]',
+      '--native-libs-jar <jar> (--flutter-assets <dir> | --no-flutter-assets) '
+      '--output <unsigned.apk> [--nocompress-extensions <csv>] [--debug], or '
+      'apk-overlay --split-name <name> --manifest <merged.xml> '
+      '--flutter-assets <dir> --output <unsigned.apk>',
     );
   }
-
+  if (cli._isSplit) {
+    spliceSplitApk(
+      mergedManifestPath: cli.manifest!,
+      splitName: cli.splitName!,
+      flutterAssetsDirPath: cli.flutterAssets!,
+      outputApkPath: cli.output!,
+      nocompressExtensions: cli.nocompressExtensions,
+      debug: cli.debug,
+    );
+    return;
+  }
   spliceApkOverlay(
-    baseApkPath: base,
-    nativeLibsJarPath: nativeLibsJar,
-    flutterAssetsDirPath: flutterAssets,
-    outputApkPath: output,
-    nocompressExtensions: nocompressExtensions,
-    debug: debug,
+    baseApkPath: cli.base!,
+    nativeLibsJarPath: cli.nativeLibsJar,
+    flutterAssetsDirPath: cli.flutterAssets,
+    outputApkPath: cli.output!,
+    nocompressExtensions: cli.nocompressExtensions,
+    debug: cli.debug,
   );
 }
