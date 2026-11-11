@@ -34,6 +34,7 @@
 /e2e/_windows_test/ export-ignore
 /e2e/package.json export-ignore
 /e2e/package-lock.json export-ignore
+/e2e/aar_host/ export-ignore
 /e2e/android_example/ export-ignore
 /e2e/android_no_go_sdk/ export-ignore
 /e2e/android_sharedprefs/ export-ignore
