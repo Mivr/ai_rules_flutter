@@ -1,10 +1,11 @@
-/// Source pins for `flutter_android_aab` (the unsigned App Bundle rule).
+/// Source pins for `flutter_android_aab` (the App Bundle rule).
 ///
 /// The bundle is built by rules_android 0.8.0's public `android_application`
 /// macro, so the rule must load exactly that entry point, nothing under
-/// rules_android's private `//rules/...` packages, no host tool, and no
-/// signing. The bundletool it runs is the sha256-pinned Maven artifact in the
-/// e2e workspace's lock file. The behaviour (one `BuildBundle` action,
+/// rules_android's private `//rules/...` packages, and no host tool. Signing is
+/// `jarsigner` from the JDK toolchain, never a shell or a debug key. The
+/// bundletool it runs is the sha256-pinned Maven artifact in the e2e
+/// workspace's lock file. The behaviour (one `BuildBundle` action,
 /// `validate` exiting 0) is checked in `e2e/android_example`, which has the
 /// Android SDK.
 library;
@@ -13,7 +14,7 @@ import 'dart:io';
 
 import 'package:test/test.dart';
 
-const _emitter = 'flutter/private/flutter_android_binary_proxy.bzl';
+const _emitter = 'flutter/private/flutter_android_aab.bzl';
 const _macro = 'flutter/android.bzl';
 const _lock = 'e2e/android_example/rules_android_maven_install.json';
 
@@ -77,23 +78,30 @@ void main() {
     }
     expect(
       _aabSection(),
-      isNot(matches(RegExp(r'bundletool\.bzl|busybox\.bzl|ctx\.actions\.run'))),
+      isNot(matches(RegExp(r'bundletool\.bzl|busybox\.bzl|run_shell'))),
     );
   });
 
-  test('is unsigned and runs no host tool', () {
+  test('signs with the JDK toolchain jarsigner and runs no host tool', () {
     final String emitter = _aabSection();
-    expect(emitter, isNot(contains('jarsigner')));
-    expect(emitter, isNot(contains('keystore')));
+    expect(emitter, contains('@bazel_tools//tools/jdk:toolchain_type'));
+    expect(emitter, contains('-storepass:file'));
+    expect(emitter, contains('-keypass:file'));
     expect(emitter, isNot(contains('use_default_shell_env')));
+    expect(emitter, isNot(contains('debug')));
   });
 
-  test('documents the unsigned bundle and the rules_android floor', () {
-    final String doc = _function(_read(_macro), 'flutter_android_aab');
-    expect(doc, contains('unsigned'));
-    expect(doc, contains('rules_android 0.8.0'));
-    expect(doc, contains('flutter_android_aab(\n            name = '));
-    expect(doc, isNot(contains('keystore = None')));
+  test('documents signing, the unsigned path and the rules_android floor', () {
+    final String macroFn = _function(_read(_macro), 'flutter_android_aab');
+    expect(macroFn, contains('unsigned'));
+    expect(macroFn, contains('keystore = "release.jks"'));
+    expect(
+      macroFn,
+      contains('keystore_password_file = keystore_password_file'),
+    );
+    expect(macroFn, contains('key_password_file = key_password_file'));
+    expect(macroFn, contains('rules_android 0.8.0'));
+    expect(macroFn, contains('flutter_android_aab(\n            name = '));
   });
 
   test('bundletool is pinned by version and sha256 in the lock file', () {

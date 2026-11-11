@@ -344,7 +344,7 @@ def _single_secret_file(ctx, files, setting, source):
     if len(files) == 1:
         return files[0]
     fail(
-        "flutter_android_apk_overlay %s: %s names %s with %s files; " % (ctx.label, setting, source, len(files)) +
+        "%s: %s names %s with %s files; " % (ctx.label, setting, source, len(files)) +
         "it must name a target with exactly one file — never an `allow_empty` glob.",
     )
 
@@ -440,7 +440,7 @@ def _overlay_signing_keys(ctx):
         signing_keys.append(ctx.file.debug_key)
     return signing_keys
 
-def _resolve_release_signing(ctx):
+def resolve_release_signing(ctx):
     """Resolves the release keystore, or None to keep debug signing.
 
     An explicit attribute always wins over its `//flutter:android_release_*`
@@ -451,6 +451,15 @@ def _resolve_release_signing(ctx):
     empty or multi-file target fails analysis naming the flag, the label and
     the file count instead of silently debug-signing. A resolved keystore
     without its password file or alias fails, naming the missing attribute.
+
+    Shared by `flutter_android_apk_overlay` and the `flutter_android_aab` file
+    rule: both declare the same signing attributes and flags.
+
+    Args:
+      ctx: Rule context of a rule declaring the release-signing attributes and flags.
+
+    Returns:
+      A struct of `keystore`, `ks_pass`, `alias` and `key_pass` files, or None for no release signing.
     """
     keystore = _resolve_release_keystore(ctx)
     if keystore == None:
@@ -458,13 +467,13 @@ def _resolve_release_signing(ctx):
     ks_pass = _resolve_release_keystore_password(ctx)
     if ks_pass == None:
         fail(
-            "flutter_android_apk_overlay %s: `keystore` is set but " % ctx.label +
+            "%s: `keystore` is set but " % ctx.label +
             "`keystore_password_file` is not. Set both to sign with a release keystore.",
         )
     alias = ctx.attr.key_alias or ctx.attr._release_key_alias[BuildSettingInfo].value
     if not alias:
         fail(
-            "flutter_android_apk_overlay %s: `keystore` is set but " % ctx.label +
+            "%s: `keystore` is set but " % ctx.label +
             "`key_alias` is not. Set both to sign with a release keystore.",
         )
 
@@ -532,7 +541,7 @@ def _flutter_android_apk_overlay_impl(ctx):
     signing_keys = _overlay_signing_keys(ctx)
     lineage = ctx.file.debug_signing_lineage_file
     rotation_min_sdk = ctx.attr.key_rotation_min_sdk
-    release = _resolve_release_signing(ctx)
+    release = resolve_release_signing(ctx)
     effective_lineage = None if release else lineage
     effective_rotation = rotation_min_sdk if rotation_min_sdk else None
     signed = run_apksign(ctx, sdk, aligned, signing_keys, effective_lineage, rotation_min_sdk, release)
