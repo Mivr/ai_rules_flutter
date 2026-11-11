@@ -45,7 +45,7 @@ is a hard build error.
 """
 
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
-load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path", "resolve_exec_dart_vm")
+load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_elf_machine_for_abi", "android_platform_for_abi", "compute_android_jni_path")
 
 # Label of the rules_android Starlark flag holding the caller's `--android_platforms`.
 # The native `//command_line_option:android_platforms` is a redirect to this flag on
@@ -206,9 +206,7 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
             src = lib.path,
         ))
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     args = ctx.actions.args()
-    args.add(ctx.executable._android_bundle_tool.path)
     args.add("native-libs-jar")
     args.add("--output", jar.path)
     args.add("--abi", abi)
@@ -216,11 +214,10 @@ def _create_native_libs_jar(ctx, aot_output, native_libs, abi):
     args.add_all(zip_entries)
 
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._android_bundle_tool,
         arguments = [args],
         inputs = depset(
             direct = [ctx.executable._android_bundle_tool] + [lib for _, lib in entries],
-            transitive = [dart_vm_files],
         ),
         outputs = [jar],
         mnemonic = "FlutterNativeLibsJar",
@@ -240,7 +237,6 @@ def _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, flutter_sdk_info)
     out = ctx.actions.declare_directory(ctx.label.name + "_debug_flutter_assets")
 
     args = ctx.actions.args()
-    args.add(ctx.executable._android_bundle_tool.path)
     args.add("debug-assets")
     args.add("--assets-dir", flutter_assets.path)
     args.add("--output-dir", out.path)
@@ -256,13 +252,11 @@ def _copy_assets_with_kernel(ctx, flutter_assets, kernel_dill, flutter_sdk_info)
         args.add("--isolate-snapshot", iso_snapshot.path)
         inputs.append(iso_snapshot)
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._android_bundle_tool,
         arguments = [args],
         inputs = depset(
             direct = inputs,
-            transitive = [dart_vm_files],
         ),
         outputs = [out],
         mnemonic = "FlutterAndroidDebugAssets",
@@ -310,18 +304,15 @@ def _flutter_android_bundle_impl(ctx):
         native_libs_jar = ctx.actions.declare_file(ctx.label.name + "_native_libs.jar")
 
         # Zipper requires at least one entry, so use a minimal valid zip header.
-        dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
         ctx.actions.run(
-            executable = dart_exe,
+            executable = ctx.executable._android_bundle_tool,
             arguments = [
-                ctx.executable._android_bundle_tool.path,
                 "empty-jar",
                 "--output",
                 native_libs_jar.path,
             ],
             inputs = depset(
                 direct = [ctx.executable._android_bundle_tool],
-                transitive = [dart_vm_files],
             ),
             outputs = [native_libs_jar],
             mnemonic = "FlutterEmptyNativeLibsJar",
@@ -487,7 +478,6 @@ def _flutter_android_aar_impl(ctx):
     aar = ctx.actions.declare_file(ctx.label.name + ".aar")
 
     args = ctx.actions.args()
-    args.add(ctx.executable._android_bundle_tool)
     args.add("aar")
     args.add("--output", aar)
     args.add("--manifest", manifest)
@@ -497,19 +487,15 @@ def _flutter_android_aar_impl(ctx):
     args.add(str(android_elf_machine_for_abi(abi)))
     args.add(app_info.aot_output)
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._android_bundle_tool,
         arguments = [args],
-        inputs = depset(
-            direct = [
-                ctx.executable._android_bundle_tool,
-                manifest,
-                flutter_assets,
-                app_info.aot_output,
-            ],
-            transitive = [dart_vm_files],
-        ),
+        inputs = [
+            ctx.executable._android_bundle_tool,
+            manifest,
+            flutter_assets,
+            app_info.aot_output,
+        ],
         outputs = [aar],
         mnemonic = "FlutterAndroidAar",
         progress_message = "Packaging Flutter module into %s" % aar.short_path,

@@ -24,7 +24,7 @@ The public macro lives in `flutter/ios.bzl`; usage is documented there and in
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("@rules_swift//swift:swift.bzl", "swift_library")
-load("//flutter:providers.bzl", "FlutterApplicationInfo", "resolve_exec_dart_vm")
+load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load(
     "//flutter/private:flutter_apple_plugins_aggregator.bzl",
@@ -100,13 +100,12 @@ def _declare_symlink(ctx, path, source):
     ctx.actions.symlink(output = out, target_file = source)
     return out
 
-def _copy_tree(ctx, dart_exe, dart_vm_files, source, path):
+def _copy_tree(ctx, source, path):
     """Copies a framework's tree artifact into this xcframework slice."""
     out = ctx.actions.declare_directory(path)
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [
-            ctx.executable._macho_edit.path,
             "copy-assets",
             "--src",
             source.path,
@@ -115,7 +114,6 @@ def _copy_tree(ctx, dart_exe, dart_vm_files, source, path):
         ],
         inputs = depset(
             direct = [source, ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [out],
         mnemonic = "FlutterIOSXcframeworkAssets",
@@ -124,12 +122,11 @@ def _copy_tree(ctx, dart_exe, dart_vm_files, source, path):
     )
     return out
 
-def _fat_binary(ctx, dart_exe, dart_vm_files, arm64, x86_64, output):
+def _fat_binary(ctx, arm64, x86_64, output):
     """Builds one universal simulator Mach-O from its two thin slices."""
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [
-            ctx.executable._macho_edit.path,
             "fat",
             "--output",
             output.path,
@@ -138,7 +135,6 @@ def _fat_binary(ctx, dart_exe, dart_vm_files, arm64, x86_64, output):
         ],
         inputs = depset(
             direct = [arm64, x86_64, ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [output],
         mnemonic = "FlutterIOSXcframeworkFat",
@@ -146,12 +142,11 @@ def _fat_binary(ctx, dart_exe, dart_vm_files, arm64, x86_64, output):
         toolchain = _DART_EXEC_TOOLCHAIN_TYPE,
     )
 
-def _patch_binary(ctx, dart_exe, dart_vm_files, source, output, platform, minimum_os_version, install_name):
+def _patch_binary(ctx, source, output, platform, minimum_os_version, install_name):
     """Retags one linked binary as an iOS framework executable."""
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [
-            ctx.executable._macho_edit.path,
             "patch",
             "--input",
             source.path,
@@ -168,7 +163,6 @@ def _patch_binary(ctx, dart_exe, dart_vm_files, source, output, platform, minimu
         ],
         inputs = depset(
             direct = [source, ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [output],
         mnemonic = "FlutterIOSXcframeworkPatch",
@@ -200,7 +194,6 @@ def _app_xcframework(ctx):
     sim_arm64 = _framework_members(_attr_target(ctx, "sim_arm64_app_framework"), "App")
     sim_x64 = _framework_members(_attr_target(ctx, "sim_x64_app_framework"), "App")
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     root = ctx.label.name + "/App.xcframework"
     outputs = []
 
@@ -208,14 +201,14 @@ def _app_xcframework(ctx):
     device_binary = _declare_symlink(ctx, device_dir + "/App", device["App"])
     outputs.append(device_binary)
     outputs.append(_declare_symlink(ctx, device_dir + "/Info.plist", device["Info.plist"]))
-    outputs.append(_copy_tree(ctx, dart_exe, dart_vm_files, device["flutter_assets"], device_dir + "/flutter_assets"))
+    outputs.append(_copy_tree(ctx, device["flutter_assets"], device_dir + "/flutter_assets"))
 
     sim_dir = root + "/%s/App.framework" % IOS_SIMULATOR
     sim_binary = ctx.actions.declare_file(sim_dir + "/App")
-    _fat_binary(ctx, dart_exe, dart_vm_files, sim_arm64["App"], sim_x64["App"], sim_binary)
+    _fat_binary(ctx, sim_arm64["App"], sim_x64["App"], sim_binary)
     outputs.append(sim_binary)
     outputs.append(_declare_symlink(ctx, sim_dir + "/Info.plist", sim_arm64["Info.plist"]))
-    outputs.append(_copy_tree(ctx, dart_exe, dart_vm_files, sim_arm64["flutter_assets"], sim_dir + "/flutter_assets"))
+    outputs.append(_copy_tree(ctx, sim_arm64["flutter_assets"], sim_dir + "/flutter_assets"))
 
     info_plist = ctx.actions.declare_file(root + "/Info.plist")
     ctx.actions.write(info_plist, xcframework_info_plist("App"))
@@ -242,7 +235,6 @@ def _flutter_xcframework(ctx):
 
 def _registrant_xcframework(ctx):
     """Declares FlutterPluginRegistrant.xcframework from linked registrants."""
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     root = ctx.label.name + "/FlutterPluginRegistrant.xcframework"
     device_patched = ctx.actions.declare_file("__%s_registrant_device" % ctx.label.name)
     arm64_patched = ctx.actions.declare_file("__%s_registrant_sim_arm64" % ctx.label.name)
@@ -250,8 +242,6 @@ def _registrant_xcframework(ctx):
     install_name = "@rpath/FlutterPluginRegistrant.framework/FlutterPluginRegistrant"
     _patch_binary(
         ctx,
-        dart_exe,
-        dart_vm_files,
         _single_binary(_attr_target(ctx, "device_registrant")),
         device_patched,
         "ios",
@@ -260,8 +250,6 @@ def _registrant_xcframework(ctx):
     )
     _patch_binary(
         ctx,
-        dart_exe,
-        dart_vm_files,
         _single_binary(_attr_target(ctx, "sim_arm64_registrant")),
         arm64_patched,
         "iossim",
@@ -270,8 +258,6 @@ def _registrant_xcframework(ctx):
     )
     _patch_binary(
         ctx,
-        dart_exe,
-        dart_vm_files,
         _single_binary(_attr_target(ctx, "sim_x64_registrant")),
         x64_patched,
         "iossim",
@@ -286,7 +272,7 @@ def _registrant_xcframework(ctx):
 
     sim_dir = root + "/%s/FlutterPluginRegistrant.framework" % IOS_SIMULATOR
     sim_binary = ctx.actions.declare_file(sim_dir + "/FlutterPluginRegistrant")
-    _fat_binary(ctx, dart_exe, dart_vm_files, arm64_patched, x64_patched, sim_binary)
+    _fat_binary(ctx, arm64_patched, x64_patched, sim_binary)
     outputs.append(sim_binary)
     outputs.append(_write_framework_plist(ctx, sim_dir, "FlutterPluginRegistrant", ctx.attr.minimum_os_version))
 
@@ -350,7 +336,6 @@ def _plugin_xcframeworks(ctx):
     device = _plugin_binaries(_attr_target(ctx, "application"))
     sim_arm64 = _plugin_binaries(_attr_target(ctx, "sim_arm64_application"))
     sim_x64 = _plugin_binaries(_attr_target(ctx, "sim_x64_application"))
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     outputs = []
     for name, binary in device.items():
         if name not in sim_arm64 or name not in sim_x64:
@@ -365,7 +350,7 @@ def _plugin_xcframeworks(ctx):
 
         sim_dir = "%s/%s/%s.framework" % (root, IOS_SIMULATOR, name)
         sim_binary = ctx.actions.declare_file(sim_dir + "/" + name)
-        _fat_binary(ctx, dart_exe, dart_vm_files, sim_arm64[name], sim_x64[name], sim_binary)
+        _fat_binary(ctx, sim_arm64[name], sim_x64[name], sim_binary)
         outputs.append(sim_binary)
         outputs.append(_write_framework_plist(ctx, sim_dir, name, ctx.attr.minimum_os_version))
 

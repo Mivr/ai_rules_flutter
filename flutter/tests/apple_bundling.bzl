@@ -14,17 +14,16 @@ load("@rules_cc//cc:objc_library.bzl", "objc_library")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:macos.bzl", "flutter_apple_plugin_library")
-load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo", "resolve_exec_dart_vm")
+load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo")
 
-def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
+def _write_fake_macho(ctx, out_file, install_name):
     if ctx.attr.fat_macho:
         arm_slice = ctx.actions.declare_file(out_file.short_path + ".arm64")
         x86_slice = ctx.actions.declare_file(out_file.short_path + ".x86_64")
         for arch, slice_file in [("arm64", arm_slice), ("x86_64", x86_slice)]:
             ctx.actions.run(
-                executable = dart_exe,
+                executable = ctx.executable._macho_edit,
                 arguments = [
-                    ctx.executable._macho_edit.path,
                     "stub",
                     "--output",
                     slice_file.path,
@@ -39,15 +38,13 @@ def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
                 ],
                 inputs = depset(
                     direct = [ctx.executable._macho_edit],
-                    transitive = [dart_vm_files],
                 ),
                 outputs = [slice_file],
                 toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
             )
         ctx.actions.run(
-            executable = dart_exe,
+            executable = ctx.executable._macho_edit,
             arguments = [
-                ctx.executable._macho_edit.path,
                 "fat",
                 "--output",
                 out_file.path,
@@ -56,16 +53,14 @@ def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
             ],
             inputs = depset(
                 direct = [x86_slice, arm_slice, ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
             ),
             outputs = [out_file],
             toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
         )
     else:
         ctx.actions.run(
-            executable = dart_exe,
+            executable = ctx.executable._macho_edit,
             arguments = [
-                ctx.executable._macho_edit.path,
                 "stub",
                 "--output",
                 out_file.path,
@@ -80,7 +75,6 @@ def _write_fake_macho(ctx, dart_exe, dart_vm_files, out_file, install_name):
             ],
             inputs = depset(
                 direct = [ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
             ),
             outputs = [out_file],
             toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
@@ -95,7 +89,6 @@ def _fake_application_impl(ctx):
     A path named in both `native_libs` and `code_assets` is one File: the shape
     of one library arriving by both routes.
     """
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
 
     libs = {}
     for path in ctx.attr.native_libs + ctx.attr.code_assets:
@@ -104,8 +97,6 @@ def _fake_application_impl(ctx):
             if ctx.attr.macho_aot:
                 _write_fake_macho(
                     ctx,
-                    dart_exe,
-                    dart_vm_files,
                     lib,
                     "@rpath/%s/%s" % (ctx.label.name, path),
                 )
@@ -127,8 +118,6 @@ def _fake_application_impl(ctx):
         if ctx.attr.macho_aot:
             _write_fake_macho(
                 ctx,
-                dart_exe,
-                dart_vm_files,
                 aot_output,
                 "@rpath/%s/App.framework/App" % ctx.label.name,
             )
@@ -141,9 +130,8 @@ def _fake_application_impl(ctx):
     ctx.actions.write(icu_data, "ICU")
     flutter_assets = ctx.actions.declare_directory(ctx.label.name + "/flutter_assets")
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [
-            ctx.executable._macho_edit.path,
             "copy-files",
             "--output-dir",
             flutter_assets.path,
@@ -151,7 +139,6 @@ def _fake_application_impl(ctx):
         ],
         inputs = depset(
             direct = [asset_manifest, ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [flutter_assets],
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
@@ -274,12 +261,10 @@ outputs_under_target_dir_test = analysistest.make(
 )
 
 def _fake_macho_binary_impl(ctx):
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     out = ctx.actions.declare_file(ctx.label.name)
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [
-            ctx.executable._macho_edit.path,
             "stub",
             "--type",
             "execute",
@@ -294,7 +279,6 @@ def _fake_macho_binary_impl(ctx):
         ],
         inputs = depset(
             direct = [ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [out],
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
@@ -336,7 +320,6 @@ _FAKE_FRAMEWORK_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 def _fake_xcframework_impl(ctx):
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     fw_name = ctx.attr.framework_name
     slice_name = "macos-arm64_x86_64" if ctx.attr.platform == "macos" else "ios-arm64"
     prefix = "%s/%s.xcframework/%s/%s.framework" % (ctx.label.name, fw_name, slice_name, fw_name)
@@ -352,9 +335,8 @@ def _fake_xcframework_impl(ctx):
         install_name = "@rpath/%s.framework/%s" % (fw_name, fw_name)
 
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [
-            ctx.executable._macho_edit.path,
             "stub",
             "--output",
             binary.path,
@@ -369,7 +351,6 @@ def _fake_xcframework_impl(ctx):
         ],
         inputs = depset(
             direct = [ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [binary],
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
@@ -397,7 +378,6 @@ fake_xcframework = rule(
 )
 
 def _macho_verify_probe_impl(ctx):
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     files = ctx.attr.target[DefaultInfo].files.to_list()
     if not files:
         fail("%s: target %s produced no files" % (ctx.label, ctx.attr.target.label))
@@ -420,7 +400,6 @@ def _macho_verify_probe_impl(ctx):
 
     stamp = ctx.actions.declare_file(ctx.label.name + ".verified")
     args = [
-        ctx.executable._macho_edit.path,
         "verify",
         "--input",
         input_file.path,
@@ -444,11 +423,10 @@ def _macho_verify_probe_impl(ctx):
         args.extend(["--forbid-entry", entry])
 
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = args,
         inputs = depset(
             direct = direct_inputs,
-            transitive = [dart_vm_files],
         ),
         outputs = [stamp],
         mnemonic = "FlutterMachOVerifyProbe",

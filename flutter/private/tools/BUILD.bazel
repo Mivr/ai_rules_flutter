@@ -89,6 +89,8 @@ exports_files(
     visibility = ["//visibility:public"],
 )
 
+# Native executable (`exe`): runs on every edit, so no VM start or JIT warm-up. Builds
+# on every HOST_COMPATIBLE host from the SDK the other `exe` tools use; no extra download.
 dart_binary(
     name = "android_bundle",
     srcs = [
@@ -101,7 +103,7 @@ dart_binary(
         "zlib_raw_tables.dart",
         "zlib_raw_trees.dart",
     ],
-    compile_mode = "kernel",
+    compile_mode = "exe",
     main = "android_bundle.dart",
     modular_kernel = False,
     target_compatible_with = HOST_COMPATIBLE,
@@ -219,10 +221,12 @@ dart_binary(
     visibility = ["//flutter:__subpackages__"],
 )
 
+# Native executable (`exe`): runs on every edit, so no VM start or JIT warm-up. Builds
+# on every HOST_COMPATIBLE host from the SDK the other `exe` tools use; no extra download.
 dart_binary(
     name = "kernel_filter",
     srcs = ["directive_guard.dart"],
-    compile_mode = "kernel",
+    compile_mode = "exe",
     main = "kernel_filter.dart",
     modular_kernel = False,
     target_compatible_with = HOST_COMPATIBLE,
@@ -254,6 +258,8 @@ dart_binary(
     deps = ["@rules_dart//dart/guard:directive_guard"],
 )
 
+# Native executable (`exe`): runs on every edit, so no VM start or JIT warm-up. Builds
+# on every HOST_COMPATIBLE host from the SDK the other `exe` tools use; no extra download.
 dart_binary(
     name = "macho_edit",
     srcs = [
@@ -272,7 +278,7 @@ dart_binary(
         "macho_verify.dart",
         "sha256.dart",
     ],
-    compile_mode = "kernel",
+    compile_mode = "exe",
     main = "macho_edit.dart",
     modular_kernel = False,
     target_compatible_with = HOST_COMPATIBLE,
@@ -637,6 +643,27 @@ _MEDIUM_TESTS = [
     target_compatible_with = HOST_COMPATIBLE,
     deps = ["@dev_tool_deps//:test"] + extra_deps,
 ) for name, (tool, extra_deps) in _UNIT_TESTS.items()]
+
+# Pins the bytes `android_bundle`, `kernel_filter` and `macho_edit` write as
+# native executables to what their kernel builds wrote for the same input.
+dart_test(
+    name = "native_exe_output_test",
+    size = "medium",
+    srcs = ["sha256.dart"],
+    data = [
+        ":android_bundle",
+        ":kernel_filter",
+        ":macho_edit",
+    ],
+    env = {
+        "ANDROID_BUNDLE": "$(rlocationpath :android_bundle)",
+        "KERNEL_FILTER": "$(rlocationpath :kernel_filter)",
+        "MACHO_EDIT": "$(rlocationpath :macho_edit)",
+    },
+    main = "test/native_exe_output_test.dart",
+    target_compatible_with = HOST_COMPATIBLE,
+    deps = ["@dev_tool_deps//:test"],
+)
 
 # Suites split out of `incr_fkc_worker_test` and `kernel_filter_test` to keep
 # each test library under the file-size ceiling. They share the tool's sources

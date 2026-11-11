@@ -6,7 +6,7 @@ Flutter compilation differs from vanilla Dart in that it uses:
 """
 
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
-load("//flutter:providers.bzl", "resolve_exec_dart_vm", "resolve_flutter_sdk_info")
+load("//flutter:providers.bzl", "resolve_flutter_sdk_info")
 load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "app_scheme_location", "app_scheme_rel_path", "stage_generated_inputs", "validate_filesystem_roots")
 load(
     "//flutter/private:flutter_compile_params.bzl",
@@ -287,13 +287,11 @@ def _run_kernel_action(ctx, run):
     With the incremental flag on a debug JIT compile, the action runs through
     the persistent worker instead.
     """
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     run_kwargs = dict(
-        executable = dart_exe,
-        arguments = [run.kernel_filter_tool.path, "--declared-inputs", run.manifest.path, run.args],
+        executable = run.kernel_filter_tool,
+        arguments = ["--declared-inputs", run.manifest.path, run.args],
         inputs = depset(
             direct = run.direct_inputs + [run.dartaotruntime, run.kernel_filter_tool, run.manifest],
-            transitive = [dart_vm_files],
         ),
         outputs = run.outputs,
         mnemonic = "FlutterKernelCompile",

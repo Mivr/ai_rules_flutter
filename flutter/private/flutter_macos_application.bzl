@@ -22,7 +22,7 @@ load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_imp
 
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:providers.bzl", "new_applebundleinfo")
-load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo", "resolve_exec_dart_vm")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo")
 load("//flutter/private:constants.bzl", "MACOS_MINIMUM_OS_VERSION")
 
 # -- flutter_macos_framework (App.framework assembly) -------------------------
@@ -52,14 +52,13 @@ _APP_FRAMEWORK_INFO_PLIST = """\
 </plist>
 """
 
-def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_debug, stub_arch, minimum_os_version):
+def _prepare_macos_framework_binary(ctx, app_info, is_debug, stub_arch, minimum_os_version):
     """Prepares the App binary: a stub dylib in debug, the retagged AOT dylib otherwise."""
     prepared_binary = ctx.actions.declare_file("%s_macho/App" % ctx.label.name)
     if is_debug:
         ctx.actions.run(
-            executable = dart_exe,
+            executable = ctx.executable._macho_edit,
             arguments = [
-                ctx.executable._macho_edit.path,
                 "stub",
                 "--output",
                 prepared_binary.path,
@@ -76,7 +75,6 @@ def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_d
             ],
             inputs = depset(
                 direct = [ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
             ),
             outputs = [prepared_binary],
             mnemonic = "FlutterMacOSStubDylib",
@@ -87,7 +85,6 @@ def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_d
     if not app_info.aot_output:
         fail("flutter_macos_framework requires an AOT build (not debug mode) or a kernel_dill in debug mode; check the `application` it was given. The `application` target %s provides neither an AOT output nor a kernel_dill." % ctx.attr.application.label)
     patch_args = [
-        ctx.executable._macho_edit.path,
         "patch",
         "--input",
         app_info.aot_output.path,
@@ -110,11 +107,10 @@ def _prepare_macos_framework_binary(ctx, dart_exe, dart_vm_files, app_info, is_d
     for allowed in ctx.attr.allow_non_macho:
         patch_args.extend(["--allow-non-macho", allowed])
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = patch_args,
         inputs = depset(
             direct = [app_info.aot_output, ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [prepared_binary],
         mnemonic = "FlutterMacOSRetagDylib",
@@ -141,7 +137,6 @@ def _macos_framework_assemble_inputs(
     """
     inputs = [flutter_assets, prepared_binary, prepared_plist, ctx.executable._macho_edit]
     assemble_args = [
-        ctx.executable._macho_edit.path,
         "assemble-macos-framework",
         "--binary",
         prepared_binary.path,
@@ -220,7 +215,6 @@ def _flutter_macos_framework_impl(ctx):
     minimum_os_version = ctx.attr.minimum_os_version
     target_arch = apple_support.target_arch_from_rule_ctx(ctx)
     stub_arch = "arm64" if target_arch == "arm64" else "x86_64"
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
 
     # The versioned layout is emitted as a deterministic `App.framework.zip`
     # for `AppleBundleInfo.archive` so `rules_apple`'s `bundletool` preserves
@@ -236,8 +230,6 @@ def _flutter_macos_framework_impl(ctx):
     stage_dir = framework_zip.path + ".stage"
     prepared_binary = _prepare_macos_framework_binary(
         ctx,
-        dart_exe,
-        dart_vm_files,
         app_info,
         is_debug,
         stub_arch,
@@ -259,11 +251,10 @@ def _flutter_macos_framework_impl(ctx):
     )
 
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = assemble_args,
         inputs = depset(
             direct = inputs,
-            transitive = [dart_vm_files],
         ),
         outputs = [framework_zip],
         mnemonic = "FlutterMacOSFramework",
@@ -399,10 +390,8 @@ def _flutter_macos_native_libs_impl(ctx):
         return [DefaultInfo(files = depset())]
 
     minimum_os_version = ctx.attr.minimum_os_version
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
     staged = ctx.actions.declare_directory(ctx.label.name)
     args = ctx.actions.args()
-    args.add(ctx.executable._macho_edit.path)
     args.add("copy-files")
     args.add("--platform")
     args.add("macos")
@@ -419,11 +408,10 @@ def _flutter_macos_native_libs_impl(ctx):
         args.add(lib)
         args.add(basename)
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [args],
         inputs = depset(
             direct = list(libs_by_basename.values()) + [ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [staged],
         mnemonic = "FlutterMacOSNativeLibs",
