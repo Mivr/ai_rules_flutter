@@ -17,7 +17,7 @@ class FlavoredApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const flavor = appFlavor ?? 'none';
-    return MaterialApp(
+    return const MaterialApp(
       title: flavor,
       home: Scaffold(
         body: Center(
