@@ -14,6 +14,10 @@ load(
     "//flutter/private:flutter_pub_scc_plan.bzl",
     "plan_hub_sccs",
 )
+load(
+    "//flutter/private:tool_deps_extension.bzl",
+    "register_tool_pub_hub",
+)
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
 def _fail_called(method):
@@ -212,8 +216,56 @@ def _internal_and_consumer_hub_plan_test_impl(ctx):
 
     return unittest.end(env)
 
+def _register_tool_pub_hub_test_impl(ctx):
+    """register_tool_pub_hub emits the hub and pure-Dart hosted spokes without android spokes."""
+    env = unittest.begin(ctx)
+    lock_yaml = "\n".join([
+        "packages:",
+        "  intl:",
+        "    dependency: \"direct main\"",
+        "    description:",
+        "      name: intl",
+        "      sha256: \"" + ("3" * 64) + "\"",
+        "      url: \"https://pub.dev\"",
+        "    source: hosted",
+        "    version: \"0.20.3\"",
+        "  meta:",
+        "    dependency: transitive",
+        "    description:",
+        "      name: meta",
+        "      sha256: \"" + ("4" * 64) + "\"",
+        "      url: \"https://pub.dev\"",
+        "    source: hosted",
+        "    version: \"1.18.3\"",
+    ])
+    hubs = []
+    spokes = []
+    lock_label = Label("//flutter/private/gen_l10n:pubspec.lock")
+    mock_ctx = struct(read = lambda _label: lock_yaml)
+    pub_tag = struct(name = "gen_l10n_deps", lock = lock_label)
+
+    pkgs = register_tool_pub_hub(
+        mock_ctx,
+        pub_tag,
+        hub_rule = lambda **kwargs: hubs.append(kwargs),
+        spoke_rule = lambda **kwargs: spokes.append(kwargs),
+    )
+
+    asserts.equals(env, ["intl", "meta"], pkgs)
+    asserts.equals(env, 1, len(hubs))
+    asserts.equals(env, "gen_l10n_deps", hubs[0]["name"])
+    asserts.equals(env, ["intl", "meta"], hubs[0]["packages"])
+    asserts.equals(env, 2, len(spokes))
+    asserts.equals(env, "gen_l10n_deps__intl", spokes[0]["name"])
+    asserts.equals(env, "0.20.3", spokes[0]["version"])
+    asserts.equals(env, "3" * 64, spokes[0]["sha256"])
+    asserts.equals(env, "gen_l10n_deps__meta", spokes[1]["name"])
+    asserts.equals(env, lock_label, spokes[1]["pubspec_lock"])
+    return unittest.end(env)
+
 _dev_tool_and_gen_l10n_internal_plan_test = unittest.make(_dev_tool_and_gen_l10n_internal_plan_test_impl)
 _internal_and_consumer_hub_plan_test = unittest.make(_internal_and_consumer_hub_plan_test_impl)
+_register_tool_pub_hub_test = unittest.make(_register_tool_pub_hub_test_impl)
 
 def flutter_pub_internal_hubs_test_suite(name):
     """Defines the flutter.pub internal hubs unit test suite."""
@@ -221,4 +273,5 @@ def flutter_pub_internal_hubs_test_suite(name):
         name,
         _dev_tool_and_gen_l10n_internal_plan_test,
         _internal_and_consumer_hub_plan_test,
+        _register_tool_pub_hub_test,
     )

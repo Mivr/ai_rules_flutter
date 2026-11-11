@@ -99,6 +99,7 @@ load(":validation_test.bzl", "validation_test_suite")
 load(":versions_test.bzl", "versions_test_suite")
 load(":web_test.bzl", "web_test_suite")
 load(":xcframework_plist_test.bzl", "xcframework_plist_test_suite")
+load(":xtool_hub_toolchains_test.bzl", "xtool_hub_toolchains_test_suite")
 load(":xtool_static_xcframework_test.bzl", "xtool_static_xcframework_test_suite")
 
 # The dependency-floor table is read by //flutter/tests:dependency_floors_test
@@ -552,6 +553,8 @@ flutter_application_test_suite(name = "flutter_application_test")
 flutter_apple_xcframework_import_test_suite(name = "flutter_apple_xcframework_import_test")
 
 xcframework_plist_test_suite(name = "xcframework_plist_test")
+
+xtool_hub_toolchains_test_suite(name = "xtool_hub_toolchains_test")
 
 xtool_static_xcframework_test_suite(name = "xtool_static_xcframework_test")
 

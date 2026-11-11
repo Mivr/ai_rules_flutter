@@ -133,7 +133,7 @@ def _flutter_gen_l10n_repo_impl(repository_ctx):
 
     srcs = "\n".join(['        "%s",' % s for s in _SUBSET_SRCS])
     deps = "\n".join([
-        '        "@%s__%s//:%s",' % (repository_ctx.attr.hub_name, d, d)
+        '        "@%s//:%s",' % (repository_ctx.attr.hub_name, d)
         for d in _SUBSET_DEPS
     ])
 

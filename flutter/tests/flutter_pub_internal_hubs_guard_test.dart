@@ -1,5 +1,5 @@
 /// Lockfile guard: internal `flutter.pub` hubs stay reproducible and never
-/// pollute consumer `MODULE.bazel.lock` facts.
+/// pollute consumer `MODULE.bazel.lock` facts or generated repositories.
 library;
 
 import 'dart:convert';
@@ -99,6 +99,8 @@ Set<String> _factHostedPackages(Map<String, Object?> extFacts) {
   return packages;
 }
 
+const _toolHubs = <String>['dev_tool_deps', 'gen_l10n_deps'];
+
 /// Entrypoint for the internal-hubs lockfile guard tests.
 void main() {
   final String root = _locateRepoRoot();
@@ -125,21 +127,20 @@ void main() {
     );
   });
 
-  test('e2e/pub_scc/MODULE.bazel.lock facts cover only consumer packages', () {
+  test('e2e/pub_scc/MODULE.bazel.lock facts and repos exclude tool hubs', () {
     final Map<String, Object?> pubSccLock = _readJsonObject(
       '$root/e2e/pub_scc/MODULE.bazel.lock',
     );
     final Map<String, Object?> facts = _jsonSection(pubSccLock, 'facts');
-    const flutterFactKey =
-        '@@ai_rules_flutter+//flutter:extensions.bzl%flutter';
+    const flutterKey = '@@ai_rules_flutter+//flutter:extensions.bzl%flutter';
 
     expect(
-      facts.containsKey(flutterFactKey),
+      facts.containsKey(flutterKey),
       isTrue,
       reason: 'e2e/pub_scc/MODULE.bazel.lock must record flutter facts',
     );
 
-    final Map<String, Object?> extFacts = _jsonSection(facts, flutterFactKey);
+    final Map<String, Object?> extFacts = _jsonSection(facts, flutterKey);
     final Set<String> covered = _factHostedPackages(extFacts);
     final Set<String> lockHosted = _hostedPackagesInPubspecLock(
       '$root/e2e/pub_scc/pubspec.lock',
@@ -165,5 +166,96 @@ void main() {
     for (final pkg in internalOnlyPackages) {
       expect(covered.contains(pkg), isFalse);
     }
+
+    final Map<String, Object?> moduleExtensions = _jsonSection(
+      pubSccLock,
+      'moduleExtensions',
+    );
+    for (final String extKey in moduleExtensions.keys) {
+      expect(
+        extKey.contains('flutter_tool_deps'),
+        isFalse,
+        reason: 'consumer lockfile must not evaluate flutter_tool_deps',
+      );
+    }
+    final Map<String, Object?> flutterExt = _jsonSection(
+      moduleExtensions,
+      flutterKey,
+    );
+    final Map<String, Object?> general = _jsonSection(flutterExt, 'general');
+    final Map<String, Object?> repoSpecs = _jsonSection(
+      general,
+      'generatedRepoSpecs',
+    );
+    expect(repoSpecs, isNotEmpty);
+    for (final String repoName in repoSpecs.keys) {
+      for (final String hub in _toolHubs) {
+        expect(
+          repoName == hub ||
+              repoName.startsWith('${hub}__') ||
+              repoName.startsWith('$hub-'),
+          isFalse,
+          reason: 'consumer flutter extension created tool repo $repoName',
+        );
+      }
+    }
+  });
+
+  test('the tool pub hubs live on flutter_tool_deps, not on flutter', () {
+    final String module = File('$root/MODULE.bazel').readAsStringSync();
+    for (final String hub in _toolHubs) {
+      expect(
+        module,
+        contains('flutter_tool_deps.pub(\n    name = "$hub",'),
+        reason: '$hub must be declared on the lazily evaluated extension',
+      );
+      expect(
+        module.contains('flutter.pub(\n    name = "$hub",'),
+        isFalse,
+        reason: '$hub on the flutter extension would reach every consumer',
+      );
+    }
+    expect(module, contains('use_repo(flutter_tool_deps, '));
+    for (final RegExpMatch m in RegExp(
+      r'use_repo\(flutter,([^)]*)\)',
+    ).allMatches(module)) {
+      for (final String hub in _toolHubs) {
+        expect(m.group(1), isNot(contains('"$hub"')));
+      }
+    }
+  });
+
+  test('no e2e workspace imports a tool hub from the flutter extension', () {
+    for (final FileSystemEntity dir in Directory('$root/e2e').listSync()) {
+      final module = File('${dir.path}/MODULE.bazel');
+      if (!module.existsSync()) {
+        continue;
+      }
+      for (final RegExpMatch m in RegExp(
+        r'use_repo\(\s*flutter,([^)]*)\)',
+      ).allMatches(module.readAsStringSync())) {
+        for (final String hub in _toolHubs) {
+          expect(
+            m.group(1),
+            isNot(contains('"$hub"')),
+            reason: '${module.path} imports $hub from the flutter extension',
+          );
+        }
+      }
+    }
+  });
+
+  test('the xtool SDK repository is registered through the hub only', () {
+    final String module = File('$root/MODULE.bazel').readAsStringSync();
+    expect(
+      RegExp(
+        r'register_toolchains\([^)]*flutter_xtool_darwin_sdk',
+      ).hasMatch(module),
+      isFalse,
+    );
+    expect(
+      module,
+      contains('register_toolchains("@flutter_toolchains//:all")'),
+    );
   });
 }
