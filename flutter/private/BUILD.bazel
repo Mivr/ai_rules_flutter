@@ -250,6 +250,7 @@ bzl_library(
     srcs = ["flutter_android_binary_proxy.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":flutter_drive_test",
         "@bazel_skylib//rules:write_file",
         "@rules_android//providers:providers_bzl",
         "@rules_java//java/common",
@@ -671,6 +672,18 @@ bzl_library(
         "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
         "@rules_java//java:core_rules",
+    ],
+)
+
+bzl_library(
+    name = "flutter_drive_test",
+    srcs = ["flutter_drive_test.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//flutter:providers",
+        "@rules_android//providers:providers_bzl",
+        "@rules_dart//dart:providers",
+        "@rules_dart//dart:utils",
     ],
 )
 

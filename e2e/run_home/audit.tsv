@@ -28,6 +28,7 @@
 @rules_flutter//flutter/private/tools:pub_runner	exec runner for //flutter:pub; covered via the //flutter:pub registry row
 @rules_flutter//flutter/private/tools:flutter_test_runner	exec runner for flutter_test; covered via the widget_test registry rows
 @rules_flutter//flutter/private/tools:flutter_integration_test_runner	exec runner for flutter_integration_test; covered via the app_test registry rows
+@rules_flutter//flutter/private/tools:flutter_drive_runner	exec runner for flutter_drive_test; needs emulator + Android SDK; its launcher env is the flutter_integration_test android one
 @rules_flutter//flutter/private/tools:strip_native_libs	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:web_template	exec build tool (AOT); outputs only, no CLI spawn
 @rules_flutter//flutter/private/tools:web_guard	exec build tool (AOT); outputs only, no CLI spawn
@@ -49,6 +50,7 @@
 @rules_flutter//flutter/private/tools:copy_local_file_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:defines_files_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:extract_library_tags_test	Dart unit test; no CLI spawn
+@rules_flutter//flutter/private/tools:flutter_drive_runner_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_integration_test_android_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_integration_test_ios_test	Dart unit test; no CLI spawn
 @rules_flutter//flutter/private/tools:flutter_integration_test_runner_test	Dart unit test; no CLI spawn

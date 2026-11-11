@@ -10,6 +10,7 @@ android_plugin: needs the Android SDK and rules_android toolchains, which this L
 android_runner: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
 apple_xcframework: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 darwin_xcframework: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
+drive_test: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
 ios_app: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 ios_engine: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 ios_framework: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)

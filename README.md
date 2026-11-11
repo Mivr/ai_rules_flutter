@@ -1959,6 +1959,55 @@ The bundle id defaults to `com.example.<package path>.<name>.<label hash>` — t
 | `include_tags` | Run only tests matching every one of these `package:test` tag selectors, as `flutter test --tags` intersects them. An attribute selection that matches no test fails the target. |
 | `exclude_tags` | Skip tests matching any of these `package:test` tag selectors, as `flutter test --exclude-tags` unions them. Wins over `include_tags`. A `--test_env=FLUTTER_TEST_TAGS=...` (or `FLUTTER_TEST_EXCLUDE_TAGS`) value at run time overrides the attribute. A `@Tags` on the test entrypoint itself is extracted at build time and always honoured; a `@Tags` on an imported file stays invisible, as under `flutter test`. |
 
+### flutter_drive_test
+
+Launches an Android app on the hermetic, pinned headless Android emulator, then runs a Dart driver script on the host against it, the way `flutter drive` and `package:flutter_driver` do. `flutter_integration_test` runs the test inside the app; `flutter_drive_test` runs a script on the host against the running app. The test passes when the driver exits 0 and fails with the driver's exit status otherwise. The emulator, the app and the port forward are cleaned up when the test ends, pass or fail, and a launch timeout names the step that timed out.
+
+```starlark
+load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_drive_test")
+
+flutter_android_app(
+    name = "app_android",
+    application = ":app",
+    package_name = "com.example.app",
+)
+
+# Host Dart and `flutter_driver` come from the toolchain and the pinned pub
+# lock, never the host machine. `driver` may also point at a `dart_binary`.
+flutter_drive_test(
+    name = "drive_test",
+    app = ":app_android",
+    driver = "test_driver/main_test.dart",
+    package_name = "com.example.app",
+    deps = [
+        "@deps//:flutter_driver",
+        "@deps//:test",
+    ],
+)
+```
+
+Build the app in debug mode (`bazel test -c dbg :drive_test`): a release app hosts no Dart VM service for the driver to connect to.
+
+| Attribute | Description |
+| --- | --- |
+| `app` | Required. The Android app under test, as `flutter_android_app` builds it. A target that is not an Android app fails analysis naming `app`. |
+| `driver` | Required. The host driver — either a `.dart` script (compiled with the hermetic Dart toolchain against `deps` and `srcs`) or a `dart_binary` target. Its exit status is the test's. A missing `driver` fails analysis naming `driver`. |
+| `package_name` | Required. The Android application ID of `app`. |
+| `deps`, `srcs` | Optional Dart dependencies (from the pinned pub lock) and helper `.dart` files when `driver` is a `.dart` script. |
+| `data`, `env` | Optional runtime files and extra environment variables (`$(rlocationpath ...)` expanded over `data`). |
+| `size`, `tags` | `size` defaults to `large`, like the Android integration test; `manual` is always added to `tags`, so the test stays out of wildcard test runs. |
+
+The driver runs with these variables in its environment, on top of the test's own:
+
+| Variable | Value |
+| --- | --- |
+| `VM_SERVICE_URL` | The app's Dart VM service URI, forwarded to the host (`http://127.0.0.1:<port>/<token>=/`), as `package:flutter_driver` reads it. |
+| `FLUTTER_DRIVE_VM_SERVICE_URI` | The same URI. |
+| `FLUTTER_DRIVE_ANDROID_SERIAL` | The emulator's `adb` serial. |
+| `FLUTTER_DRIVE_PACKAGE` | The `package_name`. |
+
+Android only. It uses the same pinned emulator and `adb` as `flutter_integration_test(platform = "android")` (x86_64 API 35, KVM required), so it adds no download. iOS simulator support is a later item.
+
 ### flutter_plugin
 
 Declares a Flutter plugin written in your workspace: its Dart code plus per-platform native implementations. Plugins from pub do not need this; the hub declares them.
