@@ -71,7 +71,7 @@ def merge_dart_defines(ctx):
         ctx.label,
         ctx.attr.defines,
         ctx.attr._extra_dart_defines[BuildSettingInfo].value,
-        ctx.attr.flavor if hasattr(ctx.attr, "flavor") else "",
+        ctx.attr.flavor if hasattr(ctx.attr, "flavor") else None,
     )
 
 def collect_define_flagfiles(ctx, user_defines):
