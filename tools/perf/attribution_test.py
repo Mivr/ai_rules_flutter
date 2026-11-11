@@ -29,16 +29,17 @@ def make_record(bazel=100.0):
 
 
 def put_rep(root, config, scenario, rep, with_log=True, with_trace=True,
-            bazel=100.0):
+            bazel=100.0, trace="trace", execlog="execlog"):
     """Rep dir holding record.json plus the gzipped fixture files."""
     rep_dir = os.path.join(root, "sol", config, scenario, "rep%d" % rep)
     os.makedirs(rep_dir)
     with open(os.path.join(rep_dir, "record.json"), "w") as fh:
         json.dump(make_record(bazel), fh)
-    for present, name in ((with_trace, "trace"), (with_log, "execlog")):
+    for present, name, dest in ((with_trace, trace, "trace"),
+                                (with_log, execlog, "execlog")):
         if present:
             with open(os.path.join(DATA, name + ".json"), "rb") as fin:
-                with open(os.path.join(rep_dir, name + ".json.gz"),
+                with open(os.path.join(rep_dir, dest + ".json.gz"),
                           "wb") as fout:
                     fout.write(gzip.compress(fin.read()))
     return rep_dir
@@ -140,6 +141,69 @@ class AttributionTest(unittest.TestCase):
                                        "g": {}}}}
         self.assertEqual(attribution.strict_attribution_exit(
             summaries, True), 0)
+
+    def test_overlapping_threads_are_split_once(self):
+        # fetch 0-10s on one thread, analysis 5-15s on another, 2 cores:
+        # fetch keeps 0-10 (20 CPU s), analysis only 10-15 (10 CPU s).
+        rep = put_rep(self.root, "sim_debug", "clean", 1,
+                      trace="overlap_trace", execlog="execlog_host")
+        result = attribution.attribute_flow([rep], 40.0)
+        parts = result["parts"]
+        self.assertAlmostEqual(parts["fetch_extract"], 20.0)
+        self.assertAlmostEqual(parts["loading_analysis"], 10.0)
+        summed = parts["fetch_extract"] + parts["loading_analysis"]
+        self.assertLessEqual(summed, 40.0)
+        self.assertTrue(result["ok"], result)
+
+    def test_host_tools_and_target_from_exec_spawns(self):
+        rep = put_rep(self.root, "sim_debug", "clean", 1,
+                      trace="overlap_trace", execlog="execlog_host")
+        parts = attribution.attribute_flow([rep], 40.0)["parts"]
+        host = parts["host_tools"]
+        self.assertAlmostEqual(host["total"], 8.0)
+        self.assertEqual(host["by_repo"], {"tools": 4.0, "extra": 4.0, "other": 0})
+        self.assertAlmostEqual(host["by_mnemonic"]["Host"], 8.0)
+        self.assertAlmostEqual(parts["target_actions"], 4.0)
+
+    def _assert_missing(self, **kwargs):
+        shutil.rmtree(os.path.join(self.root, "sol"), ignore_errors=True)
+        rep = put_rep(self.root, "sim_debug", "clean", 1, **kwargs)
+        result = attribution.attribute_flow([rep], 100.0)
+        self.assertEqual(sorted(result), ["error", "ok"])
+        self.assertFalse(result["ok"])
+        return result["error"]
+
+    def test_log_without_cpu_metrics_names_the_gap(self):
+        self.assertIn("CPU metrics", self._assert_missing(
+            execlog="execlog_no_metrics"))
+
+    def test_log_without_outputs_names_the_gap(self):
+        self.assertIn("lists no spawn outputs", self._assert_missing(
+            execlog="execlog_no_outputs"))
+
+    def test_trace_without_counter_names_the_gap(self):
+        shutil.rmtree(os.path.join(self.root, "sol"), ignore_errors=True)
+        rep = put_rep(self.root, "sim_debug", "clean", 1)
+        empty = os.path.join(rep, "trace.json.gz")
+        with open(empty, "wb") as fh:
+            fh.write(gzip.compress(b'{"traceEvents": []}'))
+        result = attribution.attribute_flow([rep], 100.0)
+        self.assertFalse(result["ok"])
+        self.assertNotIn("parts", result)
+
+    def test_strict_exit_per_fixture(self):
+        for execlog, code in (("execlog_no_metrics", 1),
+                              ("execlog_no_outputs", 1),
+                              ("execlog", 0)):
+            shutil.rmtree(os.path.join(self.root, "sol"),
+                          ignore_errors=True)
+            put_rep(self.root, "sim_debug", "clean", 1, execlog=execlog)
+            argv = ["summarize", "--results", self.root, "--sha", "x",
+                    "--repeats", "1", "--target-loc", "1", "--seed", "1",
+                    "--out", os.path.join(self.root, "o.json"),
+                    "--strict-attribution"]
+            with mock.patch("builtins.print"):
+                self.assertEqual(sol.main(argv), code, execlog)
 
 
 if __name__ == "__main__":
