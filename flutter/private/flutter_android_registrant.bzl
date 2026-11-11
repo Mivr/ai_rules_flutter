@@ -19,6 +19,7 @@ load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:common.bzl", "ANDROID_ABIS")
 load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
+load("//flutter/private:flutter_android_aab.bzl", _flutter_android_aab_emit = "flutter_android_aab_emit")
 load("//flutter/private:flutter_android_application.bzl", "android_platform_transition")
 load("//flutter/private:plugin_registrant.bzl", "generate_native_plugin_registrant")
 
@@ -123,6 +124,8 @@ flutter_android_plugins_aggregator = rule(
 )
 
 # Wiring helpers shared by the Android app macros (`flutter_android_app`, `flutter_android_aab`).
+
+flutter_android_aab_emit = _flutter_android_aab_emit
 
 def variant_overlay(name, variant, manifest, base_manifest):
     """Resolves a `flutter create` variant manifest (`debug` or `profile`).

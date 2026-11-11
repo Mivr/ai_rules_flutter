@@ -1298,7 +1298,7 @@ flutter_android_aab(
 )
 ```
 
-`bazel build //:my_app_aab` produces `my_app_aab.aab`. **The bundle is unsigned**: the rule never debug-signs and takes no signing attribute. Signing it with a release keystore is a separate step that has not landed, so the bundle is not yet ready to upload to Google Play. The `e2e/android_example` workspace runs `bundletool validate` and `bundletool dump manifest` on the produced bundle.
+`bazel build //:my_app_aab` produces `my_app_aab.aab`. Pass `keystore`, `keystore_password_file` and `key_alias` (and `key_password_file` when the key has its own password), or set the `//flutter:android_release_*` flags, and the bundle is signed with `jarsigner` from the Bazel-managed JDK toolchain; the passwords are read from their files at execution time. **Without a keystore the bundle is unsigned**: the rule never debug-signs a release bundle, so sign it before uploading to Google Play. The `e2e/android_example` workspace runs `bundletool validate` and `bundletool dump manifest` on the produced bundle.
 
 #### Android library (AAR) for a native host app
 

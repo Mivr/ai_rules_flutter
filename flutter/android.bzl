@@ -75,7 +75,6 @@ load(
     _ANDROIDX_EMBEDDING_DEPS = "ANDROIDX_EMBEDDING_DEPS",
     _FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = "FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS",
     _build_overlay_kwargs = "build_overlay_kwargs",
-    _flutter_android_aab_emit = "flutter_android_aab_emit",
     _flutter_android_binary_proxy = "flutter_android_binary_proxy",
     _flutter_drive_test = "flutter_drive_test",
 )
@@ -85,6 +84,7 @@ load(
     "//flutter/private:flutter_android_registrant.bzl",
     _android_discover_runner = "android_discover_runner",
     _android_registrant = "android_registrant",
+    _flutter_android_aab_emit = "flutter_android_aab_emit",
     _flutter_android_registrant = "flutter_android_registrant",
     _short_abi_to_full = "short_abi_to_full",
     _variant_overlay = "variant_overlay",
@@ -968,13 +968,22 @@ def flutter_android_aab(
         resources = [],
         deps = [],
         pub_hub_name = "deps",
+        keystore = None,
+        keystore_password_file = None,
+        key_alias = None,
+        key_password_file = None,
         **kwargs):
-    """Builds an unsigned Android App Bundle (`<name>.aab`) from a flutter_application.
+    """Builds an Android App Bundle (`<name>.aab`) from a flutter_application.
 
-    Google Play requires an App Bundle for new apps. The bundle is **unsigned**:
-    this rule never debug-signs it and takes no signing attribute. Signing the
-    bundle with the release keystore is a separate step that has not landed, so
-    sign it yourself (for example with `jarsigner`) before uploading.
+    Google Play requires an App Bundle for new apps. With a release keystore
+    (`keystore`, or the `//flutter:android_release_keystore` flag) the bundle is
+    signed with `jarsigner` from the Bazel-managed JDK toolchain, never a host
+    tool; the passwords are read from their files at execution time and never
+    appear on the command line. Without a keystore the bundle is **unsigned**:
+    this rule never debug-signs a release bundle. The attributes, the
+    `//flutter:android_release_*` flags, their precedence (an explicit attribute
+    wins over its flag) and the fail-closed analysis errors are those of
+    `flutter_android_app`; the signing action runs locally only (`no-remote`).
 
     It wires the same runner, registrant, plugins and manifest as
     `flutter_android_app`, then builds the bundle with rules_android's public
@@ -993,6 +1002,17 @@ def flutter_android_aab(
             package_name = "com.example.myapp",
         )
 
+    Signed with a release keystore:
+
+        flutter_android_aab(
+            name = "my_app_aab",
+            application = ":my_app",
+            package_name = "com.example.myapp",
+            keystore = "release.jks",
+            keystore_password_file = "release.storepass",
+            key_alias = "upload",
+        )
+
     Args:
         name: Target name. Produces `<name>.aab`.
         application: A flutter_application target (required).
@@ -1008,6 +1028,17 @@ def flutter_android_aab(
         resources: Extra resource_files for the base module.
         deps: Extra deps for the base module.
         pub_hub_name: Name of the `flutter.pub` hub providing plugin spokes.
+        keystore: Release keystore (`.jks` or PKCS#12 `.p12` file label) signing
+            the bundle. Needs `keystore_password_file` and `key_alias`; without
+            them analysis fails naming the missing attribute. Unset (with the
+            flag unset) leaves the bundle unsigned. Wins over the flag.
+        keystore_password_file: File holding the keystore password, read at
+            execution time (`-storepass:file`). Falls back to the
+            `//flutter:android_release_keystore_password_file` flag.
+        key_alias: Alias of the signing key inside `keystore`. Falls back to
+            the `//flutter:android_release_key_alias` flag.
+        key_password_file: File holding the key's own password
+            (`-keypass:file`); when unset jarsigner uses the keystore password.
         **kwargs: `tags` (defaults to `["manual"]`) and `visibility`.
     """
     tags = kwargs.pop("tags", ["manual"])
@@ -1043,4 +1074,10 @@ def flutter_android_aab(
         tags = tags,
         internal_tags = internal_tags,
         visibility = kwargs.pop("visibility", None),
+        signing = struct(
+            keystore = keystore,
+            keystore_password_file = keystore_password_file,
+            key_alias = key_alias,
+            key_password_file = key_password_file,
+        ),
     ))
