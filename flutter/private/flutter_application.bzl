@@ -19,6 +19,7 @@ load("@rules_dart//dart:utils.bzl", "dart_link_hook_actions", "link_hook_runner_
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
 load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "make_bundle_inputs", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info", "shader_sources")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
+load("//flutter/private:flutter_defines_files.bzl", "effective_flavor")
 load("//flutter/private:flutter_font_family.bzl", "FONTS_ATTR")
 load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
 load("//flutter/private:flutter_native_assets.bzl", "collect_application_native_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
@@ -625,7 +626,7 @@ def _flutter_application_impl(ctx):
 
     # Step 3: Shader compilation + asset bundle. Pass data assets so the
     # bundler places them under flutter_assets/packages/<pkg>/<name>.
-    flavor = ctx.attr.flavor if ctx.attr.flavor else None
+    flavor = effective_flavor(ctx) or None
     flutter_build_assets(
         ctx = ctx,
         flutter_sdk_info = flutter_sdk_info,
