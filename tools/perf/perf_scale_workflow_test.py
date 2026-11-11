@@ -26,6 +26,10 @@ _FLOWS = {"perf-scale-linux.yaml": "--config android_release "
                                    "--config android_debug",
           "perf-scale-ios.yaml": "--config device_release "
                                  "--config sim_debug"}
+_INPUT_INJECTION = re.compile(
+    r"(?:\$\{\{\s*(?:github\.event\.)?inputs\.|\bgithub\.event\.inputs\.)"
+    r"([A-Za-z0-9_]+)"
+)
 
 
 def workflow_text(name):
@@ -215,6 +219,68 @@ class ScaleWorkflowTest(unittest.TestCase):
                     f"step {step_name!r} script must not contain "
                     f"expression for {input_name}",
                 )
+
+    def test_linux_run_blocks_contain_no_inputs(self):
+        lines = workflow_text("perf-scale-linux.yaml").splitlines()
+        violations = []
+        for step in steps(lines):
+            run = step.get("run")
+            if not run:
+                continue
+            step_name = step.get("name", "<unnamed>")
+            for match in _INPUT_INJECTION.finditer(run):
+                violations.append(
+                    f"step '{step_name}' contains input '{match.group(1)}' "
+                    "in run script"
+                )
+        self.assertEqual(violations, [])
+
+    def test_linux_script_inputs_bound_in_step_env(self):
+        lines = workflow_text("perf-scale-linux.yaml").splitlines()
+        step_inputs = {
+            "Generate pristine monorepo": {
+                "SEED": ("seed", "${{ inputs.seed || '1' }}", '"$SEED"'),
+            },
+            "Measure speed-of-light": {
+                "REPEATS": (
+                    "repeats", "${{ inputs.repeats || '1' }}", '"$REPEATS"'),
+            },
+            "Summarize speed-of-light": {
+                "REPEATS": (
+                    "repeats", "${{ inputs.repeats || '1' }}", '"$REPEATS"'),
+                "SEED": ("seed", "${{ inputs.seed || '1' }}", '"$SEED"'),
+            },
+        }
+        all_steps = {s.get("name"): s for s in steps(lines) if s.get("name")}
+        for step_name, bindings in step_inputs.items():
+            self.assertIn(step_name, all_steps)
+            step = all_steps[step_name]
+            env = step.get("env", {})
+            self.assertIsInstance(
+                env, dict, f"step {step_name!r} is missing env: mapping"
+            )
+            run = step.get("run", "")
+            for env_var, (input_name, expected_env, quoted_ref) in (
+                    bindings.items()):
+                with self.subTest(step=step_name, var=env_var):
+                    self.assertIn(
+                        env_var, env,
+                        f"step {step_name!r} env missing {env_var}"
+                    )
+                    self.assertEqual(
+                        env[env_var], expected_env,
+                        f"step {step_name!r} env {env_var} must match "
+                        f"{expected_env}"
+                    )
+                    self.assertIn(
+                        quoted_ref, run,
+                        f"step {step_name!r} script must refer to {quoted_ref}"
+                    )
+                    self.assertNotIn(
+                        f"inputs.{input_name}", run,
+                        f"step {step_name!r} script must not contain "
+                        f"inputs.{input_name}"
+                    )
 
 
 if __name__ == "__main__":

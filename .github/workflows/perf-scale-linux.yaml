@@ -79,12 +79,14 @@ jobs:
           echo "build --repo_env=ANDROID_HOME=$ANDROID_HOME" >> ~/.bazelrc
           echo "build --repo_env=ANDROID_NDK_HOME=$ndk" >> ~/.bazelrc
       - name: Generate pristine monorepo
+        env:
+          SEED: ${{ inputs.seed || '1' }}
         run: |
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/gen_monorepo.py" generate \
             --packages "${{ matrix.packages }}" \
             --plugins "${{ matrix.plugins }}" \
-            --seed "${{ inputs.seed || '1' }}" \
+            --seed "$SEED" \
             --rules-flutter "$GITHUB_WORKSPACE/rules-head" \
             --out "$RUNNER_TEMP/ws-head-pristine"
       - name: Measure speed-of-light
@@ -93,11 +95,13 @@ jobs:
         # their execution logs and shuts its server down. A failing config
         # is recorded and the loop continues; the step then exits
         # non-zero, but summarize and upload still run.
+        env:
+          REPEATS: ${{ inputs.repeats || '1' }}
         run: |
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
           failed=0
-          for rep in $(seq 1 "${{ inputs.repeats || '1' }}"); do
+          for rep in $(seq 1 "$REPEATS"); do
             rm -rf "$RUNNER_TEMP/sol-out-$rep" "$RUNNER_TEMP/sol-run-$rep"
             python3 "$tools/sol.py" run --tools "$tools" \
               --pristine "$RUNNER_TEMP/ws-head-pristine" \
@@ -113,6 +117,9 @@ jobs:
         # Runs even when measuring failed, so the point file (with the
         # finished flows and the recorded reasons) is always written.
         if: ${{ !cancelled() }}
+        env:
+          REPEATS: ${{ inputs.repeats || '1' }}
+          SEED: ${{ inputs.seed || '1' }}
         run: |
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
@@ -120,9 +127,9 @@ jobs:
           python3 "$tools/sol.py" summarize \
             --results "$GITHUB_WORKSPACE/sol-results" \
             --sha "$sha" \
-            --repeats "${{ inputs.repeats || '1' }}" \
+            --repeats "$REPEATS" \
             --target-loc "$(( ${{ matrix.packages }} * 2500 ))" \
-            --seed "${{ inputs.seed || '1' }}" \
+            --seed "$SEED" \
             --lockfile none \
             --out "$GITHUB_WORKSPACE/scale-point-${{ matrix.packages }}-${{ matrix.plugins }}.json"
       - name: Upload point result
