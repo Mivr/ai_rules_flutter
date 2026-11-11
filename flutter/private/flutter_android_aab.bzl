@@ -14,6 +14,8 @@ load(
     "resolve_release_signing",
 )
 
+visibility(["//flutter/..."])
+
 # Android App Bundle (`.aab`) emission for `flutter_android_aab`: built by rules_android 0.8.0's public
 # `android_application` macro; see `flutter_android_aab_emit`.
 #

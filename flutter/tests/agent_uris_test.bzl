@@ -4,6 +4,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
 load("//flutter/private:app_entrypoint.bzl", "app_scheme_rel_path")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 
+visibility(["//flutter/tests/..."])
+
 _DBG = {
     "//command_line_option:compilation_mode": "dbg",
     str(Label("//flutter:profile")): False,

@@ -16,6 +16,8 @@ load("//flutter/private:flutter_android_aab.bzl", "flutter_android_aab_file")
 load("//flutter/private:flutter_android_apk_overlay.bzl", "release_execution_requirements")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _STORE_PASS = "aab-test-store-pass"
 _KEY_PASS = "aab-test-key-pass"
 _JDK_TYPE = "@bazel_tools//tools/jdk:toolchain_type"
