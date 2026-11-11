@@ -1777,6 +1777,7 @@ bzl_library(
     name = "ios_sim_debug",
     srcs = ["ios_sim_debug.bzl"],
     visibility = ["//visibility:public"],
+    deps = [":flutter_drive_test"],
 )
 
 bzl_library(
