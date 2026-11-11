@@ -12,7 +12,3 @@ test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
 test --output_groups=+dart_analyze
 test --output_groups=+dart_format
 common --@rules_dart//dart:analysis_config=//:analysis_config
-
-# The Android Dart registrant the test reads is a dev-loop output, which only a
-# debug build of the application emits.
-common --compilation_mode=dbg

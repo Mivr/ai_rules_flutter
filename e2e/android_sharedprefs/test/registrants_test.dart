@@ -10,10 +10,10 @@
 /// - the Android `GeneratedPluginRegistrant.java`, by its `pluginClass`
 ///   (`io.flutter.plugins.sharedpreferences.SharedPreferencesPlugin`).
 ///
-/// The Dart registrant is the Android one the dev loop compiles
-/// (`app_flutter.dev_plugin_registrant.android.dart`), written by the same
-/// generator, with `target_platform = android`, as the build's own registrant;
-/// the workspace builds in `-c dbg` so that file is an output of the app.
+/// The Dart registrant is `app_dart_registrant.dart`, symlinked from the
+/// `app_flutter_plugin_registrant.dart` file `generate_dart_plugin_registrant`
+/// writes for the Android-configured `flutter_application` and passes to
+/// `FlutterKernelCompile` under `-Dflutter.dart_plugin_registrant=`.
 library;
 
 import 'dart:io';
@@ -23,7 +23,7 @@ const _dartPluginClass = 'SharedPreferencesAndroid';
 const _javaPluginClass =
     'io.flutter.plugins.sharedpreferences.SharedPreferencesPlugin';
 
-const _dartRegistrant = 'app_flutter.dev_plugin_registrant.android.dart';
+const _dartRegistrant = 'app_dart_registrant.dart';
 const _javaRegistrant =
     'app_registrant/io/flutter/plugins/GeneratedPluginRegistrant.java';
 

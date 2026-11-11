@@ -8,6 +8,7 @@ load(
 )
 load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(":android_cc_toolchain.bzl", "declare_android_cc_toolchains")
+load(":dart_registrant.bzl", "android_dart_registrant")
 
 exports_files(["pubspec.lock"])
 
@@ -30,10 +31,19 @@ flutter_android_registrant(
     application = ":app_flutter",
 )
 
+# The Android-configured Dart registrant `generate_dart_plugin_registrant` writes.
+android_dart_registrant(
+    name = "app_dart_registrant",
+    registrant = ":app_registrant",
+)
+
 build_test(
     name = "android_registrant_build_test",
     size = "small",
-    targets = [":app_registrant"],
+    targets = [
+        ":app_dart_registrant",
+        ":app_registrant",
+    ],
 )
 
 dart_analysis_options(
@@ -58,14 +68,12 @@ flutter_library(
 )
 
 # Reads the generated Dart and Java plugin registrants and fails unless
-# `shared_preferences_android` is registered in both. The Dart one is the
-# Android registrant the dev loop compiles (an output of the app in `-c dbg`,
-# which `.bazelrc` selects); the Java one is `flutter_android_registrant`'s.
+# `shared_preferences_android` is registered in both.
 dart_test(
     name = "registrants_test",
     size = "small",
     data = [
-        ":app_flutter",
+        ":app_dart_registrant",
         ":app_registrant",
     ],
     main = "test/registrants_test.dart",
