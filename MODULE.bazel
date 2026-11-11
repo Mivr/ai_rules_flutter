@@ -416,6 +416,19 @@ flutter_tool_deps.pub(
 )
 use_repo(flutter_tool_deps, "dev_tool_deps", "gen_l10n_deps")
 
+# Root-only (`dev_dependency = True`) registration on `flutter` so the root
+# workspace's repo-contents-cache check on `@@+flutter+dev_tool_deps__*` keeps
+# resolving a `flutter_pub_package` spoke while consumer graphs never see it.
+flutter_dev = use_extension(
+    "//flutter:extensions.bzl",
+    "flutter",
+    dev_dependency = True,
+)
+flutter_dev.pub(
+    name = "dev_tool_deps",
+    lock = "//tools/dev_tool:pubspec.lock",
+)
+
 # iOS device screenshots and the device tunnel deliberately use NO Python
 # toolchain: `//tools/ios_screenshot` builds `dart_binary` drivers that run
 # their `pymobiledevice3` programs through a host `python3` (a documented host
