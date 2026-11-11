@@ -237,10 +237,8 @@ void main() {}
       });
 
       test('allows a relative empty segment that names a declared source', () {
-        expect(
-          importsOf('demo/test/t.dart', "import '../lib/src//d.dart';"),
-          isEmpty,
-        );
+        const t = 'demo/test/t.dart';
+        expect(importsOf(t, "import '../lib/src//d.dart';"), isEmpty);
         expect(importsOf('demo/lib/m.dart', "import 'src//d.dart';"), isEmpty);
       });
 
@@ -250,13 +248,73 @@ void main() {}
         }
       });
 
-      test('refuses app-scheme overshoot as Uri resolution does', () {
-        for (final i in ['app/test/c_test.dart', 'app/bin/main.dart']) {
-          for (var n = 0; n <= 4; n++) {
-            final r = '${'../' * n}/app/lib/x.dart';
-            final u = Uri.parse('org-dartlang-app:///$i').resolve(r);
-            final got = importsOf(i, "import '$r';", {'app/lib/x.dart': lib});
-            if (u.pathSegments.first.isEmpty) expect(got, hasLength(1));
+      test('refuses app-scheme overshoots across kinds and depths', () {
+        const decoys = {'app/lib/x.dart': lib, 'x.dart': lib};
+        String msg(String f, String k, String u) =>
+            "flutter: $f $k '$u' is not a declared input.";
+        for (final (f, u) in const [
+          ('app/test/c_test.dart', '../..//app/lib/x.dart'),
+          ('app/test/c_test.dart', '../..//x.dart'),
+          ('app/bin/main.dart', '../..//app/lib/x.dart'),
+          ('app/test/sub/c_test.dart', '../../..//x.dart'),
+        ]) {
+          for (final k in const ['import', 'export', 'part']) {
+            expect(importsOf(f, "$k '$u';", decoys), [msg(f, k, u)]);
+          }
+          final ok = '${'../' * ('/'.allMatches(f).length - 1)}lib/x.dart';
+          final cond = "import '$ok' if (dart.library.io) '$u';";
+          expect(importsOf(f, cond, decoys), [msg(f, 'import', u)]);
+        }
+        const stg = 'stage/app/test/c_test.dart';
+        const esc = '../..//app/lib/x.dart';
+        const stgMap = {'stage/app/lib/x.dart': lib, 'stage/x.dart': lib};
+        final List<String> stgGot = check(
+          {...stgMap, stg: "import '$esc';\n"},
+          const ['stage'],
+        );
+        expect(stgGot, [msg(stg, 'import', esc)]);
+        const ct = 'app/test/c_test.dart';
+        expect(importsOf(ct, "import '../lib//x.dart';", decoys), isEmpty);
+        const bm = 'app/bin/main.dart';
+        expect(importsOf(bm, "import '../lib//x.dart';", decoys), isEmpty);
+        const sub = 'app/test/sub/c_test.dart';
+        expect(importsOf(sub, "import '../..//lib/x.dart';", decoys), isEmpty);
+        final String cMsg = msg(ct, 'import', '..//x.dart');
+        expect(importsOf(ct, "import '..//x.dart';", decoys), [cMsg]);
+      });
+
+      test('matches Uri.resolve verdict under the app scheme (table)', () {
+        const dirs =
+            ' test/ app/ app/test/ app/test/sub/ bin/ app/bin/ app/bin/sub/';
+        final decoys = <String, String>{
+          for (final String d in dirs.split(' ')) ...{
+            '${d}x.dart': lib,
+            '${d}app/lib/x.dart': lib,
+          },
+        };
+        decoys.forEach(write);
+        final List<String> keys = decoys.keys.toList();
+        const importers =
+            'test/t.dart app/test/c_test.dart app/test/sub/c_test.dart '
+            'bin/main.dart app/bin/main.dart app/bin/sub/main.dart';
+        const tails =
+            '..//x.dart ..//app/lib/x.dart .//x.dart '
+            '..///x.dart ..//../x.dart ..///../x.dart';
+        for (final String from in importers.split(' ')) {
+          final Uri base = Uri.parse('org-dartlang-app:///$from');
+          for (final k in const ['import', 'part']) {
+            for (var n = 0; n <= 4; n++) {
+              for (final String tail in tails.split(' ')) {
+                final ref = '${'../' * n}$tail';
+                write(from, "$k '$ref';\n");
+                final List<String> got = findDisallowedFlutterDirectives(
+                  [...keys, from],
+                  const [],
+                );
+                final bool bad = base.resolve(ref).pathSegments.first.isEmpty;
+                expect(got.isNotEmpty, bad, reason: '$k $ref from $from');
+              }
+            }
           }
         }
       });
@@ -264,27 +322,19 @@ void main() {}
       test('counts an empty segment before .. as a segment', () {
         // The front end reads `src//../e.dart` as `src/e.dart`; skipping the
         // empty segment would name `lib/e.dart` instead.
-        expect(
-          importsOf('demo/lib/m.dart', "import 'src//../e.dart';", {
-            'demo/lib/e.dart': lib,
-          }),
-          hasLength(1),
-        );
-        expect(
-          importsOf('demo/lib/m.dart', "import 'src//../e.dart';", {
-            'demo/lib/src/e.dart': lib,
-          }),
-          isEmpty,
-        );
+        const m = 'demo/lib/m.dart';
+        const e1 = {'demo/lib/e.dart': lib};
+        const e2 = {'demo/lib/src/e.dart': lib};
+        expect(importsOf(m, "import 'src//../e.dart';", e1), hasLength(1));
+        expect(importsOf(m, "import 'src//../e.dart';", e2), isEmpty);
       });
 
       test(
         'refuses relative empty-segment overshoots past package root (table)',
         () {
-          const decoys = {
-            'demo/lib/x.dart': lib,
-            'demo/x.dart': lib,
-            'x.dart': lib,
+          final decoys = <String, String>{
+            for (final String p in 'demo/lib/ demo/ '.split(' '))
+              '${p}x.dart': lib,
           };
           for (final (from, tgt) in const [
             ('demo/lib/c.dart', 'c.dart'),
@@ -310,13 +360,11 @@ void main() {}
       test(
         'refuses relative empty-segment overshoots at every depth and kind',
         () {
-          const decoys = {
-            'demo/lib/x.dart': lib,
-            'demo/x.dart': lib,
-            'x.dart': lib,
-            'demo/lib/y.dart': lib,
-            'demo/y.dart': lib,
-            'y.dart': lib,
+          final decoys = <String, String>{
+            for (final String p in 'demo/lib/ demo/ '.split(' ')) ...{
+              '${p}x.dart': lib,
+              '${p}y.dart': lib,
+            },
           };
           for (final (from, refs) in [
             ('demo/lib/c.dart', ['..//x.dart']),
@@ -331,14 +379,8 @@ void main() {}
                 expect(importsOf(from, "$k '$ref';", decoys), hasLength(1));
               }
               final d = from.contains('src') ? 'd.dart' : 'demo.dart';
-              expect(
-                importsOf(
-                  from,
-                  "import '$d' if (dart.library.io) '$ref';",
-                  decoys,
-                ),
-                hasLength(1),
-              );
+              final cond = "import '$d' if (dart.library.io) '$ref';";
+              expect(importsOf(from, cond, decoys), hasLength(1));
             }
           }
         },
@@ -362,18 +404,14 @@ void main() {}
       });
 
       test('refuses leading-slash spellings that stay unsafe', () {
-        for (final directive in [
-          "export '/src/missing.dart';",
-          "export '//src/d.dart';",
-          "export '/src//d.dart';",
-          "export '/src/';",
-          "export '/../d.dart';",
-          "export '/etc/passwd';",
-        ]) {
+        const bad =
+            '/src/missing.dart //src/d.dart /src//d.dart '
+            '/src/ /../d.dart /etc/passwd';
+        for (final String u in bad.split(' ')) {
           expect(
-            importsOf('demo/lib/demo.dart', directive),
+            importsOf('demo/lib/demo.dart', "export '$u';"),
             hasLength(1),
-            reason: directive,
+            reason: u,
           );
         }
         expect(
@@ -385,18 +423,13 @@ void main() {}
 
     test('refuses a file: import of an undeclared workspace file', () {
       write('pkg/lib/secret.dart', 'const secret = 1;\n');
+      const u = 'file:///proc/self/cwd/pkg/lib/secret.dart';
       final _Errors errors = check({
-        'lib/main.dart': """
-import 'file:///proc/self/cwd/pkg/lib/secret.dart';
-void main() {}
-""",
+        'lib/main.dart': "import '$u';\nvoid main() {}\n",
       });
       expect(errors, hasLength(1));
       expect(errors.single, contains('lib/main.dart'));
-      expect(
-        errors.single,
-        contains("import 'file:///proc/self/cwd/pkg/lib/secret.dart'"),
-      );
+      expect(errors.single, contains("import '$u'"));
     });
 
     test('refuses a file: import of a host path outside the workspace', () {
@@ -449,13 +482,8 @@ void main() {}
     });
 
     test('refuses percent-encoded escapes naming a host file', () {
-      final _Errors errors = check({
-        'lib/main.dart': """
-import 'file:///etc%2fhostname';
-void main() {}
-""",
-      });
-      expect(errors, hasLength(1));
+      const m = "import 'file:///etc%2fhostname';\nvoid main() {}\n";
+      expect(check({'lib/main.dart': m}), hasLength(1));
     });
 
     test('refuses a relative import climbing out of the declared inputs', () {
@@ -488,15 +516,13 @@ void main() {}
     test('refuses a file: URI in an untaken conditional branch', () {
       const helper = 'int get answer => 42;\n';
       write('lib/helper.dart', helper);
-      final _Errors errors = check({
-        'lib/helper.dart': helper,
-        'lib/main.dart': """
-import 'helper.dart' if (dart.library.html) 'file:///etc/hostname';
-import 'helper.dart';
-void main() {}
-""",
-      });
-      expect(errors, hasLength(1));
+      const src =
+          "import 'helper.dart' if (dart.library.html) 'file:///etc/hostname';\n"
+          "import 'helper.dart';\nvoid main() {}\n";
+      expect(
+        check({'lib/helper.dart': helper, 'lib/main.dart': src}),
+        hasLength(1),
+      );
     });
 
     test('refuses file: exports and parts', () {
@@ -513,15 +539,13 @@ void main() {}
     test('refuses an app-scheme URI naming no declared key', () {
       const helper = 'int get answer => 42;\n';
       write('lib/helper.dart', helper);
-      final _Errors errors = check({
-        'lib/helper.dart': helper,
-        'lib/main.dart': """
-import 'org-dartlang-app:///other/unlisted.dart';
-import 'helper.dart';
-void main() {}
-""",
-      });
-      expect(errors, hasLength(1));
+      const src =
+          "import 'org-dartlang-app:///other/unlisted.dart';\n"
+          "import 'helper.dart';\nvoid main() {}\n";
+      expect(
+        check({'lib/helper.dart': helper, 'lib/main.dart': src}),
+        hasLength(1),
+      );
     });
 
     test('accepts a generated part and its part of, in both directions', () {
@@ -581,35 +605,34 @@ void main() {}
 
     test('accepts a malformed source with no disallowed directive', () {
       // The compiler accepts malformed sources, so a clean one is not refused.
+      final bytes = <int>[
+        ...'// '.codeUnits,
+        0xff,
+        ...'\nvoid main() {}\n'.codeUnits,
+      ];
       File('${work.path}/lib/main.dart')
         ..createSync(recursive: true)
-        ..writeAsBytesSync([
-          ...'// comment '.codeUnits,
-          0xff,
-          ...'\nvoid main() {}\n'.codeUnits,
-        ]);
-      final _Errors errors = findDisallowedFlutterDirectives([
-        'lib/main.dart',
-      ], const []);
-      expect(errors, isEmpty);
+        ..writeAsBytesSync(bytes);
+      expect(
+        findDisallowedFlutterDirectives(['lib/main.dart'], const []),
+        isEmpty,
+      );
     });
 
     test('accepts a valid source importing a malformed declared sibling', () {
       // A skipped file would be missing from the declared set, so a valid
       // importer of a malformed sibling would be refused as undeclared.
+      final bytes = <int>[
+        ...'// '.codeUnits,
+        0xff,
+        ...'\nint get answer => 42;\n'.codeUnits,
+      ];
       File('${work.path}/lib/sibling.dart')
         ..createSync(recursive: true)
-        ..writeAsBytesSync([
-          ...'// comment '.codeUnits,
-          0xff,
-          ...'\nint get answer => 42;\n'.codeUnits,
-        ]);
+        ..writeAsBytesSync(bytes);
       write('lib/main.dart', "import 'sibling.dart';\nvoid main() {}\n");
-      final _Errors errors = findDisallowedFlutterDirectives([
-        'lib/main.dart',
-        'lib/sibling.dart',
-      ], const []);
-      expect(errors, isEmpty);
+      const srcs = ['lib/main.dart', 'lib/sibling.dart'];
+      expect(findDisallowedFlutterDirectives(srcs, const []), isEmpty);
     });
   });
 
@@ -694,6 +717,15 @@ void main() {}
         script.path,
         ...extraArgs,
       ]);
+    }
+
+    File fakeReads(String name, List<String> paths) {
+      final String body = [for (final p in paths) '+file://$p'].join(r'\n');
+      final out = 'result $_id\\n$_id\\n$body\\n$_id app.dill 0';
+      return fakeCompiler(
+        name,
+        'import "dart:io";\nvoid main() => stdout.writeln("$out");\n',
+      );
     }
 
     test('a successful compile prints nothing', () async {
@@ -802,17 +834,10 @@ void main() {}
         writeWork('lib/main.dart', 'void main() {}\n');
         final output = File('${work.path}/app.dill')
           ..writeAsStringSync('stale bytes');
-        final File script = fakeCompiler(
-          'reader',
-          'import "dart:io";\n'
-              'void main() {\n'
-              '  stdout.writeln("result $_id");\n'
-              '  stdout.writeln("$_id");\n'
-              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
-              '  stdout.writeln("+file:///etc/hostname");\n'
-              '  stdout.writeln("$_id app.dill 0");\n'
-              '}\n',
-        );
+        final File script = fakeReads('reader', [
+          '${work.path}/lib/main.dart',
+          '/etc/hostname',
+        ]);
         final _Run r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
@@ -833,17 +858,10 @@ void main() {}
       writeWork('lib/main.dart', 'void main() {}\n');
       final summary = File('${work.path}/app_summary.dill')
         ..writeAsStringSync('compiled bytes');
-      final File script = fakeCompiler(
-        'import_reader',
-        'import "dart:io";\n'
-            'void main() {\n'
-            '  stdout.writeln("result $_id");\n'
-            '  stdout.writeln("$_id");\n'
-            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
-            '  stdout.writeln("+file://${summary.path}");\n'
-            '  stdout.writeln("$_id app.dill 0");\n'
-            '}\n',
-      );
+      final File script = fakeReads('import_reader', [
+        '${work.path}/lib/main.dart',
+        summary.path,
+      ]);
       final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
@@ -864,17 +882,10 @@ void main() {}
       writeWork('lib/main.dart', 'void main() {}\n');
       final summary = File('${work.path}/app_summary.dill')
         ..writeAsStringSync('compiled bytes');
-      final File script = fakeCompiler(
-        'manifest_only_reader',
-        'import "dart:io";\n'
-            'void main() {\n'
-            '  stdout.writeln("result $_id");\n'
-            '  stdout.writeln("$_id");\n'
-            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
-            '  stdout.writeln("+file://${summary.path}");\n'
-            '  stdout.writeln("$_id app.dill 0");\n'
-            '}\n',
-      );
+      final File script = fakeReads('manifest_only_reader', [
+        '${work.path}/lib/main.dart',
+        summary.path,
+      ]);
       final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
@@ -896,17 +907,10 @@ void main() {}
       final sneak = File('${work.path}/sneak.dill')..writeAsStringSync('sneak');
       final output = File('${work.path}/app.dill')
         ..writeAsStringSync('stale bytes');
-      final File script = fakeCompiler(
-        'argv_spoof',
-        'import "dart:io";\n'
-            'void main() {\n'
-            '  stdout.writeln("result $_id");\n'
-            '  stdout.writeln("$_id");\n'
-            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
-            '  stdout.writeln("+file://${sneak.path}");\n'
-            '  stdout.writeln("$_id app.dill 0");\n'
-            '}\n',
-      );
+      final File script = fakeReads('argv_spoof', [
+        '${work.path}/lib/main.dart',
+        sneak.path,
+      ]);
       final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
@@ -938,17 +942,10 @@ void main() {}
         ..createSync(recursive: true);
       final output = File('${work.path}/app.dill')
         ..writeAsStringSync('stale bytes');
-      final File script = fakeCompiler(
-        'mirror_reader',
-        'import "dart:io";\n'
-            'void main() {\n'
-            '  stdout.writeln("result $_id");\n'
-            '  stdout.writeln("$_id");\n'
-            '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
-            '  stdout.writeln("+file://${mirror.path}/evil.dart");\n'
-            '  stdout.writeln("$_id app.dill 0");\n'
-            '}\n',
-      );
+      final File script = fakeReads('mirror_reader', [
+        '${work.path}/lib/main.dart',
+        '${mirror.path}/evil.dart',
+      ]);
       final _Run r = await run([
         '--declared-inputs',
         writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
@@ -974,17 +971,10 @@ void main() {}
           ..writeAsStringSync('decoy bytes');
         final output = File('${work.path}/app.dill')
           ..writeAsStringSync('stale bytes');
-        final File script = fakeCompiler(
-          'spoofed_output',
-          'import "dart:io";\n'
-              'void main() {\n'
-              '  stdout.writeln("result $_id");\n'
-              '  stdout.writeln("$_id");\n'
-              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
-              '  stdout.writeln("+file:///etc/hostname");\n'
-              '  stdout.writeln("$_id app.dill 0");\n'
-              '}\n',
-        );
+        final File script = fakeReads('spoofed_output', [
+          '${work.path}/lib/main.dart',
+          '/etc/hostname',
+        ]);
         final _Run r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart'], [], [], [], 'app.dill'),
@@ -1008,18 +998,11 @@ void main() {}
         writeWork('lib/main.dart', 'void main() {}\n');
         final summary = File('${work.path}/app_summary.dill')
           ..writeAsStringSync('compiled bytes');
-        final File script = fakeCompiler(
-          'import_sneak_reader',
-          'import "dart:io";\n'
-              'void main() {\n'
-              '  stdout.writeln("result $_id");\n'
-              '  stdout.writeln("$_id");\n'
-              '  stdout.writeln("+file://${work.path}/lib/main.dart");\n'
-              '  stdout.writeln("+file://${summary.path}");\n'
-              '  stdout.writeln("+file://${work.path}/lib/sneak.dart");\n'
-              '  stdout.writeln("$_id app.dill 0");\n'
-              '}\n',
-        );
+        final File script = fakeReads('import_sneak_reader', [
+          '${work.path}/lib/main.dart',
+          summary.path,
+          '${work.path}/lib/sneak.dart',
+        ]);
         final _Run r = await run([
           '--declared-inputs',
           writeManifest(['lib/main.dart'], [], ['app_summary.dill']),
@@ -1340,21 +1323,15 @@ void main() {}
     );
 
     test('withForcedDependencyReport inserts the flag before the entry', () {
-      expect(withForcedDependencyReport([]), [
-        '--print-incremental-dependencies',
-      ]);
+      const flag = '--print-incremental-dependencies';
+      expect(withForcedDependencyReport([]), [flag]);
       expect(withForcedDependencyReport(['script.dart']), [
         'script.dart',
-        '--print-incremental-dependencies',
+        flag,
       ]);
       expect(
         withForcedDependencyReport(['snap', '--incremental', 'main.dart']),
-        [
-          'snap',
-          '--incremental',
-          '--print-incremental-dependencies',
-          'main.dart',
-        ],
+        ['snap', '--incremental', flag, 'main.dart'],
       );
     });
 
