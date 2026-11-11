@@ -17,9 +17,9 @@ flutter_application(
 
 flutter_android_aar(
     name = "module_aar",
+    package_name = "com.example.module",
     android_abi = "x86_64",
     application = ":module",
-    package_name = "com.example.module",
 )
 
 filegroup(
