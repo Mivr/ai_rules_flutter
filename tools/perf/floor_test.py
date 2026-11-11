@@ -378,6 +378,64 @@ class FrontendTest(unittest.TestCase):
         self.assertEqual(1.0, server.baseline)
 
 
+class FrontendDiagTest(unittest.TestCase):
+    def server(self, lines, stderr=""):
+        class Proc:
+            pid = 1
+            stdin = io.StringIO()
+            stdout = iter(lines)
+            returncode = None
+        Proc.stdin.write = lambda text: None
+        Proc.stdin.flush = lambda: None
+
+        def popen(*args, **kwargs):
+            kwargs["stderr"].write(stderr)
+            return Proc()
+        return floor_run.FrontendServer(["fe"], popen=popen)
+
+    def failure(self, lines, stderr=""):
+        server = self.server(lines, stderr)
+        with self.assertRaises(floor.FloorError) as ctx:
+            server._checked()
+        return str(ctx.exception)
+
+    def test_fields_and_diagnostics(self):
+        msg = self.failure(["result K\n", "bad one\n", "bad two\n",
+                            "K out.dill 2\n"])
+        for want in ("bad one", "bad two", "out.dill 2"):
+            self.assertIn(want, msg)
+
+    def test_no_output_file(self):
+        msg = self.failure(["result K\n", "oops\n", "K\n"])
+        self.assertIn("no output file", msg)
+        self.assertIn("oops", msg)
+
+    def test_stderr_tail_is_last_20(self):
+        err = "".join("err%d\n" % i for i in range(50))
+        msg = self.failure(["result K\n", "K\n"], err)
+        self.assertIn("err49", msg)
+        self.assertIn("err30", msg)
+        self.assertNotIn("err29\n", msg + "\n")
+
+    def test_many_diagnostics_bounded(self):
+        lines = ["result K\n"] + ["diag%03d %s\n" % (i, "x" * 60)
+                                  for i in range(100)] + ["K out.dill 7\n"]
+        msg = self.failure(lines)
+        self.assertIn("diag000", msg)
+        self.assertNotIn("diag030", msg)
+        self.assertLess(len(msg), 4000)
+        self.assertIn("out.dill 7", msg)
+
+    def test_ended_without_result(self):
+        msg = self.failure(["noise\n"], "boom\nlast\n")
+        self.assertIn("without a result", msg)
+        self.assertIn("last", msg)
+
+    def test_passing_compile_unchanged(self):
+        server = self.server(["result K\n", "K out.dill 0\n"])
+        server._checked()
+
+
 class FlowTest(unittest.TestCase):
     def args(self, **extra):
         base = dict(work=tempfile.mkdtemp(), floor="on")

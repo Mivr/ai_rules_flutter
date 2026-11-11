@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -55,35 +56,87 @@ def process_cpu(pid):
     return 60 * float(minutes or 0) + float(seconds)
 
 
+MAX_DIAGNOSTICS = 30
+STDERR_TAIL = 20
+MAX_MESSAGE = 4000
+
+
+def cap_middle(text, limit):
+    """text cut in the middle to at most limit characters."""
+    if len(text) <= limit:
+        return text
+    mark = "\n...[cut]...\n"
+    keep = limit - len(mark)
+    return text[:keep // 2] + mark + text[len(text) - (keep - keep // 2):]
+
+
+def error_message(fields, diagnostics, stderr_tail):
+    """Cause text: closing fields, diagnostics, stderr; <= MAX_MESSAGE."""
+    head = "frontend_server reported errors: %s" % (
+        " ".join(fields) or "no output file")
+    parts = []
+    if diagnostics:
+        parts.append("diagnostics:\n" + "\n".join(diagnostics))
+    if stderr_tail:
+        parts.append("stderr:\n" + stderr_tail)
+    body = cap_middle("\n".join(parts), MAX_MESSAGE - len(head) - 1)
+    return head + ("\n" + body if body else "")
+
+
 class FrontendServer:
     """Resident ``frontend_server`` speaking its incremental protocol."""
 
     def __init__(self, argv, popen=subprocess.Popen):
+        self.errlog = tempfile.TemporaryFile("w+")
         self.proc = popen(list(argv), stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, text=True,
-                          stderr=subprocess.DEVNULL)
+                          stderr=self.errlog)
         self.baseline = None
 
     def _send(self, text):
         self.proc.stdin.write(text)
         self.proc.stdin.flush()
 
+    def stderr_tail(self):
+        """The last STDERR_TAIL stderr lines of the server, as text."""
+        text = ""
+        try:
+            self.errlog.flush()
+            size = os.fstat(self.errlog.fileno()).st_size
+            text = os.pread(self.errlog.fileno(), size, 0).decode(
+                "utf-8", "replace")
+        except (OSError, ValueError):
+            pass  # the log is only a diagnostic aid
+        pipe = getattr(self.proc, "stderr", None)
+        if not text and pipe is not None and hasattr(pipe, "read"):
+            text = pipe.read() or ""
+        return "\n".join(text.splitlines()[-STDERR_TAIL:])
+
     def _read_result(self):
-        """Waits for ``result <key>``; returns the closing line's fields."""
+        """Waits for ``result <key>``; returns (fields, diagnostics).
+
+        Diagnostics are the lines between ``result <key>`` and the closing
+        line, in order, at most the first MAX_DIAGNOSTICS.
+        """
         key = None
+        diagnostics = []
         for line in self.proc.stdout:
             line = line.rstrip("\n")
             if key is None and line.startswith("result "):
                 key = line.split(" ", 1)[1]
             elif key is not None and line.startswith(key):
-                return line[len(key):].split()
-        raise FloorError("frontend_server ended without a result")
+                return line[len(key):].split(), diagnostics
+            elif key is not None and len(diagnostics) < MAX_DIAGNOSTICS:
+                diagnostics.append(line)
+        tail = self.stderr_tail()
+        raise FloorError("frontend_server ended without a result"
+                         + ("\nstderr:\n" + tail if tail else ""))
 
     def _checked(self):
-        fields = self._read_result()
+        fields, diagnostics = self._read_result()
         if len(fields) < 2 or fields[-1] != "0":
-            raise FloorError("frontend_server reported errors: %s"
-                             % " ".join(fields))
+            raise FloorError(error_message(
+                fields, diagnostics, self.stderr_tail()))
 
     def compile(self, entry):
         """First full compile; accepted so the next one is incremental."""
