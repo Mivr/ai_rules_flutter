@@ -113,31 +113,39 @@ jobs:
             --flags="$BAZEL_FLAGS"
       - name: Validate A/B inputs
         env:
+          AB: ${{ inputs.ab }}
           BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+          LOCKFILE: ${{ inputs.lockfile }}
+          MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/ab.py" validate \
-            --mode "${{ inputs.mode }}" \
-            --ab "${{ inputs.ab }}" \
-            --lockfile "${{ inputs.lockfile }}" \
+            --mode "$MODE" \
+            --ab "$AB" \
+            --lockfile "$LOCKFILE" \
             --flags="$BAZEL_FLAGS"
       - name: Generate pristine monorepos
         env:
+          AB: ${{ inputs.ab }}
           BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+          LOCKFILE: ${{ inputs.lockfile }}
+          MODE: ${{ inputs.mode }}
+          SEED: ${{ inputs.seed }}
+          TARGET_LOC: ${{ inputs.target_loc }}
         run: |
           set -euo pipefail
           refs="head"
-          if [ "${{ inputs.mode }}" = "compare" ]; then refs="base head"; fi
+          if [ "$MODE" = "compare" ]; then refs="base head"; fi
           for ref in $refs; do
             python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/gen_monorepo.py" generate \
-              --target-loc "${{ inputs.target_loc }}" \
-              --seed "${{ inputs.seed }}" \
+              --target-loc "$TARGET_LOC" \
+              --seed "$SEED" \
               --rules-flutter "$GITHUB_WORKSPACE/rules-$ref" \
               --out "$RUNNER_TEMP/ws-$ref-pristine"
           done
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
-          if [ "${{ inputs.mode }}" = "compare" ]; then
-            if [ "${{ inputs.lockfile }}" = "committed" ]; then
+          if [ "$MODE" = "compare" ]; then
+            if [ "$LOCKFILE" = "committed" ]; then
               for ref in $refs; do
                 python3 "$tools/ab.py" lock \
                   --pristine "$RUNNER_TEMP/ws-$ref-pristine" \
@@ -147,8 +155,8 @@ jobs:
             python3 "$tools/bench_flags.py" \
               --flags="$BAZEL_FLAGS" \
               --workspace "$RUNNER_TEMP/ws-head-pristine"
-          elif [ "${{ inputs.ab }}" = "off" ]; then
-            if [ "${{ inputs.lockfile }}" = "committed" ]; then
+          elif [ "$AB" = "off" ]; then
+            if [ "$LOCKFILE" = "committed" ]; then
               python3 "$tools/ab.py" lock \
                 --pristine "$RUNNER_TEMP/ws-head-pristine" \
                 --lock-out "$RUNNER_TEMP/lock-out"
@@ -158,8 +166,8 @@ jobs:
               --workspace "$RUNNER_TEMP/ws-head-pristine"
           else
             need_lock=0
-            if [ "${{ inputs.lockfile }}" = "committed" ]; then need_lock=1; fi
-            if [ "${{ inputs.ab }}" = "lockfile" ]; then need_lock=1; fi
+            if [ "$LOCKFILE" = "committed" ]; then need_lock=1; fi
+            if [ "$AB" = "lockfile" ]; then need_lock=1; fi
             if [ "$need_lock" = "1" ]; then
               python3 "$tools/ab.py" lock \
                 --pristine "$RUNNER_TEMP/ws-head-pristine" \
@@ -168,7 +176,7 @@ jobs:
             rm -rf "$RUNNER_TEMP/ws-control-pristine" "$RUNNER_TEMP/ws-treatment-pristine"
             cp -a "$RUNNER_TEMP/ws-head-pristine" "$RUNNER_TEMP/ws-control-pristine"
             cp -a "$RUNNER_TEMP/ws-head-pristine" "$RUNNER_TEMP/ws-treatment-pristine"
-            if [ "${{ inputs.ab }}" = "flags" ]; then
+            if [ "$AB" = "flags" ]; then
               if [ "$need_lock" = "0" ]; then
                 rm -f "$RUNNER_TEMP/ws-control-pristine/MODULE.bazel.lock" \
                   "$RUNNER_TEMP/ws-treatment-pristine/MODULE.bazel.lock"
@@ -188,6 +196,8 @@ jobs:
           fi
       - name: Build, edit, replay
         if: inputs.mode == 'compare'
+        env:
+          REPEATS: ${{ inputs.repeats }}
         # One repeat at a time: run_rep.py resets the workspace from the
         # pristine copy before each config, then per config builds all three
         # scenarios first (clean, app_edit, core_edit), makes bazel-out
@@ -200,7 +210,7 @@ jobs:
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
           for ref in base head; do
-            for rep in $(seq 1 "${{ inputs.repeats }}"); do
+            for rep in $(seq 1 "$REPEATS"); do
               rm -rf "$RUNNER_TEMP/out-$ref-$rep" "$RUNNER_TEMP/run-$ref-$rep"
               python3 "$tools/run_rep.py" --tools "$tools" \
                 --pristine "$RUNNER_TEMP/ws-$ref-pristine" \
@@ -214,12 +224,17 @@ jobs:
       - name: Summarize repeats
         if: inputs.mode == 'compare'
         env:
+          BASE_REF: ${{ inputs.base_ref }}
           BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+          HEAD_REF: ${{ inputs.head_ref }}
+          REPEATS: ${{ inputs.repeats }}
+          SEED: ${{ inputs.seed }}
+          TARGET_LOC: ${{ inputs.target_loc }}
         run: |
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
-          meta="$(python3 - "$GITHUB_WORKSPACE/tools-src/tools/perf" "$RUNNER_TEMP" "${{ inputs.target_loc }}" "${{ inputs.seed }}" \
-            "${{ inputs.repeats }}" "${{ inputs.base_ref }}" "${{ inputs.head_ref }}" <<'EOF'
+          meta="$(python3 - "$GITHUB_WORKSPACE/tools-src/tools/perf" "$RUNNER_TEMP" "$TARGET_LOC" "$SEED" \
+            "$REPEATS" "$BASE_REF" "$HEAD_REF" <<'EOF'
           import json
           import os
           import sys
@@ -262,6 +277,9 @@ jobs:
           retention-days: 3
       - name: Measure speed-of-light (head only)
         if: inputs.mode == 'sol'
+        env:
+          AB: ${{ inputs.ab }}
+          REPEATS: ${{ inputs.repeats }}
         # Per repeat and config: fresh workspace copy and output base, then
         # the clean scenario runs as a measured `bazel --batch build`
         # followed by the hand-run chain from that build's execution log,
@@ -297,8 +315,8 @@ jobs:
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
           failed=0
-          if [ "${{ inputs.ab }}" = "off" ]; then
-            for rep in $(seq 1 "${{ inputs.repeats }}"); do
+          if [ "$AB" = "off" ]; then
+            for rep in $(seq 1 "$REPEATS"); do
               rm -rf "$RUNNER_TEMP/sol-out-$rep" "$RUNNER_TEMP/sol-run-$rep"
               python3 "$tools/sol.py" run --tools "$tools" \
                 --pristine "$RUNNER_TEMP/ws-head-pristine" \
@@ -318,7 +336,7 @@ jobs:
               --out-base-root-control "$RUNNER_TEMP/ab-out-control" \
               --out-base-root-treatment "$RUNNER_TEMP/ab-out-treatment" \
               --results "$GITHUB_WORKSPACE/ab-results" \
-              --repeats "${{ inputs.repeats }}" \
+              --repeats "$REPEATS" \
               --config device_release --config sim_debug \
               || failed=1
           fi
@@ -328,20 +346,25 @@ jobs:
         # finished flows and the recorded reasons) is always written.
         if: ${{ !cancelled() && inputs.mode == 'sol' }}
         env:
+          AB: ${{ inputs.ab }}
           BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+          LOCKFILE: ${{ inputs.lockfile }}
+          REPEATS: ${{ inputs.repeats }}
+          SEED: ${{ inputs.seed }}
+          TARGET_LOC: ${{ inputs.target_loc }}
         run: |
           set -euo pipefail
           tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
           sha="$(git -C "$GITHUB_WORKSPACE/rules-head" rev-parse HEAD)"
-          if [ "${{ inputs.ab }}" = "off" ]; then
+          if [ "$AB" = "off" ]; then
             python3 "$tools/sol.py" summarize \
               --results "$GITHUB_WORKSPACE/sol-results" \
               --sha "$sha" \
-              --repeats "${{ inputs.repeats }}" \
-              --target-loc "${{ inputs.target_loc }}" \
-              --seed "${{ inputs.seed }}" \
+              --repeats "$REPEATS" \
+              --target-loc "$TARGET_LOC" \
+              --seed "$SEED" \
               --bazel-flags="$BAZEL_FLAGS" \
-              --lockfile "${{ inputs.lockfile }}" \
+              --lockfile "$LOCKFILE" \
               --out "$GITHUB_WORKSPACE/ios-sol.json"
             {
               echo '```json'
@@ -352,12 +375,12 @@ jobs:
             python3 "$tools/ab.py" summarize \
               --results "$GITHUB_WORKSPACE/ab-results" \
               --sha "$sha" \
-              --repeats "${{ inputs.repeats }}" \
-              --target-loc "${{ inputs.target_loc }}" \
-              --seed "${{ inputs.seed }}" \
-              --ab "${{ inputs.ab }}" \
+              --repeats "$REPEATS" \
+              --target-loc "$TARGET_LOC" \
+              --seed "$SEED" \
+              --ab "$AB" \
               --bazel-flags="$BAZEL_FLAGS" \
-              --lockfile "${{ inputs.lockfile }}" \
+              --lockfile "$LOCKFILE" \
               --out "$GITHUB_WORKSPACE/ios-ab.json"
             {
               echo '```json'
