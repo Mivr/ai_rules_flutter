@@ -8,6 +8,7 @@ load(":android_aar_test.bzl", "android_aar_test_suite")
 load(":android_debug_signing_test.bzl", "android_debug_signing_test_suite")
 load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
+load(":android_shared_engine_test.bzl", "android_shared_engine_test_suite")
 load(":aot_flags_test.bzl", "aot_flags_test_suite")
 load(":app_entrypoint_test.bzl", "app_entrypoint_test_suite")
 load(":apple_objc_deps_test.bzl", "apple_objc_deps_test_suite")
@@ -429,6 +430,8 @@ action_inputs_test_suite(name = "action_inputs_test")
 android_pure_go_test_suite(name = "android_pure_go_test")
 
 android_aar_test_suite(name = "android_aar_test")
+
+android_shared_engine_test_suite(name = "android_shared_engine_test")
 
 android_release_signing_test_suite(name = "android_release_signing_test")
 

@@ -12,7 +12,7 @@ The fixture shapes mirror real pub.dev plugins:
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("@rules_dart//dart/pub:yaml_parser.bzl", "pubspec_sdk_constraint_error")
-load("//flutter/private:flutter_pub_android_package.bzl", "android_package_repo_name", "android_spoke_alias_content")
+load("//flutter/private:flutter_pub_android_package.bzl", "android_build_config_source", "android_package_repo_name", "android_spoke_alias_content")
 load(
     "//flutter/private:flutter_pub_package.bzl",
     "apply_overlay_substitutions",
@@ -156,12 +156,9 @@ def _record_android_subpackage_test_impl(ctx):
         "_build_config/com/llfbandit/record/BuildConfig.java" in content,
         "expected BuildConfig against the plugin namespace in:\n" + content,
     )
-    asserts.true(
-        env,
-        'load("@bazel_skylib//rules:write_file.bzl", "write_file")' in content,
-        content,
-    )
-    asserts.true(env, "write_file(\n    name = \"_build_config_src\"," in content, content)
+    asserts.true(env, '+ ["_build_config/com/llfbandit/record/BuildConfig.java"]' in content, content)
+    for gone in ("name = \"_engine\"", "_build_config_src", "name = \"_build_config\"", "write_file", "java_library"):
+        asserts.false(env, gone in content, "%s must not be declared per plugin:\n%s" % (gone, content))
     asserts.false(env, "genrule" in content, content)
     asserts.false(env, "cat >" in content, content)
 
@@ -176,7 +173,8 @@ def _record_android_subpackage_test_impl(ctx):
     # The androidx compile baseline comes from the engine target's exports
     # (mirroring the Flutter embedding POM), not from a per-plugin list —
     # a dep-less build.gradle still compiles against NotificationCompat etc.
-    asserts.true(env, '":_engine",' in content, content)
+    asserts.true(env, '"@rules_flutter//flutter:android_plugin_engine",' in content, content)
+    asserts.false(env, '":_engine"' in content, content)
     asserts.false(
         env,
         "@rules_android_maven//:androidx" in content,
@@ -260,10 +258,47 @@ def _empty_subpackage_test_impl(ctx):
     asserts.true(env, "srcs = []" in content, content)
     asserts.false(env, "resource_files" in content, content)
     asserts.false(env, "flutter_android_engine" in content, content)
+    asserts.false(env, "android_plugin_engine" in content, content)
 
     return unittest.end(env)
 
 empty_subpackage_test = unittest.make(_empty_subpackage_test_impl)
+
+def _build_config_source_test_impl(ctx):
+    """The BuildConfig source keeps the package and the fields of the old target."""
+    env = unittest.begin(ctx)
+
+    source = android_build_config_source("com.example.plugin")
+    asserts.equals(env, "_build_config/com/example/plugin/BuildConfig.java", source.path)
+    asserts.equals(env, "\n".join([
+        "package com.example.plugin;",
+        "public final class BuildConfig {",
+        "  public static final boolean DEBUG = false;",
+        '  public static final String LIBRARY_PACKAGE_NAME = "com.example.plugin";',
+        '  public static final String BUILD_TYPE = "release";',
+        "}",
+        "",
+    ]), source.content)
+    asserts.equals(env, "_build_config/_unknown/BuildConfig.java", android_build_config_source("").path)
+
+    content = make_android_subpackage_build_content(
+        android_src_dir = "android/src/main",
+        java_package = "com.example.plugin",
+        extra_maven_labels = [],
+    )
+    asserts.true(env, '+ ["%s"]' % source.path in content, content)
+
+    resources_only = make_android_subpackage_build_content(
+        android_src_dir = "",
+        java_package = "com.example.plugin",
+        extra_maven_labels = [],
+        has_resources = True,
+    )
+    asserts.true(env, 'srcs = ["%s"]' % source.path in resources_only, resources_only)
+
+    return unittest.end(env)
+
+build_config_source_test = unittest.make(_build_config_source_test_impl)
 
 # The non-Dart remainder of `lib/` — the same partition rules_dart's
 # `make_dart_library_build_content` emits. `srcs + resources = lib/**`
@@ -2409,6 +2444,7 @@ def flutter_pub_package_test_suite(name):
         resources_without_manifest_test,
         no_resources_subpackage_test,
         empty_subpackage_test,
+        build_config_source_test,
         plugin_spoke_carries_resources_test,
         plugin_defines_reach_the_generated_build_test,
         library_spoke_carries_resources_test,

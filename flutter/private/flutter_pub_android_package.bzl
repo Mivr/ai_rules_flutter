@@ -43,6 +43,9 @@ load(":starlark_literal.bzl", "starlark_string_literal")
 # Kotlin/Java source extensions for Android plugin libraries.
 _ANDROID_SRC_EXTENSIONS = ("kt", "java")
 
+# The one neverlink engine every plugin library compiles against.
+_SHARED_ANDROID_ENGINE = "@rules_flutter//flutter:android_plugin_engine"
+
 def android_package_repo_name(hub_name, package_name):
     """The deterministic Android repository name for one hub and package.
 
@@ -221,35 +224,44 @@ write_file(
 """.format(content = manifest_content)
     return ('    manifest = ":_manifest",\n', synthesized)
 
-def _android_build_config_block(bc_package):
-    """Return the `(out, content)` fragments of the BuildConfig stub.
-
-    Gradle synthesizes BuildConfig per Android module (matching
-    `android.namespace`); rules_android does not, so the repository
-    hand-emits a minimal one. `DEBUG = false` is the safe default — the
-    engine ABI / mode is decided elsewhere.
+def _build_config_path(bc_package):
+    """The `android/`-relative path of the generated BuildConfig source.
 
     Args:
         bc_package: The Java package for the generated BuildConfig class.
 
     Returns:
-        `(out_path, content_lines)` for the `write_file` stub.
+        The relative path.
     """
-    bc_lines = [
-        "package " + bc_package + ";",
-        "public final class BuildConfig {",
-        "  public static final boolean DEBUG = false;",
-        "  public static final String LIBRARY_PACKAGE_NAME = \"" + bc_package + "\";",
-        "  public static final String BUILD_TYPE = \"release\";",
-        "}",
-        "",
-    ]
+    return "_build_config/" + bc_package.replace(".", "/") + "/BuildConfig.java"
 
-    # `bc_package` is a validated Java package name (dots only); every line
-    # still renders through the escaping helper.
-    return (
-        starlark_string_literal("_build_config/" + bc_package.replace(".", "/") + "/BuildConfig.java"),
-        "\n".join(["        %s," % starlark_string_literal(line) for line in bc_lines]),
+def android_build_config_source(java_package):
+    """Return the BuildConfig stub a plugin's `lib` compiles as a source.
+
+    Gradle synthesizes BuildConfig per Android module (matching
+    `android.namespace`) inside the module's own compile; rules_android does
+    not, so the repository writes a minimal one beside the plugin's sources.
+    `DEBUG = false` is the safe default; the engine ABI / mode is decided
+    elsewhere.
+
+    Args:
+        java_package: The plugin's Android namespace, or `""`.
+
+    Returns:
+        `struct(path, content)`: the `android/`-relative file path and text.
+    """
+    bc_package = java_package if java_package else "_unknown"
+    return struct(
+        path = _build_config_path(bc_package),
+        content = "\n".join([
+            "package " + bc_package + ";",
+            "public final class BuildConfig {",
+            "  public static final boolean DEBUG = false;",
+            "  public static final String LIBRARY_PACKAGE_NAME = \"" + bc_package + "\";",
+            "  public static final String BUILD_TYPE = \"release\";",
+            "}",
+            "",
+        ]),
     )
 
 def _fail_on_invalid_android_namespace(package_name, java_package):
@@ -273,27 +285,31 @@ def _fail_on_invalid_android_namespace(package_name, java_package):
             ns = repr(java_package),
         ))
 
-def _android_srcs_attr(android_src_dir):
+def _android_srcs_attr(android_src_dir, bc_path):
     """The `srcs` attribute value for the generated `kt_android_library`.
 
     The source dir is relative to the repository root; the sub-package itself
-    lives at `android/`, so that prefix is stripped there.
+    lives at `android/`, so that prefix is stripped there. The generated
+    BuildConfig is always one of the sources.
 
     Args:
         android_src_dir: The repository-relative Android source dir, or `""`.
+        bc_path: The `android/`-relative BuildConfig.java path.
 
     Returns:
         A BUILD `srcs` expression.
     """
+    bc_src = "[%s]" % starlark_string_literal(bc_path)
     if not android_src_dir:
-        return "[]"
+        return bc_src
     if android_src_dir.startswith("android/"):
         sub_src = android_src_dir[len("android/"):]
     else:
         sub_src = android_src_dir
-    return "glob([{kt}, {java}], allow_empty = True)".format(
+    return "glob([{kt}, {java}], allow_empty = True) + {bc}".format(
         kt = starlark_string_literal(sub_src + "/**/*.kt"),
         java = starlark_string_literal(sub_src + "/**/*.java"),
+        bc = bc_src,
     )
 
 def _android_library_args(java_package, android_manifest, has_resources, consumer_proguard_specs):
@@ -353,11 +369,11 @@ def _android_library_args(java_package, android_manifest, has_resources, consume
     )
 
 def _android_plugin_deps_block(extra_maven_labels):
-    """The `deps` block body: the engine and BuildConfig plus maven labels.
+    """The `deps` block body: the shared engine plus maven labels.
 
-    Base deps every plugin gets: the engine (which carries the
-    FlutterPlugin SPI plus the embedding's androidx compile classpath via
-    its exports) and the BuildConfig stub. Plugin-specific maven deps from
+    Base dep every plugin gets: the one compile-only engine the rules define
+    (it carries the FlutterPlugin SPI plus the embedding's androidx compile
+    classpath via its exports). Plugin-specific maven deps from
     `extra_maven_labels` are appended, de-duped.
 
     Args:
@@ -366,10 +382,7 @@ def _android_plugin_deps_block(extra_maven_labels):
     Returns:
         The comma-separated deps body.
     """
-    base_labels = [
-        ":_engine",
-        ":_build_config",
-    ]
+    base_labels = [_SHARED_ANDROID_ENGINE]
     seen = {label: True for label in base_labels}
     all_labels = list(base_labels)
     for lbl in extra_maven_labels:
@@ -382,53 +395,16 @@ def _android_plugin_deps_block(extra_maven_labels):
     # hostile value lands inert instead of breaking out of the list.
     return "\n        ".join([starlark_string_literal(label) + "," for label in all_labels])
 
-def _android_engine_prelude(bc_out, bc_content):
-    """The engine + BuildConfig half of the Android sub-package content.
-
-    Args:
-        bc_out: The BuildConfig.java output path.
-        bc_content: Rendered BuildConfig.java lines.
+def _android_load_prelude():
+    """The `load()` half of the Android sub-package content.
 
     Returns:
-        The BUILD fragment holding `_engine`, `_build_config_src` and
-        `_build_config`.
+        The BUILD fragment holding the `kt_android_library` load.
     """
     return """\
-load("@bazel_skylib//rules:write_file.bzl", "write_file")
-load("@rules_flutter//flutter:android.bzl", "flutter_android_engine")
-load("@rules_java//java:java_library.bzl", "java_library")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 
-# Private engine target — gives the plugin's Kotlin/Java the FlutterPlugin
-# SPI plus the embedding's androidx dependencies (via the engine's
-# exports) on the compile classpath. Always arm64; Java bytecode is
-# ABI-independent. neverlink, so the APK carries only the app's engine, of
-# the ABI flutter_android_app(android_abi=...) names.
-flutter_android_engine(
-    name = "_engine",
-    neverlink = True,
-    visibility = ["//visibility:private"],
-)
-
-# BuildConfig.java stub. Gradle synthesizes this per Android module
-# (matching `android.namespace`). rules_android doesn't, so we generate
-# a minimal one — `DEBUG = false`, which is correct for release builds
-# and harmless for debug (the engine ABI / mode is decided elsewhere).
-write_file(
-    name = "_build_config_src",
-    out = {bc_out},
-    content = [
-{bc_content}
-    ],
-    newline = "unix",
-)
-
-java_library(
-    name = "_build_config",
-    srcs = [":_build_config_src"],
-    visibility = ["//visibility:private"],
-)
-""".format(bc_out = bc_out, bc_content = bc_content)
+"""
 
 def _android_lib_target(srcs_attr, lib_args, deps_block):
     """The `kt_android_library(name = "lib")` half, manifest included.
@@ -575,7 +551,7 @@ kt_android_library(
             "generated, so the resources would not compile.",
         )
 
-    srcs_attr = _android_srcs_attr(android_src_dir)
+    srcs_attr = _android_srcs_attr(android_src_dir, android_build_config_source(java_package).path)
 
     lib_args = _android_library_args(
         java_package,
@@ -586,12 +562,7 @@ kt_android_library(
 
     deps_block = _android_plugin_deps_block(extra_maven_labels)
 
-    # BuildConfig.java stub — Gradle generates this implicitly per
-    # plugin's namespace. rules_android does not, so we hand-emit one.
-    bc_package = java_package if java_package else "_unknown"
-    (bc_out, bc_content) = _android_build_config_block(bc_package)
-
-    return _android_engine_prelude(bc_out, bc_content) + _android_lib_target(
+    return _android_load_prelude() + _android_lib_target(
         srcs_attr,
         lib_args,
         deps_block,
@@ -795,6 +766,9 @@ def _flutter_pub_android_package_impl(ctx):
         )
         return
 
+    if android.src_dir or android.has_resources:
+        build_config = android_build_config_source(android.java_package)
+        ctx.file("android/" + build_config.path, build_config.content)
     ctx.file(
         "android/BUILD.bazel",
         make_android_subpackage_build_content(
