@@ -250,6 +250,89 @@ void main() {}
         }
       });
 
+      group('outside lib/ under the app scheme', () {
+        const declared = {
+          'app/lib/x.dart': lib,
+          'x.dart': lib,
+        };
+
+        _Errors appCheck(String importer, String directive) =>
+            check({...declared, importer: '$directive\n'});
+
+        test('refuses a reference the front end resolves to a host path', () {
+          const pairs = {
+            'app/test/c_test.dart': ['../..//app/lib/x.dart', '../..//x.dart'],
+            'app/bin/main.dart': ['../..//app/lib/x.dart'],
+          };
+          pairs.forEach((importer, refs) {
+            for (final ref in refs) {
+              for (final kind in ['import', 'export', 'part']) {
+                expect(
+                  appCheck(importer, "$kind '$ref';"),
+                  hasLength(1),
+                  reason: '$kind $importer $ref',
+                );
+              }
+              expect(
+                appCheck(importer, "import 'a.dart' if (x) '$ref';"),
+                isNotEmpty,
+                reason: 'conditional $importer $ref',
+              );
+            }
+          });
+        });
+
+        test('agrees with Uri resolution against the app scheme', () {
+          const importers = [
+            'app/test/c_test.dart',
+            'app/test/deep/er/c_test.dart',
+            'app/bin/main.dart',
+            'bin/main.dart',
+            'test/t.dart',
+          ];
+          const tails = [
+            '/x.dart',
+            '/app/lib/x.dart',
+            '//x.dart',
+            '/a//x.dart',
+          ];
+          for (final importer in importers) {
+            for (var ups = 0; ups <= 6; ups++) {
+              for (final tail in tails) {
+                final String ref = '${List.filled(ups, '..').join('/')}/$tail'
+                    .replaceFirst(RegExp('^/+'), '');
+                for (final String spelled in {ref, ref.replaceAll('/', '//')}) {
+                  final Uri resolved = Uri.parse(
+                    'org-dartlang-app:///$importer',
+                  ).resolve(spelled);
+                  if (resolved.pathSegments.first.isNotEmpty) continue;
+                  expect(
+                    appCheck(importer, "import '$spelled';"),
+                    hasLength(1),
+                    reason: '$importer $spelled',
+                  );
+                }
+              }
+            }
+          }
+        });
+
+        test('keeps accepting an empty segment inside the scheme root', () {
+          expect(
+            appCheck('app/test/c_test.dart', "import '../lib//x.dart';"),
+            isEmpty,
+          );
+          expect(
+            appCheck('app/test/c_test.dart', "import '../..//app/lib/x.dart';"),
+            hasLength(1),
+          );
+          expect(
+            appCheck('app/test/c_test.dart', "import '..//x.dart';"),
+            hasLength(1),
+          );
+        });
+      });
+
       test('counts an empty segment before .. as a segment', () {
         // The front end reads `src//../e.dart` as `src/e.dart`; skipping the
         // empty segment would name `lib/e.dart` instead.
