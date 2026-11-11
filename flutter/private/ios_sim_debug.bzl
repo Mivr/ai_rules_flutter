@@ -11,9 +11,15 @@ analyse this app in debug mode instead of failing in `flutter_build_mode`,
 which rejects profile mode outside `-c opt`.
 """
 
+load(":flutter_drive_test.bzl", _flutter_drive_test = "flutter_drive_test")
+
 visibility(["//flutter/..."])
 
 _PROFILE_FLAG = str(Label("//flutter:profile"))
+
+# The iOS-simulator leg of `flutter_drive_test` lives with the other simulator
+# rules so that `ios.bzl` exports it from one place.
+flutter_drive_test = _flutter_drive_test
 
 def ios_sim_debug_transition_impl(_settings, _attr):
     """Transition implementation that selects a debug simulator build.

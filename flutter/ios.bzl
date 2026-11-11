@@ -64,7 +64,6 @@ load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library", _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_apple_xcframework_import.bzl", _flutter_apple_xcframework_import = "flutter_apple_xcframework_import")
-load("//flutter/private:flutter_drive_test.bzl", _flutter_drive_test = "flutter_drive_test")
 load(
     "//flutter/private:flutter_ios_application.bzl",
     _flutter_ios_application = "flutter_ios_application",
@@ -83,7 +82,11 @@ load(
     _flutter_ios_app = "flutter_ios_app",
     _flutter_ios_engine = "flutter_ios_engine",
 )
-load("//flutter/private:ios_sim_debug.bzl", _ios_sim_debug_app = "ios_sim_debug_app")
+load(
+    "//flutter/private:ios_sim_debug.bzl",
+    _flutter_drive_test = "flutter_drive_test",
+    _ios_sim_debug_app = "ios_sim_debug_app",
+)
 
 visibility("public")
 
