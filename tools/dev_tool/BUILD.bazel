@@ -116,6 +116,7 @@ _PATH_DEP = ["@dev_tool_deps//:path"]
 
 _UNIT_TESTS = {
     "agent_command_test": {"fakes": True},
+    "android_split_install_test": {},
     "app_instance_test": {"fakes": True},
     "app_log_sink_test": {"fakes": True},
     "app_log_test": {"fakes": True},

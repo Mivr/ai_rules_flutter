@@ -114,6 +114,16 @@ class RunCommand {
       help: 'Trace application startup, then save to a timeline file.',
     )
     ..addFlag(
+      'single-apk',
+      negatable: false,
+      help:
+          'Install a debug Android app as one APK with `adb install -r`. '
+          'By default a debug `flutter_android_app` is installed as a base '
+          'APK plus a Dart payload split with `adb install-multiple`: the '
+          'whole set the first time or when the base changed, and only the '
+          'payload split when only Dart changed.',
+    )
+    ..addFlag(
       'machine',
       defaultsTo: false,
       help: 'Enable machine-readable JSON protocol.',
