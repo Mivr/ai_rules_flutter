@@ -362,7 +362,7 @@ bool _isAllowedSchemeless(
   if (text.startsWith('/')) {
     return _isAllowedLeadingSlash(text, from, fromKey, declared, declaredKeys);
   }
-  if (hasEmptyPathSegment(uri)) {
+  if (_hasRelativeEmptySegment(uri)) {
     return _isAllowedEmptySegment(uri, from, fromKey, declared, declaredKeys);
   }
   final String? target = resolveStagedRelativeTarget(uri, from);
@@ -432,6 +432,14 @@ bool _escapesAppRoot(String uri, String from, String fromKey) {
     return true;
   }
 }
+
+/// Whether the schemeless relative [uri] holds an empty path segment (`a//b`).
+///
+/// The shared `hasEmptyPathSegment` never refuses a relative URI for one, so
+/// it cannot route the spelling here; `src//d.dart/` must reach
+/// [_isAllowedEmptySegment], which refuses a URI ending in an empty segment.
+bool _hasRelativeEmptySegment(String uri) =>
+    _relativePathPart(uri)?.contains('//') ?? false;
 
 /// Whether the schemeless [uri] with an empty path segment names a declared
 /// source or key by its RFC 3986 resolution, empty segments counted.
