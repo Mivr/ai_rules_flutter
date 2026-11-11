@@ -1,7 +1,12 @@
 {
   "spawns": [
     {
-      "listedOutputs": ["bazel-out/k8-opt-exec-ST-1/bin/h"],
+      "inputs": {
+        "bazel-out/k8-opt-exec-ST-1/bin/g": {}
+      },
+      "listedOutputs": [
+        "bazel-out/k8-opt-exec-ST-1/bin/h"
+      ],
       "metrics": {
         "systemTime": "0.5s",
         "userTime": "3.5s"
@@ -10,7 +15,9 @@
       "targetLabel": "@@tools//:h"
     },
     {
-      "listedOutputs": ["bazel-out/k8-opt-exec-ST-1/bin/g"],
+      "listedOutputs": [
+        "bazel-out/k8-opt-exec-ST-1/bin/g"
+      ],
       "metrics": {
         "systemTime": "0.5s",
         "userTime": "3.5s"
@@ -19,7 +26,9 @@
       "targetLabel": "@@extra//:g"
     },
     {
-      "listedOutputs": ["bazel-out/k8-fastbuild/bin/t"],
+      "listedOutputs": [
+        "bazel-out/k8-fastbuild/bin/t"
+      ],
       "metrics": {
         "systemTime": "0.5s",
         "userTime": "3.5s"

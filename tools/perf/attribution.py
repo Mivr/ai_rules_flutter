@@ -16,6 +16,13 @@ import gzip
 import os
 import tempfile
 
+from attribution_owner import check_input_data
+from attribution_owner import median_counts
+from attribution_owner import merge_owners
+from attribution_owner import owner_warnings
+from attribution_owner import repo_of
+from attribution_owner import repo_owners
+from attribution_owner import spawn_counts
 from attribution_trace import MissingData
 from attribution_trace import TRACE_PARTS
 from attribution_trace import trace_part_seconds
@@ -26,23 +33,14 @@ from replay import spawn_output_strings
 from summarize import summarize_values
 
 ATTRIBUTED_FLOWS = frozenset([
-    "ios-debug-clean", "ios-debug-body", "android-debug-body",
-    "android-release-noop"])
+    "ios-debug-clean", "ios-debug-body", "ios-debug-app",
+    "android-debug-body", "android-release-noop"])
 TOLERANCE = 0.05
 TOP_N = 10
 SIMPLE_PARTS = ("fetch_extract", "module_resolution", "loading_analysis",
                 "target_actions", "sandbox")
 _TRACE = "trace.json.gz"
 _EXECLOG = "execlog.json.gz"
-
-
-def repo_of(label):
-    """Repository name of a target label ("_main" for the main repo)."""
-    text = label if isinstance(label, str) else ""
-    if not text.startswith("@"):
-        return "_main"
-    name = text.lstrip("@").split("//", 1)[0]
-    return name or "_main"
 
 
 def spawn_cpu(spawn):
@@ -75,6 +73,7 @@ def check_spawn_data(spawns):
 def spawn_costs(spawns):
     """{"target_actions", "host": {"total","by_mnemonic","by_repo"}}."""
     check_spawn_data(spawns)
+    check_input_data(spawns)
     host = {"total": 0.0, "by_mnemonic": {}, "by_repo": {}}
     target = 0.0
     for spawn in spawns:
@@ -87,7 +86,9 @@ def spawn_costs(spawns):
         repo = repo_of(spawn.get("targetLabel"))
         for key, name in (("by_mnemonic", mnemonic), ("by_repo", repo)):
             host[key][name] = host[key].get(name, 0.0) + cpu
-    return {"target_actions": target, "host": host}
+    host["owners"] = repo_owners(spawns)
+    return {"target_actions": target, "host": host,
+            "counts": spawn_counts(spawns)}
 
 
 def top_with_other(values, limit=TOP_N):
@@ -118,6 +119,7 @@ def rep_parts(rep_dir):
     parts = {name: seconds[name] for name in TRACE_PARTS}
     parts["target_actions"] = costs["target_actions"]
     parts["host"] = costs["host"]
+    parts["counts"] = costs["counts"]
     return parts
 
 
@@ -148,19 +150,28 @@ def median_parts(reps):
         "by_mnemonic": top_with_other(
             _median_map([h["by_mnemonic"] for h in hosts])),
         "by_repo": top_with_other(
-            _median_map([h["by_repo"] for h in hosts]))}
+            _median_map([h["by_repo"] for h in hosts])),
+        "by_repo_owner": merge_owners([h["owners"] for h in hosts])}
+    keep = out["host_tools"]["by_repo"]
+    out["host_tools"]["by_repo_owner"] = {
+        repo: out["host_tools"]["by_repo_owner"].get(repo, [])
+        for repo in keep if repo != "other"}
     return out
 
 
-def build_attribution(parts, total):
+def build_attribution(parts, total, counts=None):
     """The attribution record; unattributed = total - parts 1..6."""
     summed = sum(parts[name] for name in SIMPLE_PARTS)
     summed += parts["host_tools"]["total"]
     gap = total - summed
     record = dict(parts)
     record["unattributed"] = gap
+    host = parts["host_tools"]
     return {"ok": abs(gap) <= TOLERANCE * total, "gap_s": gap,
-            "total_s": total, "parts": record}
+            "total_s": total, "parts": record,
+            "spawns_by_mnemonic": counts or {},
+            "warnings": owner_warnings(host["by_repo"],
+                                       host["by_repo_owner"])}
 
 
 def attribute_flow(rep_dirs, total):
@@ -178,7 +189,8 @@ def attribute_flow(rep_dirs, total):
         return {"ok": False, "error": str(exc)}
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": "unreadable input: %s" % (exc,)}
-    return build_attribution(median_parts(reps), total)
+    return build_attribution(median_parts(reps), total,
+                             median_counts([r["counts"] for r in reps]))
 
 
 def strict_attribution_exit(summaries, strict):

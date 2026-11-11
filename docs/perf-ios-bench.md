@@ -658,7 +658,7 @@ the report.
 
 `python3 tools/perf/sol.py summarize` adds `flows.<flow>.attribution`
 (a sibling of `profile`) to `ios-debug-clean`, `ios-debug-body`,
-`android-debug-body` and `android-release-noop`. It reads each repeat's
+`ios-debug-app`, `android-debug-body` and `android-release-noop`. It reads each repeat's
 saved `trace.json.gz` and `execlog.json.gz`, so no extra Bazel run is
 needed, and reports the median over repeats, in CPU seconds (the unit of
 the flow's `bazel` total):
@@ -674,6 +674,21 @@ the flow's `bazel` total):
 - `host_tools` (`total`, `by_mnemonic`, `by_repo`: ten largest, then
   `other`) is the execution log's `userTime` + `systemTime` of executed
   spawns whose listed outputs land in an exec configuration.
+- `host_tools.by_repo_owner` maps each repository in `by_repo` (not
+  `other`) to the sorted exec tool target labels whose closure pulled it
+  in. It is derived from the saved execution log: spawns that build host
+  tools and read the repository's outputs as inputs, followed through
+  other host-tool spawns to the outermost target. Labels are the union
+  over repeats. When the log does not tie a repository to a tool its
+  entry is `[]` and the attribution's `warnings` list names it
+  ("no exec tool target found for repository <repo>"); a tool is never
+  guessed.
+- `spawns_by_mnemonic` (a sibling of `parts`) gives, for every mnemonic
+  of the execution log, `executed` (spawns that ran) and `cache_hit`
+  (spawns with `cacheHit` true), each the median over repeats (a repeat
+  without the mnemonic counts 0). `ImportedDynamicFrameworkProcessor`,
+  `ProcessAndSign` and `BundleApp` are always listed, with 0 and 0 when
+  they did not occur, so an absent spawn is never read as missing data.
 - `target_actions` is the same CPU of the remaining executed spawns.
 - `unattributed` is `total_s` minus the six parts above; `gap_s` equals
   it (never clamped). `ok` is `abs(gap_s) <= 0.05 * total_s`.
@@ -684,7 +699,8 @@ directory without `trace.json.gz` or `execlog.json.gz`, a trace with no
 fetch/module/loading/analysis events or no "CPU usage (Bazel)" counter
 samples, an execution log whose executed spawns carry no
 `metrics.userTime`/`systemTime` (the Linux sandbox runner reports none),
-or whose spawns list no outputs (`listedOutputs`/`actualOutputs`).
+or whose spawns list no outputs (`listedOutputs`/`actualOutputs`), or
+whose spawns list no `inputs` (needed for `by_repo_owner`).
 `--strict-attribution` makes `summarize` exit non-zero when a flow's
 `ok` is false (default off). Once this lands, the bench step in the
 iOS perf workflow that runs `sol.py summarize` must pass

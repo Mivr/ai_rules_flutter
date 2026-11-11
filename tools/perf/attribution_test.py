@@ -113,7 +113,8 @@ class AttributionTest(unittest.TestCase):
                      "android-debug-body"):
             self.assertIn("attribution", flows[flow])
             self.assertIn("profile", flows[flow])
-        for flow in ("ios-debug-app", "android-debug-clean"):
+        self.assertIn("attribution", flows["ios-debug-app"])
+        for flow in ("android-debug-clean",):
             self.assertNotIn("attribution", flows[flow])
 
     def _run_summarize(self, strict, bazel):
@@ -164,6 +165,57 @@ class AttributionTest(unittest.TestCase):
         self.assertEqual(host["by_repo"], {"tools": 4.0, "extra": 4.0, "other": 0})
         self.assertAlmostEqual(host["by_mnemonic"]["Host"], 8.0)
         self.assertAlmostEqual(parts["target_actions"], 4.0)
+
+    def test_repo_owner_names_the_consuming_tool(self):
+        rep = put_rep(self.root, "sim_debug", "clean", 1,
+                      trace="overlap_trace", execlog="execlog_host")
+        result = attribution.attribute_flow([rep], 40.0)
+        host = result["parts"]["host_tools"]
+        self.assertEqual(host["by_repo_owner"],
+                         {"extra": ["@@tools//:h"], "tools": []})
+        self.assertEqual(result["warnings"], [
+            "no exec tool target found for repository tools"])
+
+    def test_owner_keys_match_by_repo_without_other(self):
+        rep = put_rep(self.root, "sim_debug", "clean", 1)
+        host = attribution.attribute_flow([rep], 100.0)["parts"][
+            "host_tools"]
+        self.assertEqual(set(host["by_repo_owner"]),
+                         set(host["by_repo"]) - {"other"})
+
+    def test_owner_terminal_label_through_chain(self):
+        rep = put_rep(self.root, "sim_debug", "clean", 1,
+                      execlog="execlog_counts_a")
+        result = attribution.attribute_flow([rep], 100.0)
+        self.assertEqual(
+            result["parts"]["host_tools"]["by_repo_owner"],
+            {"cpplib": ["@@tools//:tool"], "tools": []})
+
+    def test_spawns_by_mnemonic_median_and_required_names(self):
+        reps = [put_rep(self.root, "sim_debug", "clean", n, execlog=name)
+                for n, name in enumerate(("execlog_counts_a",
+                                          "execlog_counts_b",
+                                          "execlog_counts_c"), 1)]
+        counts = attribution.attribute_flow(reps, 100.0)[
+            "spawns_by_mnemonic"]
+        self.assertEqual(counts["Compile"], {"executed": 3, "cache_hit": 2})
+        for name in ("ImportedDynamicFrameworkProcessor", "ProcessAndSign",
+                     "BundleApp"):
+            self.assertEqual(counts[name], {"executed": 0, "cache_hit": 0})
+
+    def test_log_without_inputs_names_the_gap(self):
+        shutil.rmtree(os.path.join(self.root, "sol"), ignore_errors=True)
+        rep = put_rep(self.root, "sim_debug", "clean", 1)
+        log = os.path.join(rep, "execlog.json.gz")
+        with gzip.open(log, "rt") as fh:
+            data = json.load(fh)
+        for spawn in data["spawns"]:
+            spawn.pop("inputs", None)
+        with gzip.open(log, "wt") as fh:
+            json.dump(data, fh)
+        result = attribution.attribute_flow([rep], 100.0)
+        self.assertFalse(result["ok"])
+        self.assertIn("inputs", result["error"])
 
     def _assert_missing(self, **kwargs):
         shutil.rmtree(os.path.join(self.root, "sol"), ignore_errors=True)
