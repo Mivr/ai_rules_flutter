@@ -130,11 +130,9 @@ def _build_proxy_providers(ctx, binary, default_files, output_groups):
     default_runfiles = binary_default.default_runfiles.merge(
         ctx.runfiles(files = default_files),
     )
-    data_runfiles = (
-        binary_default.data_runfiles.merge(ctx.runfiles(files = default_files))
-        if binary_default.data_runfiles
-        else default_runfiles
-    )
+    data_runfiles = default_runfiles
+    if binary_default.data_runfiles:
+        data_runfiles = binary_default.data_runfiles.merge(ctx.runfiles(files = default_files))
     providers = [
         DefaultInfo(
             files = depset(default_files),
