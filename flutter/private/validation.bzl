@@ -288,21 +288,24 @@ def validate_flavor_defines(target_label, flavor, defines):
                     ),
                 )
 
-def merge_dart_defines_with_flavor(target_label, defines, extra_defines, flavor = ""):
+def merge_dart_defines_with_flavor(target_label, defines, extra_defines, flavor = None):
     """Validate and merge Dart defines with extra defines and flavor.
 
     Args:
         target_label: The target label for error messages.
         defines: Target's declared `defines` list.
         extra_defines: Values from `extra_dart_defines` build setting.
-        flavor: Target's flavor string (empty or None for unflavored).
+        flavor: Target's flavor string (`""` when unflavored), or None when
+            the rule declares no `flavor` attribute.
 
     Returns:
         List of merged define strings.
     """
     validate_dart_defines(defines, "defines attribute of %s" % target_label)
-    validate_flavor(target_label, flavor)
     merged = list(defines) + list(extra_defines)
+    if flavor == None:
+        return merged
+    validate_flavor(target_label, flavor)
     validate_flavor_defines(target_label, flavor, merged)
     if flavor:
         flavor_define = "FLUTTER_APP_FLAVOR=" + flavor
