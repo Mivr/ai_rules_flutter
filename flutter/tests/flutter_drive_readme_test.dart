@@ -2,8 +2,8 @@
 ///
 /// The README must show a `load` of `flutter_drive_test` from
 /// `@rules_flutter//flutter:android.bzl`, name its attributes and the
-/// environment the driver receives, state the Android-only scope and say the
-/// iOS simulator is a later item.
+/// environment the driver receives on each device, and state the supported
+/// device kinds: the Android emulator and the iOS simulator.
 library;
 
 import 'dart:io';
@@ -42,8 +42,18 @@ void main() {
     }
   });
 
-  test('states the Android-only scope and that iOS is later', () {
-    expect(readme, contains('Android only'));
-    expect(readme, contains('iOS simulator support is a later item'));
+  test('loads flutter_drive_test from flutter/ios.bzl', () {
+    final load = RegExp(
+      r'load\("@rules_flutter//flutter:ios\.bzl"[^)]*"flutter_drive_test"',
+    );
+    expect(load.hasMatch(readme), isTrue);
+  });
+
+  test('states the supported device kinds and the iOS environment', () {
+    expect(readme, contains('Supported device kinds are the Android emulator'));
+    expect(readme, contains('iOS simulator'));
+    expect(readme, contains('FLUTTER_DRIVE_IOS_UDID'));
+    expect(readme, isNot(contains('Android only')));
+    expect(readme, isNot(contains('iOS simulator support is a later item')));
   });
 }

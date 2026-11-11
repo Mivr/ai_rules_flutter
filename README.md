@@ -1964,7 +1964,7 @@ The bundle id defaults to `com.example.<package path>.<name>.<label hash>` — t
 
 ### flutter_drive_test
 
-Launches an Android app on the hermetic, pinned headless Android emulator, then runs a Dart driver script on the host against it, the way `flutter drive` and `package:flutter_driver` do. `flutter_integration_test` runs the test inside the app; `flutter_drive_test` runs a script on the host against the running app. The test passes when the driver exits 0 and fails with the driver's exit status otherwise. The emulator, the app and the port forward are cleaned up when the test ends, pass or fail, and a launch timeout names the step that timed out.
+Launches an app on a device, then runs a Dart driver script on the host against it, the way `flutter drive` and `package:flutter_driver` do. The device is the hermetic, pinned headless Android emulator for an Android app, or an iOS simulator for an iOS simulator app. `flutter_integration_test` runs the test inside the app; `flutter_drive_test` runs a script on the host against the running app. The test passes when the driver exits 0 and fails with the driver's exit status otherwise. The app is terminated and any emulator or simulator the test booted is shut down when the test ends, pass or fail, and a launch timeout names the step that timed out.
 
 ```starlark
 load("@rules_flutter//flutter:android.bzl", "flutter_android_app", "flutter_drive_test")
@@ -1989,27 +1989,49 @@ flutter_drive_test(
 )
 ```
 
+For an iOS simulator app, load the rule from `@rules_flutter//flutter:ios.bzl` (it is exported from both files), pass the simulator build of the app (`ios_sim_debug_app`) as `app`, and set `platform = "ios"` so the test is `enormous`, `exclusive` and macOS-only:
+
+```starlark
+load("@rules_flutter//flutter:ios.bzl", "flutter_drive_test", "flutter_ios_app", "ios_sim_debug_app")
+
+flutter_ios_app(name = "app_ios", application = ":app", bundle_id = "com.example.app")
+
+ios_sim_debug_app(name = "app_ios_sim", app = ":app_ios", tags = ["manual"])
+
+flutter_drive_test(
+    name = "drive_ios_test",
+    app = ":app_ios_sim",
+    bundle_id = "com.example.app",
+    driver = "test_driver/main_test.dart",
+    platform = "ios",
+    deps = ["@deps//:flutter_driver", "@deps//:test"],
+)
+```
+
 Build the app in debug mode (`bazel test -c dbg :drive_test`): a release app hosts no Dart VM service for the driver to connect to.
 
 | Attribute | Description |
 | --- | --- |
-| `app` | Required. The Android app under test, as `flutter_android_app` builds it. A target that is not an Android app fails analysis naming `app`. |
+| `app` | Required. The app under test: an Android app as `flutter_android_app` builds it, or an iOS simulator app (an `.ipa`) as `ios_sim_debug_app` builds it. A target of neither kind fails analysis naming `app`. |
 | `driver` | Required. The host driver — either a `.dart` script (compiled with the hermetic Dart toolchain against `deps` and `srcs`) or a `dart_binary` target. Its exit status is the test's. A missing `driver` fails analysis naming `driver`. |
-| `package_name` | Required. The Android application ID of `app`. |
+| `package_name` | The Android application ID of `app`. Required for an Android app. |
+| `bundle_id` | The bundle identifier of an iOS simulator `app`; defaults to `package_name`. Required for an iOS app. |
+| `platform` | Macro argument: `"android"` (default) or `"ios"`. `"ios"` makes the target `enormous`, `exclusive` and macOS-only. |
 | `deps`, `srcs` | Optional Dart dependencies (from the pinned pub lock) and helper `.dart` files when `driver` is a `.dart` script. |
 | `data`, `env` | Optional runtime files and extra environment variables (`$(rlocationpath ...)` expanded over `data`). |
-| `size`, `tags` | `size` defaults to `large`, like the Android integration test; `manual` is always added to `tags`, so the test stays out of wildcard test runs. |
+| `size`, `tags` | `size` defaults to `large` (`enormous` for iOS); `manual` is always added to `tags`, so the test stays out of wildcard test runs. |
 
-The driver runs with these variables in its environment, on top of the test's own:
+Supported device kinds are the Android emulator and the iOS simulator. The driver runs with these variables in its environment, on top of the test's own:
 
-| Variable | Value |
-| --- | --- |
-| `VM_SERVICE_URL` | The app's Dart VM service URI, forwarded to the host (`http://127.0.0.1:<port>/<token>=/`), as `package:flutter_driver` reads it. |
-| `FLUTTER_DRIVE_VM_SERVICE_URI` | The same URI. |
-| `FLUTTER_DRIVE_ANDROID_SERIAL` | The emulator's `adb` serial. |
-| `FLUTTER_DRIVE_PACKAGE` | The `package_name`. |
+| Variable | Android emulator | iOS simulator |
+| --- | --- | --- |
+| `VM_SERVICE_URL` | The app's Dart VM service URI, forwarded to the host (`http://127.0.0.1:<port>/<token>=/`), as `package:flutter_driver` reads it. | The app's Dart VM service URI (`http://127.0.0.1:<port>/<token>=/`); the simulator shares the host's loopback. |
+| `FLUTTER_DRIVE_VM_SERVICE_URI` | The same URI. | The same URI. |
+| `FLUTTER_DRIVE_ANDROID_SERIAL` | The emulator's `adb` serial. | Not set. |
+| `FLUTTER_DRIVE_IOS_UDID` | Not set. | The simulator's UDID. |
+| `FLUTTER_DRIVE_PACKAGE` | The `package_name`. | The bundle id. |
 
-Android only. It uses the same pinned emulator and `adb` as `flutter_integration_test(platform = "android")` (x86_64 API 35, KVM required), so it adds no download. iOS simulator support is a later item.
+The Android leg uses the same pinned emulator and `adb` as `flutter_integration_test(platform = "android")` (x86_64 API 35, KVM required), so it adds no download. The iOS leg boots or reuses a simulator through `xcrun simctl` the way `flutter_integration_test(platform = "ios")` does and needs only the runner's Xcode and a simulator runtime; it adds no download either, and a simulator that was already booted is left running.
 
 ### flutter_plugin
 

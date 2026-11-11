@@ -1,4 +1,4 @@
-"""Analysis tests for `flutter_drive_test`: its shape, its required inputs and its tags."""
+"""Analysis tests for `flutter_drive_test`: its shape, its required inputs, its tags and the iOS leg."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_android//providers:providers.bzl", "ApkInfo")
@@ -34,6 +34,24 @@ def _app_stub_impl(ctx):
 _app_stub = rule(
     implementation = _app_stub_impl,
     doc = "A target with a signed `.apk` and `ApkInfo`, standing in for `flutter_android_app`.",
+)
+
+def _ios_app_stub_impl(ctx):
+    """Stands in for `ios_sim_debug_app`: one `.ipa` in `DefaultInfo`.
+
+    Args:
+        ctx: The rule context.
+
+    Returns:
+        The provider list for the stub iOS simulator app.
+    """
+    ipa = ctx.actions.declare_file(ctx.label.name + ".ipa")
+    ctx.actions.write(ipa, "")
+    return [DefaultInfo(files = depset([ipa]))]
+
+_ios_app_stub = rule(
+    implementation = _ios_app_stub_impl,
+    doc = "A target with one `.ipa`, standing in for an iOS simulator app.",
 )
 
 def _not_android_impl(ctx):
@@ -111,6 +129,76 @@ _shape_test = analysistest.make(
     doc = "Checks test executable, runfile inputs and absence of host paths on `flutter_drive_test`.",
 )
 
+def _ios_shape_test_impl(ctx):
+    """Verifies the iOS test's single executable, its inputs and the absence of host tools.
+
+    Args:
+        ctx: The analysis test context.
+
+    Returns:
+        The `analysistest` result token.
+    """
+    env = analysistest.begin(ctx)
+    target = analysistest.target_under_test(env)
+    info = target[DefaultInfo]
+    asserts.equals(env, ctx.attr.name_of_test, info.files_to_run.executable.basename)
+    paths = [f.short_path for f in info.default_runfiles.files.to_list()]
+    asserts.true(env, [p for p in paths if p.endswith("_ios_app_stub.ipa")], "app .ipa missing from runfiles")
+    asserts.true(env, [p for p in paths if p.endswith("_driver_stub")], "driver missing from runfiles")
+    asserts.true(env, [p for p in paths if p.endswith("/flutter_drive_runner")], "runner missing from runfiles")
+    for p in paths:
+        asserts.false(env, p.startswith("/"), "host path in runfiles: %s" % p)
+        for tool in ["/adb", "/emulator", "flutter_android_headless_runtime"]:
+            asserts.false(env, tool in p, "Android tool %s in iOS runfiles: %s" % (tool, p))
+    environment = target[RunEnvironmentInfo].environment
+    asserts.equals(env, "com.example.drive", environment["FLUTTER_DRIVE_IOS_BUNDLE_ID"])
+    asserts.true(env, "FLUTTER_DRIVE_IOS_APP" in environment, "FLUTTER_DRIVE_IOS_APP not set")
+    asserts.false(env, "FLUTTER_DRIVE_ANDROID_APK" in environment, "Android variables set for an iOS app")
+    return analysistest.end(env)
+
+_ios_shape_test = analysistest.make(
+    _ios_shape_test_impl,
+    attrs = {
+        "name_of_test": attr.string(
+            doc = "Expected basename of the declared test executable; defaults to `\"\"`.",
+        ),
+    },
+    doc = "Checks the iOS `flutter_drive_test` executable, runfile inputs, environment and absence of host tools.",
+)
+
+def _ios_tags_test_impl(ctx):
+    """Checks the iOS test is `enormous`, `exclusive`, `manual` and macOS-only.
+
+    Args:
+        ctx: The analysis test context.
+
+    Returns:
+        The `analysistest` result token.
+    """
+    env = analysistest.begin(ctx)
+    asserts.equals(env, "enormous", ctx.attr.observed_size)
+    for tag in ["manual", "exclusive"]:
+        asserts.true(env, tag in ctx.attr.observed_tags, "%s missing from %s" % (tag, ctx.attr.observed_tags))
+    macos = [c for c in ctx.attr.observed_compat if c.endswith("//os:macos")]
+    asserts.true(env, macos, "not macOS-only: %s" % ctx.attr.observed_compat)
+    return analysistest.end(env)
+
+_ios_tags_test = analysistest.make(
+    _ios_tags_test_impl,
+    attrs = {
+        "observed_compat": attr.string_list(
+            doc = "Observed `target_compatible_with` recorded on the underlying rule; defaults to `[]`.",
+        ),
+        "observed_size": attr.string(
+            doc = "Observed `size` attribute recorded on the underlying rule; defaults to `\"\"`.",
+        ),
+        "observed_tags": attr.string_list(
+            doc = "Observed `tags` attribute recorded on the underlying rule; defaults to `[]`.",
+        ),
+    },
+    doc = "Verifies the iOS `flutter_drive_test` size, tags and macOS-only compatibility.",
+)
+
 def _missing_driver_test_impl(ctx):
     """Checks that omitting `driver` fails analysis and names `driver`.
 
@@ -186,6 +274,20 @@ def flutter_drive_test_test_suite(name):
     _app_stub(name = name + "_app_stub", tags = ["manual"])
     _not_android(name = name + "_not_android", tags = ["manual"])
     _driver_stub(name = name + "_driver_stub", tags = ["manual"])
+    _ios_app_stub(name = name + "_ios_app_stub", tags = ["manual"])
+    flutter_drive_test(
+        name = name + "_ios",
+        app = ":" + name + "_ios_app_stub",
+        driver = ":" + name + "_driver_stub",
+        package_name = "com.example.drive",
+    )
+    flutter_drive_test(
+        name = name + "_ios_macos",
+        app = ":" + name + "_ios_app_stub",
+        driver = ":" + name + "_driver_stub",
+        package_name = "com.example.drive",
+        platform = "ios",
+    )
     flutter_drive_test(
         name = name + "_ok",
         app = ":" + name + "_app_stub",
@@ -242,6 +344,24 @@ def flutter_drive_test_test_suite(name):
         target_under_test = ":" + name + "_bad_app",
         size = "small",
     )
+    _ios_shape_test(
+        name = name + "_ios_shape",
+        target_under_test = ":" + name + "_ios",
+        name_of_test = name + "_ios",
+        size = "small",
+    )
+    ios_declared = native.existing_rule(name + "_ios_macos")
+
+    # The macOS-only target is incompatible with a Linux host, so the test
+    # analyzes a compatible stand-in and checks the attributes the macro set.
+    _ios_tags_test(
+        name = name + "_ios_tags",
+        target_under_test = ":" + name + "_ios_app_stub",
+        observed_size = ios_declared["size"],
+        observed_tags = ios_declared["tags"],
+        observed_compat = [str(c) for c in ios_declared["target_compatible_with"]],
+        size = "small",
+    )
     native.test_suite(
         name = name,
         tests = [
@@ -249,6 +369,8 @@ def flutter_drive_test_test_suite(name):
             ":" + name + "_script_shape",
             ":" + name + "_missing_driver",
             ":" + name + "_not_android_app",
+            ":" + name + "_ios_shape",
+            ":" + name + "_ios_tags",
             ":" + name + "_tags_size",
         ],
     )
