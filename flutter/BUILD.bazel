@@ -1,5 +1,6 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
+load("//flutter:android.bzl", "flutter_android_engine")
 load("//flutter/private:build_settings.bzl", "dart_defines_flag")
 load("//flutter/private:flutter_material_icons.bzl", "flutter_material_icons")
 load("//flutter/private:flutter_pub.bzl", "flutter_pub")
@@ -41,6 +42,16 @@ alias(
 alias(
     name = "font_subset_toolchain_type",
     actual = "//flutter/private:font_subset_toolchain_type",
+    visibility = ["//visibility:public"],
+)
+
+# The compile-only engine every pub Android plugin library compiles against:
+# the FlutterPlugin SPI plus the embedding's androidx classes, never packaged
+# (the app's own engine, of its ABI, is the one that ships). Always arm64;
+# Java bytecode is ABI-independent.
+flutter_android_engine(
+    name = "android_plugin_engine",
+    neverlink = True,
     visibility = ["//visibility:public"],
 )
 
