@@ -13,6 +13,7 @@ library;
 import 'dart:async';
 
 import 'package:args/args.dart';
+import 'package:flutter_bazel_dev_tool/android_splits.dart';
 import 'package:flutter_bazel_dev_tool/bazel.dart';
 import 'package:flutter_bazel_dev_tool/dev_tool_exception.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
@@ -69,6 +70,32 @@ typedef _RunBuildInputs = ({
   List<String> extraArgs,
 });
 
+/// Android debug runs install the app as splits unless `--single-apk`.
+///
+/// Before the build flags are read: the split install is what asks bazel for
+/// the `base_apk` and `payload_apk` groups instead of the single APK.
+void _chooseInstallMode(
+  ArgResults results,
+  List<Device> devices,
+  String? compilationMode,
+) {
+  final bool split =
+      compilationMode == 'dbg' &&
+      !(results['single-apk'] as bool) &&
+      devices.every((d) => d is AndroidDevice);
+  for (final AndroidDevice device in devices.whereType<AndroidDevice>()) {
+    device.splitInstall = split;
+  }
+}
+
+/// The `--build-arg`s plus the flag that keeps a split run's rebuilds on the
+/// split groups.
+List<String> _userBuildArgs(ArgResults results, List<Device> devices) => [
+  ...(results['build-arg'] as List<String>),
+  if (devices.first.buildArgs.contains(splitOutputGroupsFlag))
+    splitOutputGroupsFlag,
+];
+
 /// Resolve the workspace root once rather than per callsite.
 ///
 /// One answer avoids redundant `bazel info` spawns and gives every consumer
@@ -82,6 +109,7 @@ Future<_RunBuildInputs> resolveRunBuildInputs(
   required String? compilationMode,
 }) async {
   final String workspace = await bazel.findWorkspaceRoot();
+  _chooseInstallMode(results, devices, compilationMode);
   final List<String> extraArgs = [
     ...(results['build-arg'] as List<String>),
     ...defineFlags,
@@ -612,7 +640,7 @@ class RunPlan {
     return RunPlan._(
       target: plan.target,
       extraArgs: plan.resolved.extraArgs,
-      userBuildArgs: results['build-arg'] as List<String>,
+      userBuildArgs: _userBuildArgs(results, plan.devices),
       compilationMode: plan.compilationMode,
       devices: plan.devices,
       workspace: plan.resolved.workspace,
@@ -732,6 +760,32 @@ class RunPlan {
     );
   }
 
+  /// Hand the split APKs in [outputs] to the Android devices that install
+  /// them, and return the base split to launch from. Null when this run
+  /// installs one APK.
+  ///
+  /// A target that emits no splits fails here, naming `--single-apk`: the run
+  /// never quietly installs a different way than it was asked to.
+  String? _handOutSplits(List<String> outputs) {
+    final List<AndroidDevice> installing = [
+      for (final AndroidDevice d in devices.whereType<AndroidDevice>())
+        if (d.splitInstall) d,
+    ];
+    if (installing.isEmpty) return null;
+    final List<String>? splits = splitApksFrom(outputs);
+    if (splits == null) {
+      throw DevToolException(
+        '$target has no base_apk and payload_apk output groups, so a debug '
+        'Android run cannot install it as splits. Pass --single-apk to '
+        'install the single APK.',
+      );
+    }
+    for (final d in installing) {
+      d.splitApks = splits;
+    }
+    return splits.first;
+  }
+
   /// Build the target and pick the artifact to launch from.
   Future<({String appFile, List<String> outputFiles})> buildApp() async {
     logger.fine({
@@ -759,12 +813,14 @@ class RunPlan {
         exitCode: result.exitCode,
       );
     }
-    if (result.outputFiles.isEmpty) {
+    final String? splitBase = _handOutSplits(result.outputFiles);
+    if (splitBase == null && result.outputFiles.isEmpty) {
       throw DevToolException(
         'Build succeeded but cquery returned no output files for $target.',
       );
     }
-    final String appFile = devices.first.pickArtifact(result.outputFiles);
+    final String appFile =
+        splitBase ?? devices.first.pickArtifact(result.outputFiles);
     logger.fine({
       'message': 'build_outputs',
       'text': 'Launch artifact: $appFile',

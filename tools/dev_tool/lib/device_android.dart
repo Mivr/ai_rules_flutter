@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/android_splits.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
 import 'package:flutter_bazel_dev_tool/host_tools.dart';
 import 'package:flutter_bazel_dev_tool/logging.dart';
@@ -51,6 +52,19 @@ class AndroidDevice extends Device {
   /// (debug/JIT builds). Set by the run command before [launch]; enables the
   /// INTERNET-permission preflight, which release/profile launches skip.
   bool expectsVmService = false;
+
+  /// Whether this run installs a debug app as a base APK plus a Dart payload
+  /// split (`adb install-multiple`) instead of one APK. Set by the run plan
+  /// from `--single-apk` and the build mode, before the build.
+  bool splitInstall = false;
+
+  /// The base split and then the payload split the build produced, once the
+  /// run plan has read them from the `base_apk` and `payload_apk` output
+  /// groups. Null means the launch installs the single APK.
+  List<String>? splitApks;
+
+  /// What this session last installed, to tell which split changed.
+  final SplitInstallLedger _splitLedger = SplitInstallLedger();
 
   /// The logcat a launch in flight has started, until the launch returns it.
   ///
@@ -126,6 +140,7 @@ class AndroidDevice extends Device {
   @override
   List<String> get buildArgs => [
     '--platforms=@rules_flutter//flutter/platforms:android_$abi',
+    if (splitInstall) splitOutputGroupsFlag,
   ];
 
   /// Build the common adb prefix args (includes -s <deviceId> if set).
@@ -195,20 +210,8 @@ class AndroidDevice extends Device {
   Future<AppInstance> _launch(String appPath, {AppLogListener? onLog}) async {
     final String packageName = _packageName ?? await _readPackageName(appPath);
 
-    // Step 1: Install the APK.
-    final ProcessResult installResult = await _runProcess(
-      adbPath,
-      _adbArgs(['install', '-r', appPath]),
-    );
-    if (installResult.exitCode != 0) {
-      final stderr = '${installResult.stderr}';
-      if (stderr.contains('INSTALL_FAILED_INSUFFICIENT_STORAGE')) {
-        throw StateError(
-          await _insufficientStorageMessage(appPath, packageName, stderr),
-        );
-      }
-      throw StateError(_adbFailure('install', stderr));
-    }
+    // Step 1: Install the APK (or its splits).
+    await _installApp(appPath, packageName);
 
     // Step 1a: Debug launches await the VM service, which can never come up
     // without android.permission.INTERNET — fail fast instead.
@@ -312,6 +315,61 @@ class AndroidDevice extends Device {
       vmServiceDiscoveryNote: discovery.gaveUpNote,
       logs: logs,
     );
+  }
+
+  /// Install the app: its splits when the build produced them, else the one
+  /// APK with `adb install -r`.
+  Future<void> _installApp(String appPath, String packageName) async {
+    final List<String>? splits = splitApks;
+    if (splits != null) {
+      await installSplits(splits);
+      return;
+    }
+    final ProcessResult installResult = await _runProcess(
+      adbPath,
+      _adbArgs(['install', '-r', appPath]),
+    );
+    if (installResult.exitCode != 0) {
+      final stderr = '${installResult.stderr}';
+      if (stderr.contains('INSTALL_FAILED_INSUFFICIENT_STORAGE')) {
+        throw StateError(
+          await _insufficientStorageMessage(appPath, packageName, stderr),
+        );
+      }
+      throw StateError(_adbFailure('install', stderr));
+    }
+  }
+
+  /// Install a debug app's split APKs with `adb install-multiple`.
+  ///
+  /// [apkPaths] is the base split followed by the payload split(s). The whole
+  /// set goes the first time and whenever the base changed; when only a
+  /// payload split changed, a partial install (`-p <package>`) carries just
+  /// that one. A change is a different SHA-256 than the one recorded at this
+  /// session's last successful install. Nothing changed, nothing installed.
+  ///
+  /// A failed install throws, naming the command and what adb said; there is
+  /// no other install mode to fall back to.
+  Future<void> installSplits(List<String> apkPaths) async {
+    final SplitInstallDecision decision = await _splitLedger.plan(apkPaths);
+    final SplitInstallPlan plan = decision.plan;
+    if (plan.apks.isEmpty) return;
+    final String? package = plan.partial
+        ? (_packageName ?? await _readPackageName(apkPaths.first))
+        : null;
+    final ProcessResult result = await _runProcess(
+      adbPath,
+      _adbArgs([
+        'install-multiple',
+        '-r',
+        if (package != null) ...['-p', package],
+        ...plan.apks,
+      ]),
+    );
+    if (result.exitCode != 0) {
+      throw StateError(_adbFailure('install-multiple', result.stderr));
+    }
+    _splitLedger.recordInstalled(decision.digests);
   }
 
   /// Read the package name (and launchable activity) out of the APK.

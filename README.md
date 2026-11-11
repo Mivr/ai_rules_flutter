@@ -1214,6 +1214,14 @@ bazel build //:my_app_android \
 | `analyze_size` | Emit an instructions-size JSON breakdown (`<name>_size.json`) from `gen_snapshot`. Included in default outputs and exposed via the `analyze_size` output group. Default `False`. |
 | `multidex` | Defaults to `"native"`. |
 
+**Split APKs (debug).** In a debug build `flutter_android_app` can also emit the Dart payload (`flutter_assets/`, including the kernel blob) as its own split APK, and everything else (engine, dex, resources, manifest, native libraries) as a base APK. Both are signed with the app's signing configuration. They are two output groups, not default outputs, and a release build leaves both empty:
+
+```
+bazel build //:my_app_android -c dbg --output_groups=base_apk,payload_apk
+```
+
+A Dart edit changes only the payload split, so the base APK's bytes, and the inputs of its signing action, stay the same and the base is not re-signed. The single `<name>.apk` stays the default output and is what a release build produces. `flutter_bazel run` installs a debug build as splits with `adb install-multiple`: the whole set the first time or when the base changed, and only the changed split (`adb install-multiple -p <package>`) when only the payload changed. It decides by the SHA-256 of each split against what it recorded at its last successful install in the session. A failed install names the command and adb's message. Pass `--single-apk` to install the single APK with `adb install -r`, as before.
+
 **Code-size analysis.** Set `analyze_size = True` on `flutter_android_app` to pass `--print-instructions-sizes-to` to `gen_snapshot` and produce a `<name>_size.json` instruction-size breakdown. The file is a default output and also readable through the `analyze_size` output group:
 
 ```starlark
@@ -2220,6 +2228,7 @@ bazel run @rules_flutter//tools/dev_tool:flutter_bazel -- run -t //:my_app_macos
 | `--dart-define KEY=VALUE` | A Dart define, forwarded to the build and replayed on reload and restart. Repeatable. |
 | `--no-hot` | Run without hot reload. |
 | `--profile` | Profile mode: AOT with the Dart VM service, for DevTools. Builds `-c opt --@rules_flutter//flutter:profile`. Not on the iOS simulator. |
+| `--single-apk` | Install a debug Android app as one APK with `adb install -r`. By default a debug `flutter_android_app` installs as a base APK plus a Dart payload split with `adb install-multiple`. See "Split APKs". |
 | `--start-paused` | Hold the app at the start of `main()` until a debugger resumes it. |
 | `--vm-service-timeout` | How long to wait for the app's VM-service announcement, in seconds. Defaults to 180. Applies where the run reads the announcement from a log; a physical iOS device discovers over mDNS on its own budget instead. See below. |
 | `--route` | The initial route. |
