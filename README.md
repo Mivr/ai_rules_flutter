@@ -1183,7 +1183,7 @@ bazel build //:my_app_android
 
 **Pure Go host tools.** `flutter_android_app` builds rules_android's Go host tools in rules_go pure mode: without a C++ toolchain, so the hermetic LLVM runtimes are never compiled from source. The APK is unchanged (only the host tools' own binaries differ). The setting is scoped to the app — desktop builds and your own Go targets keep their configuration. Opt out with `--@rules_flutter//flutter:android_pure_go=false`; you need that only if the app's own subtree contains cgo Go code, which pure mode cannot compile. Hand-assembled Tier-2 `android_binary` targets are unaffected either way: add the global `--@rules_go//go/config:pure=true` yourself if you want the same saving there and have no cgo Go code.
 
-**Release signing.** The APK signs with the debug keystore, as an `android_binary` does. In debug builds (`-c dbg`), the default signature scheme is `v2` alone when `minSdkVersion` is 24 or higher, falling back to `v1_v2` below 24 (the repo's minimum SDK `21` requires v1 JAR signatures to install on Android API 21–23); an explicit `@rules_android//flags:apk_signing_method` flag overrides this default. To ship to Google Play, pass `keystore` (a `.jks` or PKCS#12 `.p12` file) together with `keystore_password_file` and `key_alias`; set `key_password_file` as well when the key has its own password. Both passwords travel as `file:` references to file inputs, so their text never appears on the command line. When `key_password_file` is unset, `--key-pass` is omitted and apksigner unlocks the key with the keystore password. Only each file's first line is read, so end it with a newline. A `keystore` without its password file or alias fails analysis naming the missing attribute. When `keystore` is unset, the `//flutter:android_release_keystore`, `//flutter:android_release_keystore_password_file` and `//flutter:android_release_key_alias` flags supply the same three values, so CI can inject a secret without editing BUILD files; an explicit attribute always wins over its flag. Every secret setting must name a target with exactly one file: a flag or attribute pointing at an empty or multi-file target fails analysis naming the setting, the target and the file count, instead of silently falling back to debug signing. Never hide a secret behind an `allow_empty` glob — a CI secret that was never written would otherwise have shipped a debug-signed release.
+**Release signing.** The APK signs with the debug keystore, as an `android_binary` does. In debug builds (`-c dbg`), the default signature scheme is `v2` alone when `minSdkVersion` is 24 or higher, falling back to `v1_v2` below 24 (the repo's minimum SDK `21` requires v1 JAR signatures to install on Android API 21–23); an explicit `@rules_android//flags:apk_signing_method` flag overrides this default. To sign the APK with a release key, pass `keystore` (a `.jks` or PKCS#12 `.p12` file) together with `keystore_password_file` and `key_alias`; set `key_password_file` as well when the key has its own password. Both passwords travel as `file:` references to file inputs, so their text never appears on the command line. When `key_password_file` is unset, `--key-pass` is omitted and apksigner unlocks the key with the keystore password. Only each file's first line is read, so end it with a newline. A `keystore` without its password file or alias fails analysis naming the missing attribute. When `keystore` is unset, the `//flutter:android_release_keystore`, `//flutter:android_release_keystore_password_file` and `//flutter:android_release_key_alias` flags supply the same three values, so CI can inject a secret without editing BUILD files; an explicit attribute always wins over its flag. Every secret setting must name a target with exactly one file: a flag or attribute pointing at an empty or multi-file target fails analysis naming the setting, the target and the file count, instead of silently falling back to debug signing. Never hide a secret behind an `allow_empty` glob — a CI secret that was never written would otherwise have shipped a debug-signed release. Google Play requires an Android App Bundle for new apps, not an APK: build one with `flutter_android_aab` (see "Android App Bundle (AAB) for Google Play" below).
 
 The release signing action always runs locally (`no-remote`): Bazel never uploads the keystore or the password files to a remote executor or a remote cache. A password file's content digest would otherwise land in the shared action cache, an execution log or a build event stream, where it is an offline brute-force oracle for a human-chosen password. Keep the secrets out of version control — have CI write them to gitignored files and point the flags at those — and out of remote and disk caches: a secret checked into the source tree is still an action input whose digest is recorded in the local disk cache and in any build event output you keep.
 
@@ -1281,6 +1281,25 @@ android_binary(
 | `mobile_install` | JNI-structured symlinks and assets for `bazel mobile-install` |
 
 </details>
+
+#### Android App Bundle (AAB) for Google Play
+
+Google Play requires an Android App Bundle for new apps. `flutter_android_aab` takes the same `application` and `package_name` attributes as `flutter_android_app` and emits `<name>.aab`. It wires the same runner, plugin registrant and manifest, then builds the bundle with rules_android 0.8.0's public `android_application` macro (`@rules_android//android:rules.bzl`) and a minimal bundle config. The proto-format resource link, the module conversion and `bundletool build-bundle` are that macro's own actions, with the bundletool of its toolchain: the `com.android.tools.build:bundletool` Maven artifact locked by version and sha256 in `rules_android_maven_install.json`, so a missing or wrong checksum fails the build. The native libraries per ABI and `flutter_assets` go into the bundle's base module. Like `flutter_android_app`, it needs the Android SDK and NDK. rules_android 0.8.0 is the floor the rule was built against.
+
+```starlark
+load("@rules_flutter//flutter:android.bzl", "flutter_android_aab")
+load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+
+flutter_application(name = "my_app", main = "lib/main.dart", deps = [...])
+
+flutter_android_aab(
+    name = "my_app_aab",
+    application = ":my_app",
+    package_name = "com.example.myapp",
+)
+```
+
+`bazel build //:my_app_aab` produces `my_app_aab.aab`. **The bundle is unsigned**: the rule never debug-signs and takes no signing attribute. Signing it with a release keystore is a separate step that has not landed, so the bundle is not yet ready to upload to Google Play. The `e2e/android_example` workspace runs `bundletool validate` and `bundletool dump manifest` on the produced bundle.
 
 #### Android library (AAR) for a native host app
 

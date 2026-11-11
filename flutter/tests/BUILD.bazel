@@ -729,6 +729,25 @@ dart_test(
     ],
 )
 
+# Source pins for `flutter_android_aab`: the public rules_android entry point,
+# no signing or host tool, and bundletool pinned by sha256 in the lock file.
+dart_test(
+    name = "android_aab_contract_test",
+    size = "small",
+    data = ["android_aab_contract_test.dart"],
+    env = {"GUARD_ROOT_ANCHOR": "$(rlocationpath :android_aab_contract_test.dart)"},
+    env_inherit = ["BUILD_WORKSPACE_DIRECTORY"],
+    main = "android_aab_contract_test.dart",
+    tags = [
+        "external",
+        "local",
+        "no-sandbox",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 architecture_fixtures(name = "arch_inv")
 
 test_suite(

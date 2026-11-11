@@ -1,8 +1,19 @@
 # Corpus targets the Linux-x64 CI host can build (analysis-clean), sorted.
 # Regenerate with the cquery in the header of BUILD.bazel, then drop the labels
 # Bazel marks incompatible. Feeds `bazel aquery` for actions.golden.json.
+//flutter/tests/corpus:____android_aab_manifest_dbg
+//flutter/tests/corpus:____android_aab_manifest_opt
 //flutter/tests/corpus:____android_app_manifest_dbg
 //flutter/tests/corpus:____android_app_manifest_opt
+//flutter/tests/corpus:__android_aab_aab_assets
+//flutter/tests/corpus:__android_aab_android_plugins
+//flutter/tests/corpus:__android_aab_bundle
+//flutter/tests/corpus:__android_aab_bundle_config
+//flutter/tests/corpus:__android_aab_manifest
+//flutter/tests/corpus:__android_aab_native_libs
+//flutter/tests/corpus:__android_aab_native_libs_jar
+//flutter/tests/corpus:__android_aab_overlay_assets
+//flutter/tests/corpus:__android_aab_registrant_src
 //flutter/tests/corpus:__android_app_android_plugins
 //flutter/tests/corpus:__android_app_bundle
 //flutter/tests/corpus:__android_app_manifest
