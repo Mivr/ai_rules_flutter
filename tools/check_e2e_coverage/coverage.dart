@@ -31,6 +31,9 @@ const Map<String, String> uncoveredReasons = {
   'e2e/_overlay_tests/native_assets_synthetic':
       'Local-only overlay fixture; runs by hand with its sibling override '
       'of rules_flutter, which push CI never checks out.',
+  'e2e/android_sharedprefs':
+      'Registrant-content test only; no workflow leg exists for it and the '
+      'nightly emulator leg is not extended by this item.',
 };
 
 final RegExp _workspaceRef = RegExp(
