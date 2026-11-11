@@ -1,9 +1,7 @@
 {
   "spawns": [
     {
-      "listedOutputs": [
-        "bazel-out/k8-opt-exec-ST-1/bin/lib"
-      ],
+      "listedOutputs": ["bazel-out/k8-opt-exec-ST-1/bin/lib"],
       "metrics": {
         "systemTime": "1s",
         "userTime": "1s"
@@ -15,9 +13,7 @@
       "inputs": {
         "bazel-out/k8-opt-exec-ST-1/bin/lib": {}
       },
-      "listedOutputs": [
-        "bazel-out/k8-opt-exec-ST-1/bin/tool"
-      ],
+      "listedOutputs": ["bazel-out/k8-opt-exec-ST-1/bin/tool"],
       "metrics": {
         "systemTime": "1s",
         "userTime": "1s"
@@ -26,9 +22,7 @@
       "targetLabel": "@@tools//:tool"
     },
     {
-      "listedOutputs": [
-        "bazel-out/k8-fastbuild/bin/c0"
-      ],
+      "listedOutputs": ["bazel-out/k8-fastbuild/bin/c0"],
       "metrics": {
         "systemTime": "1s",
         "userTime": "1s"
@@ -38,17 +32,13 @@
     },
     {
       "cacheHit": true,
-      "listedOutputs": [
-        "bazel-out/k8-fastbuild/bin/h0"
-      ],
+      "listedOutputs": ["bazel-out/k8-fastbuild/bin/h0"],
       "mnemonic": "Compile",
       "targetLabel": "//app:t"
     },
     {
       "cacheHit": true,
-      "listedOutputs": [
-        "bazel-out/k8-fastbuild/bin/h1"
-      ],
+      "listedOutputs": ["bazel-out/k8-fastbuild/bin/h1"],
       "mnemonic": "Compile",
       "targetLabel": "//app:t"
     }
