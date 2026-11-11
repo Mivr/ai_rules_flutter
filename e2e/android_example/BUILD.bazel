@@ -78,8 +78,8 @@ flutter_android_app(
 flutter_android_app(
     name = "app_analyze_size",
     package_name = "com.example.flutterapp",
-    application = ":app_flutter",
     analyze_size = True,
+    application = ":app_flutter",
     permissions = ["android.permission.INTERNET"],
 )
 
