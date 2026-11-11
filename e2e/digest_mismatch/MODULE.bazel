@@ -18,7 +18,7 @@ greps the exact message.
 module(name = "rules_flutter_digest_mismatch")
 
 bazel_dep(name = "ai_rules_flutter", version = "0.0.0", repo_name = "rules_flutter")
-bazel_dep(name = "ai_rules_dart", version = "0.24.0", repo_name = "rules_dart")
+bazel_dep(name = "ai_rules_dart", version = "0.27.0", repo_name = "rules_dart")
 
 local_path_override(
     module_name = "ai_rules_flutter",
@@ -27,12 +27,12 @@ local_path_override(
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "db7ec60d2515e0f1dc0eeb6632e0f88b27abd21e",
+    commit = "83495132087f39e83b4f178062f9baa6b26ae702",
     remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 
 sky = use_repo_rule(
-    "@rules_flutter//flutter/private:flutter_sky_engine_repo.bzl",
+    "@rules_flutter//flutter:repositories.bzl",
     "flutter_sky_engine_repo",
 )
 
@@ -49,9 +49,9 @@ sky(
 
 # Offline helper red paths. Each repo fetches one committed fixture file
 # through a file:// URL; CI fetches every repo separately.
-_download = use_repo_rule("@rules_flutter//flutter/private:digest_case_repos.bzl", "digest_download")
+_download = use_repo_rule("//:digest_case_repos.bzl", "digest_download")
 
-_extract = use_repo_rule("@rules_flutter//flutter/private:digest_case_repos.bzl", "digest_extract")
+_extract = use_repo_rule("//:digest_case_repos.bzl", "digest_extract")
 
 _TXT_SHA256 = "7145333f2c1999f823e0ad287d979acf5c0db3337c2d79e9583c373df2ebc0a6"
 

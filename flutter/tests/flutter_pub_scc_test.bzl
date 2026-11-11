@@ -65,6 +65,8 @@ load(
 load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _hub_build_content_empty_scc_test_impl(ctx):
     """Hub BUILD and android/BUILD are byte-identical when scc_targets is empty."""
     env = unittest.begin(ctx)
@@ -466,17 +468,14 @@ def _merged_spoke_build_3cycle_test_impl(ctx):
         'flutter_test_package(\n    name = "test",\n    library = "//:_test_member",' in test_member_build,
         test_member_build,
     )
-    asserts.true(env, "flutter_test_package" in scc_flutter_test_package_bzl_content())
-    public = scc_flutter_test_package_bzl_content(_providers_ctx("DartTestRunnerSnapshotInfo"))
-    asserts.true(env, '"@rules_dart//dart:providers.bzl",\n    "DartTestRunnerInfo"' in public, public)
-    older = scc_flutter_test_package_bzl_content(_providers_ctx("DartInfo"))
-    asserts.true(env, '"@rules_dart//dart/private:dart_test_runner.bzl"' in older, older)
+    content = scc_flutter_test_package_bzl_content()
+    asserts.true(env, "flutter_test_package" in content)
+    asserts.true(env, '"@rules_dart//dart:providers.bzl"' in content, content)
+    asserts.true(env, '"DartTestRunnerInfo"' in content, content)
+    asserts.true(env, '"DartTestRunnerSnapshotInfo"' in content, content)
+    asserts.true(env, "dart/private" not in content, content)
 
     return unittest.end(env)
-
-def _providers_ctx(providers_text):
-    """A repository-context stand-in whose `rules_dart` `providers.bzl` reads `providers_text`."""
-    return struct(path = lambda label: label, read = lambda _path: providers_text)
 
 def root_content_snippet(content):
     """Helper to return content stripped of leading/trailing space for sub-checks."""

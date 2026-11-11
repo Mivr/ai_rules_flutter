@@ -1,6 +1,6 @@
 """Floor check for the resolved `ai_rules_dart` module.
 
-`rules_flutter` needs `ai_rules_dart` 0.24.0 (see `MODULE.bazel`), but a root
+`rules_flutter` needs `ai_rules_dart` 0.27.0 (see `MODULE.bazel`), but a root
 module override (`archive_override`, `git_override`, `local_path_override`
 or `single_version_override`) replaces that resolution while Bazel ignores
 the overridden module's `bazel_dep` version. Release archives carry no module
@@ -14,7 +14,9 @@ so a floor bump touches one file.
 
 load("@rules_dart//dart/pub:yaml_parser.bzl", "pubspec_sdk_constraint_error")
 
-RULES_DART_FLOOR = "0.24.0"
+visibility(["//flutter/..."])
+
+RULES_DART_FLOOR = "0.27.0"
 
 # A pubspec-shaped stream the floor reader refuses and the previous release
 # accepts: `pubspec_sdk_constraint_error` is public in both, reports None on

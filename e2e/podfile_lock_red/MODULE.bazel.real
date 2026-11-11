@@ -3,7 +3,7 @@
 module(name = "rules_flutter_podfile_lock_red")
 
 bazel_dep(name = "ai_rules_flutter", version = "0.0.0", repo_name = "rules_flutter")
-bazel_dep(name = "ai_rules_dart", version = "0.24.0", repo_name = "rules_dart")
+bazel_dep(name = "ai_rules_dart", version = "0.27.0", repo_name = "rules_dart")
 
 local_path_override(
     module_name = "ai_rules_flutter",
@@ -12,7 +12,7 @@ local_path_override(
 
 git_override(
     module_name = "ai_rules_dart",
-    commit = "db7ec60d2515e0f1dc0eeb6632e0f88b27abd21e",
+    commit = "83495132087f39e83b4f178062f9baa6b26ae702",
     remote = "https://github.com/Mivr/ai_rules_dart.git",
 )
 
@@ -20,7 +20,7 @@ flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.7")
 flutter.pub(
     name = "red_deps",
-    lock = "//:pubspec.lock",
     ios_podfile_lock = "//:Podfile.lock",
+    lock = "//:pubspec.lock",
 )
 use_repo(flutter, "red_deps")

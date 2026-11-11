@@ -77,11 +77,11 @@
     "symbol": "`@rules_jvm_external//:extensions.bzl` with `maven.install`/`maven.artifact`, `use_starlark_android_rules` and `aar_import_bzl_label`"
   },
   "ai_rules_dart": {
-    "floor": "0.24.0",
-    "current": "0.24.0",
-    "resolved": "0.24.0",
+    "floor": "0.27.0",
+    "current": "0.27.0",
+    "resolved": "0.27.0",
     "lifted_by": [],
-    "symbol": "`@rules_dart//dart:hooks.bzl`, `@rules_dart//dart/private:record_use.bzl`, `@rules_dart//dart/pub:pub_scc.bzl`, `dart_analysis_config(baseline = ...)` and `dart_codegen(package_name = ...)`"
+    "symbol": "`@rules_dart//dart:defs.bzl`, `@rules_dart//dart:utils.bzl`, `@rules_dart//dart/pub:pub_scc.bzl`, `dart_analysis_config(baseline = ...)` and `dart_codegen(package_name = ...)`"
   },
   "rules_go": {
     "floor": "0.59.0",
