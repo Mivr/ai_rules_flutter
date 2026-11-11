@@ -44,7 +44,7 @@ def _archive_test_impl(ctx):
     )
 
     # Everything is a declared input: the only executable is the Dart tool, with no host tool.
-    asserts.true(env, [p for p in inputs if p.endswith("android_bundle.dill")], "bundle tool in %s" % inputs)
+    asserts.true(env, [p for p in inputs if p.endswith("tools/android_bundle")], "bundle tool in %s" % inputs)
     for arg in (action.argv or []):
         asserts.false(env, arg.startswith("/bin/") or arg.startswith("/usr/bin/"), "host tool in argv: %s" % arg)
     for path in inputs:

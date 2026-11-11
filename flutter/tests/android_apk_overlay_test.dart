@@ -167,7 +167,6 @@ void _runOverlayTool({
   required bool debug,
 }) {
   final args = <String>[
-    androidBundlePath,
     'apk-overlay',
     '--base',
     basePath,
@@ -181,10 +180,7 @@ void _runOverlayTool({
   if (debug) {
     args.add('--debug');
   }
-  final ProcessResult result = Process.runSync(
-    Platform.resolvedExecutable,
-    args,
-  );
+  final ProcessResult result = Process.runSync(androidBundlePath, args);
   if (result.exitCode != 0) {
     throw StateError(
       'android_bundle apk-overlay failed (exit ${result.exitCode}):\n'

@@ -33,7 +33,6 @@ payload entries come last).
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_android//providers:providers.bzl", "AndroidFeatureFlagSet", "AndroidInstrumentationInfo", "ApkInfo", "StarlarkApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
-load("//flutter/private:common.bzl", "resolve_exec_dart_vm")
 load("//flutter/private:flutter_android_binary_proxy.bzl", _overlay_output_groups = "overlay_output_groups")
 
 _ANDROID_SDK_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android_sdk:toolchain_type")
@@ -199,11 +198,10 @@ def _overlay_merged_manifest(ctx, base):
         )
     return merged_manifests[0], base_groups
 
-def _run_apk_overlay(ctx, dart_exe, dart_vm_files, base_unsigned, native_libs_jar, flutter_assets):
+def _run_apk_overlay(ctx, base_unsigned, native_libs_jar, flutter_assets):
     """Splices the Flutter payload into a copy of the base unsigned APK."""
     overlay_unsigned = ctx.actions.declare_file(ctx.label.name + "_overlay_unsigned.apk")
     overlay_args = ctx.actions.args()
-    overlay_args.add(ctx.executable._overlay_tool.path)
     overlay_args.add("apk-overlay")
     overlay_args.add("--base", base_unsigned.path)
     overlay_args.add("--native-libs-jar", native_libs_jar.path)
@@ -214,11 +212,10 @@ def _run_apk_overlay(ctx, dart_exe, dart_vm_files, base_unsigned, native_libs_ja
     if ctx.var.get("COMPILATION_MODE", "") == "dbg":
         overlay_args.add("--debug")
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._overlay_tool,
         arguments = [overlay_args],
         inputs = depset(
             direct = [ctx.executable._overlay_tool, base_unsigned, native_libs_jar, flutter_assets],
-            transitive = [dart_vm_files],
         ),
         outputs = [overlay_unsigned],
         mnemonic = "FlutterApkOverlay",
@@ -411,8 +408,7 @@ def _flutter_android_apk_overlay_impl(ctx):
     flutter_assets = ctx.file.flutter_assets
 
     # 1. Splice the Flutter payload into a copy of the base unsigned APK.
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx)
-    overlay_unsigned = _run_apk_overlay(ctx, dart_exe, dart_vm_files, base_unsigned, native_libs_jar, flutter_assets)
+    overlay_unsigned = _run_apk_overlay(ctx, base_unsigned, native_libs_jar, flutter_assets)
 
     # 2. Align, exactly as android_binary does (`-P 16`, same alignment).
     aligned = _run_zipalign(ctx, sdk, overlay_unsigned)

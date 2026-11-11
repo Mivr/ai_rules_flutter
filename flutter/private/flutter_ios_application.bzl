@@ -22,7 +22,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 # (it accepts a single .framework). This is the same helper that rule uses.
 # buildifier: disable=bzl-visibility
 load("@rules_apple//apple/internal:framework_import_support.bzl", "framework_import_support")
-load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo", "resolve_exec_dart_vm")
+load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo")
 load("//flutter/private:constants.bzl", "IOS_MINIMUM_OS_VERSION")
 load("//flutter/private:flutter_native_assets.bzl", "native_asset_framework_name")
 
@@ -107,8 +107,6 @@ def _check_ios_simulator_aot(ctx, app_info, is_device):
 
 def _patch_ios_app_binary(
         ctx,
-        dart_exe,
-        dart_vm_files,
         dylib,
         framework_binary,
         vtool_platform,
@@ -121,7 +119,6 @@ def _patch_ios_app_binary(
     gen_snapshot's `--strip` leaves those behind on Apple.
     """
     patch_args = [
-        ctx.executable._macho_edit.path,
         "patch",
         "--input",
         dylib.path,
@@ -141,11 +138,10 @@ def _patch_ios_app_binary(
     for allowed in ctx.attr.allow_non_macho:
         patch_args.extend(["--allow-non-macho", allowed])
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = patch_args,
         inputs = depset(
             direct = [dylib, ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [framework_binary],
         mnemonic = "FlutterIOSRetagDylib",
@@ -153,12 +149,11 @@ def _patch_ios_app_binary(
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
-def _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, framework_assets):
+def _copy_ios_framework_assets(ctx, flutter_assets, framework_assets):
     """Copies flutter_assets into the framework."""
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [
-            ctx.executable._macho_edit.path,
             "copy-assets",
             "--src",
             flutter_assets.path,
@@ -167,7 +162,6 @@ def _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, fra
         ],
         inputs = depset(
             direct = [flutter_assets, ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [framework_assets],
         mnemonic = "FlutterIOSCopyAssets",
@@ -175,15 +169,14 @@ def _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, fra
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
 
-def _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_arch, vtool_platform, minimum_os_version):
+def _stub_ios_app_binary(ctx, framework_binary, stub_arch, vtool_platform, minimum_os_version):
     """Creates a stub dylib — rules_apple's framework processor requires a binary file.
 
     bundle_only=True prevents linking so it is never loaded.
     """
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = [
-            ctx.executable._macho_edit.path,
             "stub",
             "--output",
             framework_binary.path,
@@ -200,7 +193,6 @@ def _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_ar
         ],
         inputs = depset(
             direct = [ctx.executable._macho_edit],
-            transitive = [dart_vm_files],
         ),
         outputs = [framework_binary],
         mnemonic = "FlutterIOSStubDylib",
@@ -210,8 +202,6 @@ def _stub_ios_app_binary(ctx, dart_exe, dart_vm_files, framework_binary, stub_ar
 
 def _assemble_ios_debug_assets(
         ctx,
-        dart_exe,
-        dart_vm_files,
         flutter_sdk_info,
         flutter_assets,
         kernel_dill,
@@ -225,8 +215,6 @@ def _assemble_ios_debug_assets(
 
     Args:
         ctx: The rule context.
-        dart_exe: The Dart executable file.
-        dart_vm_files: Depset of Dart VM runtime files.
         flutter_sdk_info: The resolved FlutterSdkInfo.
         flutter_assets: The staged app flutter_assets directory.
         kernel_dill: The compiled Dart kernel dill file.
@@ -240,7 +228,6 @@ def _assemble_ios_debug_assets(
     iso_snapshot = flutter_sdk_info.isolate_snapshot
 
     copy_args = [
-        ctx.executable._macho_edit.path,
         "copy-assets",
         "--src",
         flutter_assets.path,
@@ -262,11 +249,10 @@ def _assemble_ios_debug_assets(
             copy_inputs.append(snap)
 
     ctx.actions.run(
-        executable = dart_exe,
+        executable = ctx.executable._macho_edit,
         arguments = copy_args,
         inputs = depset(
             direct = copy_inputs,
-            transitive = [dart_vm_files],
         ),
         outputs = [framework_assets],
         mnemonic = "FlutterIOSDebugAssets",
@@ -401,30 +387,25 @@ def _flutter_ios_framework_impl(ctx):
 
     ctx.actions.write(framework_plist, _APP_FRAMEWORK_INFO_PLIST.format(minimum_os_version = minimum_os_version))
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx, flutter_sdk_info)
     kernel_blob = None
 
     if app_info.aot_output:
         # Release mode: AOT binary + flutter_assets.
         _patch_ios_app_binary(
             ctx,
-            dart_exe,
-            dart_vm_files,
             app_info.aot_output,
             framework_binary,
             vtool_platform,
             minimum_os_version,
             app_info.aot_strip,
         )
-        _copy_ios_framework_assets(ctx, dart_exe, dart_vm_files, flutter_assets, framework_assets)
+        _copy_ios_framework_assets(ctx, flutter_assets, framework_assets)
     else:
         # Debug mode: stub binary + flutter_assets with kernel_blob.bin.
         target_arch = apple_support.target_arch_from_rule_ctx(ctx)
         stub_arch = "arm64" if target_arch == "arm64" else "x86_64"
         _stub_ios_app_binary(
             ctx,
-            dart_exe,
-            dart_vm_files,
             framework_binary,
             stub_arch,
             vtool_platform,
@@ -432,8 +413,6 @@ def _flutter_ios_framework_impl(ctx):
         )
         kernel_blob = _assemble_ios_debug_assets(
             ctx,
-            dart_exe,
-            dart_vm_files,
             flutter_sdk_info,
             flutter_assets,
             app_info.kernel_dill,
@@ -547,8 +526,6 @@ def _flutter_ios_native_frameworks_impl(ctx):
     is_device = apple_support.target_environment_from_rule_ctx(ctx) == "device"
     vtool_platform = "ios" if is_device else "iossim"
 
-    dart_exe, dart_vm_files = resolve_exec_dart_vm(ctx) if dylibs else (None, None)
-
     framework_files = []
     seen = {}
     for dylib in dylibs:
@@ -567,7 +544,6 @@ def _flutter_ios_native_frameworks_impl(ctx):
         # LC_BUILD_VERSION so the dynamic linker resolves it from the embedded
         # framework via @rpath with the configured deployment target.
         patch_args = [
-            ctx.executable._macho_edit.path,
             "patch",
             "--input",
             dylib.path,
@@ -585,11 +561,10 @@ def _flutter_ios_native_frameworks_impl(ctx):
         for allowed in ctx.attr.allow_non_macho:
             patch_args.extend(["--allow-non-macho", allowed])
         ctx.actions.run(
-            executable = dart_exe,
+            executable = ctx.executable._macho_edit,
             arguments = patch_args,
             inputs = depset(
                 direct = [dylib, ctx.executable._macho_edit],
-                transitive = [dart_vm_files],
             ),
             outputs = [binary],
             mnemonic = "FlutterIOSNativeAssetFramework",
