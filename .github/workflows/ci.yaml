@@ -822,6 +822,8 @@ jobs:
         uses: ./.github/actions/disk-report
         with:
           label: after e2e/integration_android
+      - name: Run e2e/aar_host
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/aar_host --bazel=bazel
       - name: Run e2e/min_versions
         run: bazel run //tools/e2e_runner -- --workspace=e2e/min_versions --bazel=bazel
       - name: Disk report (after e2e/min_versions)
