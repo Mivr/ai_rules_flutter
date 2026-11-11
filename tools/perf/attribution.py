@@ -12,21 +12,20 @@ and no command lines. The remainder is total minus parts 1 to 6, never
 clamped; ``ok`` holds while it is within 5% of the total.
 """
 
-import gzip
 import os
-import tempfile
 
 from attribution_owner import check_input_data
 from attribution_owner import median_counts
-from attribution_owner import merge_owners
 from attribution_owner import owner_warnings
-from attribution_owner import repo_of
-from attribution_owner import repo_owners
 from attribution_owner import spawn_counts
 from attribution_trace import MissingData
 from attribution_trace import TRACE_PARTS
 from attribution_trace import trace_part_seconds
-from execlog import load_spawns
+from attribution_wall import accumulate_host_costs
+from attribution_wall import load_rep_spawns
+from attribution_wall import summarize_host_tools
+from attribution_wall import top_with_other
+from attribution_wall import try_wall_attribution
 from execlog import parse_duration
 from replay import builds_host_tool
 from replay import spawn_output_strings
@@ -74,47 +73,18 @@ def spawn_costs(spawns):
     """{"target_actions", "host": {"total","by_mnemonic","by_repo"}}."""
     check_spawn_data(spawns)
     check_input_data(spawns)
-    host = {"total": 0.0, "by_mnemonic": {}, "by_repo": {}}
-    target = 0.0
-    for spawn in spawns:
-        cpu = spawn_cpu(spawn)
-        if not builds_host_tool(spawn):
-            target += cpu
-            continue
-        host["total"] += cpu
-        mnemonic = spawn.get("mnemonic") or ""
-        repo = repo_of(spawn.get("targetLabel"))
-        for key, name in (("by_mnemonic", mnemonic), ("by_repo", repo)):
-            host[key][name] = host[key].get(name, 0.0) + cpu
-    host["owners"] = repo_owners(spawns)
+    host = accumulate_host_costs(spawns, spawn_cpu)
+    target = sum(spawn_cpu(s) for s in spawns if not builds_host_tool(s))
     return {"target_actions": target, "host": host,
             "counts": spawn_counts(spawns)}
 
 
-def top_with_other(values, limit=TOP_N):
-    """The `limit` largest entries plus an "other" sum of the rest."""
-    ranked = sorted(values.items(), key=lambda item: (-item[1], item[0]))
-    named = dict(ranked[:limit])
-    named["other"] = sum(value for _, value in ranked[limit:])
-    return named
-
-
-def _gunzip_to(src, dst):
-    with open(src, "rb") as fin:
-        data = fin.read()
-    with open(dst, "wb") as fout:
-        fout.write(gzip.decompress(data))
-
-
 def rep_parts(rep_dir):
     """One repeat's raw parts; raises OSError/ValueError if unreadable."""
-    with tempfile.TemporaryDirectory() as tmp:
-        log = os.path.join(tmp, "execlog.json")
-        _gunzip_to(os.path.join(rep_dir, _EXECLOG), log)
-        try:
-            costs = spawn_costs(load_spawns(log))
-        except MissingData as exc:
-            raise MissingData("%s (in %s)" % (exc, rep_dir))
+    try:
+        costs = spawn_costs(load_rep_spawns(rep_dir))
+    except MissingData as exc:
+        raise MissingData("%s (in %s)" % (exc, rep_dir))
     seconds = trace_part_seconds(os.path.join(rep_dir, _TRACE))
     parts = {name: seconds[name] for name in TRACE_PARTS}
     parts["target_actions"] = costs["target_actions"]
@@ -132,30 +102,12 @@ def missing_input(rep_dirs):
     return None
 
 
-def _median_map(maps):
-    keys = set()
-    for entry in maps:
-        keys.update(entry)
-    return {key: summarize_values(
-        [entry.get(key, 0.0) for entry in maps])["median"] for key in keys}
-
-
 def median_parts(reps):
     """Per-key median over the repeats' raw parts."""
     out = {name: summarize_values([r[name] for r in reps])["median"]
            for name in SIMPLE_PARTS}
     hosts = [r["host"] for r in reps]
-    out["host_tools"] = {
-        "total": summarize_values([h["total"] for h in hosts])["median"],
-        "by_mnemonic": top_with_other(
-            _median_map([h["by_mnemonic"] for h in hosts])),
-        "by_repo": top_with_other(
-            _median_map([h["by_repo"] for h in hosts])),
-        "by_repo_owner": merge_owners([h["owners"] for h in hosts])}
-    keep = out["host_tools"]["by_repo"]
-    out["host_tools"]["by_repo_owner"] = {
-        repo: out["host_tools"]["by_repo_owner"].get(repo, [])
-        for repo in keep if repo != "other"}
+    out["host_tools"] = summarize_host_tools(hosts)
     return out
 
 
@@ -186,6 +138,13 @@ def attribute_flow(rep_dirs, total):
     try:
         reps = [rep_parts(rep_dir) for rep_dir in rep_dirs]
     except MissingData as exc:
+        if "metrics.userTime/systemTime" in str(exc):
+            try:
+                wall = try_wall_attribution(rep_dirs, str(exc))
+                if wall is not None:
+                    return wall
+            except MissingData as wall_exc:
+                return {"ok": False, "error": str(wall_exc)}
         return {"ok": False, "error": str(exc)}
     except (OSError, ValueError) as exc:
         return {"ok": False, "error": "unreadable input: %s" % (exc,)}

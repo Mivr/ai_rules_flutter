@@ -246,6 +246,7 @@ class AttributionTest(unittest.TestCase):
     def test_strict_exit_per_fixture(self):
         for execlog, code in (("execlog_no_metrics", 1),
                               ("execlog_no_outputs", 1),
+                              ("execlog_wall", 1),
                               ("execlog", 0)):
             shutil.rmtree(os.path.join(self.root, "sol"),
                           ignore_errors=True)
@@ -256,6 +257,79 @@ class AttributionTest(unittest.TestCase):
                     "--strict-attribution"]
             with mock.patch("builtins.print"):
                 self.assertEqual(sol.main(argv), code, execlog)
+
+    def test_host_tools_wall_when_cpu_metrics_missing(self):
+        rep = put_rep(self.root, "sim_debug", "clean", 1,
+                      trace="overlap_trace", execlog="execlog_wall")
+        result = attribution.attribute_flow([rep], 100.0)
+        self.assertFalse(result["ok"])
+        self.assertIn("CPU metrics", result["error"])
+        self.assertNotIn("parts", result)
+        host = result["host_tools_wall"]
+        self.assertEqual(host["unit"], "wall_s")
+        self.assertAlmostEqual(host["total"], 7.0)
+        self.assertEqual(host["by_mnemonic"], {"Host": 7.0, "other": 0})
+        self.assertEqual(host["by_repo"],
+                         {"tools": 4.0, "extra": 3.0, "other": 0})
+        self.assertEqual(host["by_repo_owner"],
+                         {"extra": ["@@tools//:h"], "tools": []})
+        self.assertEqual(result["warnings"],
+                         ["no exec tool target found for repository tools"])
+
+    def test_log_with_cpu_metrics_has_no_host_tools_wall(self):
+        rep = put_rep(self.root, "sim_debug", "clean", 1)
+        result = attribution.attribute_flow([rep], 100.0)
+        self.assertTrue(result["ok"])
+        self.assertNotIn("host_tools_wall", result)
+
+    def test_log_without_cpu_or_wall_metrics_has_no_host_tools_wall(self):
+        rep = put_rep(self.root, "sim_debug", "clean", 1,
+                      execlog="execlog_no_metrics")
+        result = attribution.attribute_flow([rep], 100.0)
+        self.assertFalse(result["ok"])
+        self.assertIn("CPU metrics", result["error"])
+        self.assertNotIn("host_tools_wall", result)
+        self.assertEqual(sorted(result), ["error", "ok"])
+
+    def test_wall_medians_over_reps(self):
+        rep1 = put_rep(self.root, "sim_debug", "clean", 1,
+                       trace="overlap_trace", execlog="execlog_wall")
+        rep2 = put_rep(self.root, "sim_debug", "clean", 2,
+                       trace="overlap_trace", execlog="execlog_wall")
+        rep3 = put_rep(self.root, "sim_debug", "clean", 3,
+                       trace="overlap_trace", execlog="execlog_wall")
+        for rep, (t, e) in ((rep2, ("5.0s", "4.0s")), (rep3, ("6.0s", "5.0s"))):
+            log = os.path.join(rep, "execlog.json.gz")
+            with gzip.open(log, "rt") as fh:
+                data = json.load(fh)
+            data["spawns"][0]["metrics"]["executionWallTime"] = t
+            data["spawns"][1]["metrics"]["executionWallTime"] = e
+            with gzip.open(log, "wt") as fh:
+                json.dump(data, fh)
+        result = attribution.attribute_flow([rep1, rep2, rep3], 100.0)
+        self.assertFalse(result["ok"])
+        host = result["host_tools_wall"]
+        self.assertAlmostEqual(host["total"], 9.0)
+        self.assertEqual(host["by_repo"],
+                         {"tools": 5.0, "extra": 4.0, "other": 0})
+        self.assertEqual(host["by_mnemonic"], {"Host": 9.0, "other": 0})
+
+    def test_wall_log_without_inputs_names_the_gap(self):
+        shutil.rmtree(os.path.join(self.root, "sol"), ignore_errors=True)
+        rep = put_rep(self.root, "sim_debug", "clean", 1,
+                      execlog="execlog_wall")
+        log = os.path.join(rep, "execlog.json.gz")
+        with gzip.open(log, "rt") as fh:
+            data = json.load(fh)
+        for spawn in data["spawns"]:
+            spawn.pop("inputs", None)
+        with gzip.open(log, "wt") as fh:
+            json.dump(data, fh)
+        result = attribution.attribute_flow([rep], 100.0)
+        self.assertFalse(result["ok"])
+        self.assertIn("inputs", result["error"])
+        self.assertNotIn("host_tools_wall", result)
+        self.assertEqual(sorted(result), ["error", "ok"])
 
 
 if __name__ == "__main__":
