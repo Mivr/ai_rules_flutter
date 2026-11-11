@@ -56,6 +56,8 @@ def process_cpu(pid):
     return 60 * float(minutes or 0) + float(seconds)
 
 
+MAX_PRELUDE = 30
+MAX_PRE_RESULT = MAX_PRELUDE
 MAX_DIAGNOSTICS = 30
 STDERR_TAIL = 20
 MAX_MESSAGE = 4000
@@ -70,15 +72,27 @@ def cap_middle(text, limit):
     return text[:keep // 2] + mark + text[len(text) - (keep - keep // 2):]
 
 
-def error_message(fields, diagnostics, stderr_tail):
-    """Cause text: closing fields, diagnostics, stderr; <= MAX_MESSAGE."""
+def error_message(fields, pre_result, diagnostics=None, stderr_tail=None):
+    """Cause text: closing fields, prelude, diagnostics, stderr; <= MAX_MESSAGE."""
+    if stderr_tail is None and isinstance(diagnostics, str):
+        stderr_tail = diagnostics
+        diagnostics = pre_result
+        pre_result = []
+    elif diagnostics is None:
+        diagnostics = []
+    if stderr_tail is None:
+        stderr_tail = ""
     head = "frontend_server reported errors: %s" % (
         " ".join(fields) or "no output file")
     parts = []
+    if pre_result:
+        parts.append("before result:\n" + "\n".join(pre_result))
     if diagnostics:
         parts.append("diagnostics:\n" + "\n".join(diagnostics))
     if stderr_tail:
         parts.append("stderr:\n" + stderr_tail)
+    if not parts:
+        parts.append("the server printed no diagnostics and no stderr")
     body = cap_middle("\n".join(parts), MAX_MESSAGE - len(head) - 1)
     return head + ("\n" + body if body else "")
 
@@ -113,30 +127,41 @@ class FrontendServer:
         return "\n".join(text.splitlines()[-STDERR_TAIL:])
 
     def _read_result(self):
-        """Waits for ``result <key>``; returns (fields, diagnostics).
+        """Waits for ``result <key>``; returns (fields, pre_result, diagnostics).
 
-        Diagnostics are the lines between ``result <key>`` and the closing
-        line, in order, at most the first MAX_DIAGNOSTICS.
+        Lines before ``result <key>`` are kept in order, at most the first
+        MAX_PRELUDE. Diagnostics are the lines between ``result <key>``
+        and the closing line, in order, at most the first MAX_DIAGNOSTICS.
         """
         key = None
+        pre_result = []
         diagnostics = []
         for line in self.proc.stdout:
-            line = line.rstrip("\n")
+            line = line.rstrip("\r\n")
             if key is None and line.startswith("result "):
                 key = line.split(" ", 1)[1]
-            elif key is not None and line.startswith(key):
-                return line[len(key):].split(), diagnostics
-            elif key is not None and len(diagnostics) < MAX_DIAGNOSTICS:
+            elif key is None:
+                if len(pre_result) < MAX_PRELUDE:
+                    pre_result.append(line)
+            elif line.startswith(key):
+                return line[len(key):].split(), pre_result, diagnostics
+            elif len(diagnostics) < MAX_DIAGNOSTICS:
                 diagnostics.append(line)
         tail = self.stderr_tail()
-        raise FloorError("frontend_server ended without a result"
-                         + ("\nstderr:\n" + tail if tail else ""))
+        head = "frontend_server ended without a result"
+        parts = []
+        if pre_result:
+            parts.append("before result:\n" + "\n".join(pre_result))
+        if tail:
+            parts.append("stderr:\n" + tail)
+        body = cap_middle("\n".join(parts), MAX_MESSAGE - len(head) - 1)
+        raise FloorError(head + ("\n" + body if body else ""))
 
     def _checked(self):
-        fields, diagnostics = self._read_result()
+        fields, pre_result, diagnostics = self._read_result()
         if len(fields) < 2 or fields[-1] != "0":
             raise FloorError(error_message(
-                fields, diagnostics, self.stderr_tail()))
+                fields, pre_result, diagnostics, self.stderr_tail()))
 
     def compile(self, entry):
         """First full compile; accepted so the next one is incremental."""
