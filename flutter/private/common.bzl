@@ -29,7 +29,7 @@ load(
     _collect_define_flagfiles = "collect_define_flagfiles",
     _merge_dart_defines = "merge_dart_defines",
 )
-load("//flutter/private:flutter_info.bzl", "dedup_plugins")
+load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
 load(
     "//flutter/private:flutter_kernel_module.bzl",
     "compile_flutter_modular_app_kernel",
@@ -371,11 +371,7 @@ def _kernel_registrant(ctx, target_platform, agent, emit_dev_config):
     # Collect plugins from deps and generate the registrant. The registrant is
     # a side library (upstream _PluginRegistrant shape) the engine invokes
     # before main() on every root-isolate launch — including hot restart.
-    all_dep_plugins = []
-    for dep in ctx.attr.deps:
-        if FlutterInfo in dep:
-            all_dep_plugins.extend(dep[FlutterInfo].plugins)
-    plugins = dedup_plugins(all_dep_plugins)
+    plugins = collect_flutter_plugin_deps(ctx.attr.deps).all_plugins
     registrant = generate_dart_plugin_registrant(
         ctx,
         plugins,

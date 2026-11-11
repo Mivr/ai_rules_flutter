@@ -31,21 +31,23 @@ load("//flutter/private:flutter_info.bzl", "LINK_HOOK_ATTR", "flutter_asset_chan
 load("//flutter/private:flutter_library.bzl", "SKY_ENGINE_ATTR", "build_pub_contributions", "check_asset_shader_conflict", "flutter_analyzable_info")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs", "native_sources_aspect")
 
-def build_plugin_struct(name, plugin_platforms, implements = ""):
+def build_plugin_struct(name, plugin_platforms, implements = "", direct = False):
     """Build a plugin metadata struct from per-platform metadata.
 
     Args:
         name: Plugin package name.
         plugin_platforms: Dict of platform -> {pluginClass, dartPluginClass, ...}.
         implements: Umbrella package name this plugin implements, or "".
+        direct: Whether this plugin is a direct dependency.
 
     Returns:
-        A struct with name, platforms dict, and implements.
+        A struct with name, platforms dict, implements, and direct.
     """
     return struct(
         name = name,
         platforms = plugin_platforms,
         implements = implements if implements != None else "",
+        direct = direct,
     )
 
 def _apple_plugin_platform(ctx):
