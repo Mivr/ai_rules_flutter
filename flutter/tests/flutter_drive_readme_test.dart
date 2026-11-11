@@ -50,9 +50,18 @@ void main() {
   });
 
   test('states the supported device kinds and the iOS environment', () {
-    expect(readme, contains('Supported device kinds are the Android emulator'));
-    expect(readme, contains('iOS simulator'));
-    expect(readme, contains('FLUTTER_DRIVE_IOS_UDID'));
+    final int start = readme.indexOf('### flutter_drive_test');
+    final int end = readme.indexOf('### flutter_plugin', start);
+    final String section = readme.substring(start, end);
+    expect(
+      section,
+      contains('Supported device kinds are the Android emulator'),
+    );
+    expect(section, contains('iOS simulator'));
+    expect(section, contains('FLUTTER_DRIVE_IOS_UDID'));
+    expect(section, contains('FLUTTER_DRIVE_VM_SERVICE_URI'));
+    expect(section, contains('FLUTTER_DRIVE_PACKAGE'));
+    expect(section, isNot(contains('| `platform` |')));
     expect(readme, isNot(contains('Android only')));
     expect(readme, isNot(contains('iOS simulator support is a later item')));
   });

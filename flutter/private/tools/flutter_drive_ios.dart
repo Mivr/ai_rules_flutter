@@ -19,6 +19,60 @@ import 'flutter_drive_common.dart';
 import 'flutter_integration_test_ios.dart';
 import 'test_support.dart';
 
+/// Running `simctl launch --console-pty` child process.
+class ConsoleProcess {
+  /// Wraps output streams, [exitCode] and [kill] of a launched console child.
+  const new({
+    required this.stdout,
+    required this.stderr,
+    required this.exitCode,
+    required this.kill,
+  });
+
+  /// Spawns a real OS process with [Process.start].
+  static Future<ConsoleProcess> start(
+    String executable,
+    List<String> args,
+  ) async {
+    final Process p = await Process.start(executable, args);
+    return ConsoleProcess(
+      stdout: p.stdout,
+      stderr: p.stderr,
+      exitCode: p.exitCode,
+      kill: () => p.kill(ProcessSignal.sigkill),
+    );
+  }
+
+  /// Standard output byte stream.
+  final Stream<List<int>> stdout;
+
+  /// Standard error byte stream.
+  final Stream<List<int>> stderr;
+
+  /// Exit code future of the child process.
+  final Future<int> exitCode;
+
+  /// Terminates the console child process.
+  final void Function() kill;
+}
+
+/// Callback that starts an `xcrun simctl launch --console-pty` child.
+typedef ConsoleStarter = Future<ConsoleProcess> Function(
+  String executable,
+  List<String> args,
+);
+
+/// Callback that executes the host driver and returns its exit code.
+typedef DriverRunner = Future<int> Function(
+  DriverCommand command,
+  String scratch,
+  Map<String, String> extraEnv,
+);
+
+final RegExp _xmlBundleId = RegExp(
+  r'<key>\s*CFBundleIdentifier\s*</key>\s*<string>\s*([^<\s]+)\s*</string>',
+);
+
 /// Everything the iOS run reads from the test environment.
 class IosDriveConfig {
   /// Creates an iOS drive configuration.
@@ -32,7 +86,7 @@ class IosDriveConfig {
   /// Reads the configuration from the test [env] and runfiles [r].
   factory fromEnv(Map<String, String> env, Runfiles r) => IosDriveConfig(
     app: r.rlocation(requiredEnv(env, 'FLUTTER_DRIVE_IOS_APP')),
-    bundleId: requiredEnv(env, 'FLUTTER_DRIVE_IOS_BUNDLE_ID'),
+    bundleId: (env['FLUTTER_DRIVE_IOS_BUNDLE_ID'] ?? '').trim(),
     driver: driverCommandFromEnv(env, r),
     tmp: env['TEST_TMPDIR'] ?? Directory.systemTemp.path,
   );
@@ -40,7 +94,7 @@ class IosDriveConfig {
   /// The simulator `.ipa` (or `.app` directory) under test.
   final String app;
 
-  /// Bundle identifier the app is installed and launched under.
+  /// Bundle identifier override; when empty, read from `Info.plist` at launch.
   final String bundleId;
 
   /// Host command that runs the driver.
@@ -53,8 +107,12 @@ class IosDriveConfig {
 /// One simulator session: boot, install, launch and tear down.
 class IosDriveSession {
   /// Creates a simulator session for [config].
-  new(this.config, {CommandSpawner? spawner})
-    : spawner = spawner ?? ProcessCommandSpawner();
+  new(
+    this.config, {
+    CommandSpawner? spawner,
+    this.consoleStarter = ConsoleProcess.start,
+    this.waitVmTimeout = const Duration(seconds: 300),
+  }) : spawner = spawner ?? ProcessCommandSpawner();
 
   /// The run's inputs.
   final IosDriveConfig config;
@@ -62,14 +120,24 @@ class IosDriveSession {
   /// How `xcrun` children are started.
   final CommandSpawner spawner;
 
+  /// How `simctl launch --console-pty` is started.
+  final ConsoleStarter consoleStarter;
+
+  /// Time budget to wait for the Dart VM service line on the launch console.
+  final Duration waitVmTimeout;
+
   String? _udid;
+  String? _bundleId;
   bool _bootedHere = false;
   bool _launched = false;
   Directory? _scratch;
-  Process? _console;
+  ConsoleProcess? _console;
 
   /// The booted simulator's UDID, or an empty string before boot.
   String get udid => _udid ?? '';
+
+  /// Resolved bundle identifier of the launched app.
+  String get bundleId => _bundleId ?? config.bundleId;
 
   /// The session scratch directory, or [IosDriveConfig.tmp] before boot.
   String get scratchPath => _scratch?.path ?? config.tmp;
@@ -113,35 +181,63 @@ class IosDriveSession {
     _bootedHere = !choice.wasBooted;
   }
 
+  Future<String> _resolveBundleId(String appDir) async {
+    if (config.bundleId.isNotEmpty) return config.bundleId;
+    final plist = File('$appDir/Info.plist');
+    if (!plist.existsSync()) {
+      throw StateError('Info.plist missing in "$appDir"; set bundle_id.');
+    }
+    final String raw = latin1.decode(plist.readAsBytesSync());
+    final RegExpMatch? xml = _xmlBundleId.firstMatch(raw);
+    if (xml != null) return xml.group(1)!;
+    final SpawnedCommand cmd = await spawner.start('/usr/bin/plutil', <String>[
+      '-extract',
+      'CFBundleIdentifier',
+      'raw',
+      '-o',
+      '-',
+      plist.path,
+    ]);
+    final int code = await cmd.exitCode;
+    final String out = (await cmd.stdoutText).trim();
+    if (code == 0 && out.isNotEmpty) return out;
+    throw StateError(
+      'Could not read CFBundleIdentifier from "${plist.path}"; set bundle_id.',
+    );
+  }
+
   /// Installs the app, launches it and returns the VM service URI it prints.
   Future<String> launchApp() async {
     final String appDir = _resolveApp();
+    final String resolvedBundle = await _resolveBundleId(appDir);
+    _bundleId = resolvedBundle;
     await _simctl('install app', <String>[
       'install',
       udid,
       appDir,
     ], const Duration(seconds: 180));
-    final Process console = await Process.start('xcrun', <String>[
+    final ConsoleProcess console = await consoleStarter('xcrun', <String>[
       'simctl',
       'launch',
       '--console-pty',
       '--terminate-running-process',
       udid,
-      config.bundleId,
+      resolvedBundle,
     ]);
     _console = console;
     _launched = true;
     final Future<({int port, String path})> found = _vmServiceLines(console);
     final ({int port, String path}) svc = await runStep(
       'wait for VM service',
-      const Duration(seconds: 300),
+      waitVmTimeout,
       () => found,
     );
     return 'http://127.0.0.1:${svc.port}${svc.path}';
   }
 
-  Future<({int port, String path})> _vmServiceLines(Process console) {
+  Future<({int port, String path})> _vmServiceLines(ConsoleProcess console) {
     final merged = StreamController<List<int>>();
+    final tail = <String>[];
     var open = 2;
     void done() {
       if (--open == 0) unawaited(merged.close());
@@ -149,13 +245,22 @@ class IosDriveSession {
 
     console.stdout.listen(merged.add, onDone: done);
     console.stderr.listen(merged.add, onDone: done);
-    return merged.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .map(parseVmServiceLine)
-        .where((m) => m != null)
-        .map((m) => m!)
-        .first;
+    return () async {
+      await for (final String line
+          in merged.stream
+              .transform(const Utf8Decoder(allowMalformed: true))
+              .transform(const LineSplitter())) {
+        if (tail.length == 20) tail.removeAt(0);
+        tail.add(line);
+        final ({int port, String path})? parsed = parseVmServiceLine(line);
+        if (parsed != null) return parsed;
+      }
+      final int code = await console.exitCode;
+      throw StateError(
+        'simctl launch exited ($code) before announcing the Dart VM service:\n'
+        '${tail.join('\n')}',
+      );
+    }();
   }
 
   String _resolveApp() {
@@ -172,14 +277,15 @@ class IosDriveSession {
   /// Terminates the app, shuts down a simulator this run booted and drops the
   /// scratch; never throws.
   Future<void> dispose() async {
-    _console?.kill(ProcessSignal.sigkill);
+    _console?.kill();
     final String id = udid;
-    if (id.isNotEmpty && _launched) {
+    final String appBundle = bundleId;
+    if (id.isNotEmpty && _launched && appBundle.isNotEmpty) {
       await teardownQuietly(
         () => _simctl('terminate app', <String>[
           'terminate',
           id,
-          config.bundleId,
+          appBundle,
         ], const Duration(seconds: 60)),
       );
     }
@@ -200,26 +306,30 @@ class IosDriveSession {
 
 /// Boots, launches and drives on the simulator; always cleans up. Returns the
 /// exit status.
-Future<int> runIosDrive(IosDriveConfig config) async {
-  final session = IosDriveSession(config);
+Future<int> runIosDrive(
+  IosDriveConfig config, {
+  IosDriveSession? session,
+  DriverRunner runDriver = runDriverProcess,
+}) async {
+  final IosDriveSession activeSession = session ?? IosDriveSession(config);
   try {
-    await session.boot();
-    final String uri = await session.launchApp();
-    return await runDriverProcess(
+    await activeSession.boot();
+    final String uri = await activeSession.launchApp();
+    return await runDriver(
       config.driver,
-      session.scratchPath,
+      activeSession.scratchPath,
       <String, String>{
         'PATH': '/usr/bin:/bin',
         vmServiceEnv: uri,
         'FLUTTER_DRIVE_VM_SERVICE_URI': uri,
-        'FLUTTER_DRIVE_IOS_UDID': session.udid,
-        'FLUTTER_DRIVE_PACKAGE': config.bundleId,
+        'FLUTTER_DRIVE_IOS_UDID': activeSession.udid,
+        'FLUTTER_DRIVE_PACKAGE': activeSession.bundleId,
       },
     );
   } on Object catch (e) {
     stderr.writeln('flutter_drive_test: $e');
     return 1;
   } finally {
-    await session.dispose();
+    await activeSession.dispose();
   }
 }

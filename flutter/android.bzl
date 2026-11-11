@@ -115,7 +115,7 @@ flutter_android_apk_overlay = _flutter_android_apk_overlay
 # android_binary's own packaging apply.
 FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS = _FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS
 
-# Runs a host-side driver script against an app launched on the Android emulator.
+# Runs a host-side driver script against an Android emulator or iOS simulator app.
 flutter_drive_test = _flutter_drive_test
 
 # Merges a variant AndroidManifest.xml overlay (e.g. flutter create's

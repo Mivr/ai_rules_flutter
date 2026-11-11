@@ -6,12 +6,65 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:runfiles/runfiles.dart';
 import 'package:test/test.dart';
 
 import '../flutter_drive_runner.dart';
+import '../flutter_integration_test_ios.dart' as sim;
+
+class _StubSpawner implements sim.CommandSpawner {
+  new(this.responder);
+
+  final List<List<String>> calls = <List<String>>[];
+  final String Function(List<String> args) responder;
+
+  @override
+  Future<sim.SpawnedCommand> start(String exe, List<String> args) async {
+    final full = <String>[exe, ...args];
+    calls.add(full);
+    return sim.SpawnedCommand(
+      exitCode: Future<int>.value(0),
+      stdoutText: Future<String>.value(responder(full)),
+      stderrText: Future<String>.value(''),
+      kill: () {},
+    );
+  }
+}
+
+String _simListJson({required String udid, required String state}) =>
+    jsonEncode(<String, Object>{
+      'runtimes': <Map<String, Object>>[
+        <String, Object>{
+          'identifier': 'com.apple.CoreSimulator.SimRuntime.iOS-18-0',
+          'isAvailable': true,
+        },
+      ],
+      'devices': <String, Object>{
+        'com.apple.CoreSimulator.SimRuntime.iOS-18-0': <Map<String, Object>>[
+          <String, Object>{
+            'name': 'iPhone 16',
+            'udid': udid,
+            'state': state,
+            'isAvailable': true,
+          },
+        ],
+      },
+    });
+
+Directory _writeFakeAppBundle(Directory parent, String bundleId) {
+  final appDir = Directory('${parent.path}/Runner.app')
+    ..createSync(recursive: true);
+  File('${appDir.path}/Info.plist').writeAsStringSync(
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    '<plist version="1.0"><dict>\n'
+    '<key>CFBundleIdentifier</key><string>$bundleId</string>\n'
+    '</dict></plist>\n',
+  );
+  return appDir;
+}
 
 void main() {
   group('parseVmServiceLine', () {
@@ -72,10 +125,15 @@ void main() {
   });
 
   group('runDrive (offline fakes)', runDriveTests);
+  _registerConfigTests();
+  _registerIosBootTest();
+  _registerIosReuseTest();
+}
+
+void _registerConfigTests() {
+  final runfiles = Runfiles.fromState(directory: '/rf');
 
   group('DriveConfig.fromEnv', () {
-    final runfiles = Runfiles.fromState(directory: '/rf');
-
     test('resolves executable driver when FLUTTER_DRIVE_DART is unset', () {
       final cfg = DriveConfig.fromEnv(<String, String>{
         'FLUTTER_DRIVE_ANDROID_APK': '_main/app.apk',
@@ -128,6 +186,128 @@ void main() {
       );
     });
   });
+
+  group('IosDriveConfig.fromEnv', () {
+    test('resolves iOS app and allows omitted bundle id for plist lookup', () {
+      final cfg = IosDriveConfig.fromEnv(<String, String>{
+        'FLUTTER_DRIVE_IOS_APP': '_main/app.ipa',
+        'FLUTTER_DRIVE_DRIVER': '_main/driver_bin',
+        'TEST_TMPDIR': '/scratch',
+      }, runfiles);
+      expect(cfg.app, '/rf/_main/app.ipa');
+      expect(cfg.bundleId, isEmpty);
+      expect(cfg.driver.executable, '/rf/_main/driver_bin');
+    });
+  });
+}
+
+void _registerIosBootTest() {
+  test(
+    'runIosDrive boots simulator, sets VM env, propagates exit and shuts down',
+    () async {
+      final Directory tmp = Directory.systemTemp.createTempSync('ios_drive_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final Directory app = _writeFakeAppBundle(tmp, 'com.example.plistapp');
+      final spawner = _StubSpawner(
+        (cmd) => cmd.contains('list')
+            ? _simListJson(udid: 'SIM-NEW', state: 'Shutdown')
+            : '',
+      );
+      var consoleKilled = false;
+      final cfg = IosDriveConfig(
+        app: app.path,
+        bundleId: '',
+        driver: (executable: '/bin/driver', args: const <String>[]),
+        tmp: tmp.path,
+      );
+      Map<String, String>? seenEnv;
+      final session = IosDriveSession(
+        cfg,
+        spawner: spawner,
+        consoleStarter: (_, _) async => ConsoleProcess(
+          stdout: Stream<List<int>>.value(
+            utf8.encode(
+              'flutter: The Dart VM service is listening on http://127.0.0.1:50123/tok=/\n',
+            ),
+          ),
+          stderr: const Stream<List<int>>.empty(),
+          exitCode: Completer<int>().future,
+          kill: () => consoleKilled = true,
+        ),
+      );
+      final int status = await runIosDrive(
+        cfg,
+        session: session,
+        runDriver: (_, _, env) async {
+          seenEnv = env;
+          return 7;
+        },
+      );
+      expect(status, 7);
+      expect(consoleKilled, isTrue);
+      expect(seenEnv?['VM_SERVICE_URL'], 'http://127.0.0.1:50123/tok=/');
+      expect(
+        seenEnv?['FLUTTER_DRIVE_VM_SERVICE_URI'],
+        'http://127.0.0.1:50123/tok=/',
+      );
+      expect(seenEnv?['FLUTTER_DRIVE_IOS_UDID'], 'SIM-NEW');
+      expect(seenEnv?['FLUTTER_DRIVE_PACKAGE'], 'com.example.plistapp');
+      expect(
+        spawner.calls.any(
+          (c) => c.contains('terminate') && c.contains('com.example.plistapp'),
+        ),
+        isTrue,
+      );
+      expect(
+        spawner.calls.any(
+          (c) => c.contains('shutdown') && c.contains('SIM-NEW'),
+        ),
+        isTrue,
+      );
+    },
+  );
+}
+
+void _registerIosReuseTest() {
+  test(
+    'runIosDrive reuses booted simulator without shutdown and names timeout',
+    () async {
+      final Directory tmp = Directory.systemTemp.createTempSync('ios_reuse_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final Directory app = _writeFakeAppBundle(tmp, 'com.example.reused');
+      final spawner = _StubSpawner(
+        (cmd) => cmd.contains('list')
+            ? _simListJson(udid: 'SIM-BOOTED', state: 'Booted')
+            : '',
+      );
+      final cfg = IosDriveConfig(
+        app: app.path,
+        bundleId: 'com.example.reused',
+        driver: (executable: '/bin/driver', args: const <String>[]),
+        tmp: tmp.path,
+      );
+      final session = IosDriveSession(
+        cfg,
+        spawner: spawner,
+        waitVmTimeout: const Duration(milliseconds: 20),
+        consoleStarter: (_, _) async => ConsoleProcess(
+          stdout: Completer<List<int>>().future.asStream(),
+          stderr: const Stream<List<int>>.empty(),
+          exitCode: Completer<int>().future,
+          kill: () {},
+        ),
+      );
+      final int status = await runIosDrive(cfg, session: session);
+      expect(status, 1);
+      expect(
+        spawner.calls.any(
+          (c) => c.contains('terminate') && c.contains('SIM-BOOTED'),
+        ),
+        isTrue,
+      );
+      expect(spawner.calls.any((c) => c.contains('shutdown')), isFalse);
+    },
+  );
 }
 
 const String _pkg = 'com.example.app';

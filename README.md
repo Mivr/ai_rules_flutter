@@ -1989,7 +1989,7 @@ flutter_drive_test(
 )
 ```
 
-For an iOS simulator app, load the rule from `@rules_flutter//flutter:ios.bzl` (it is exported from both files), pass the simulator build of the app (`ios_sim_debug_app`) as `app`, and set `platform = "ios"` so the test is `enormous`, `exclusive` and macOS-only:
+For an iOS simulator app, load the rule from `@rules_flutter//flutter:ios.bzl` (it is exported from both files) and pass the simulator build of the app (`ios_sim_debug_app`) as `app`; an iOS simulator `app` makes the test `enormous`, `exclusive` and macOS-only automatically:
 
 ```starlark
 load("@rules_flutter//flutter:ios.bzl", "flutter_drive_test", "flutter_ios_app", "ios_sim_debug_app")
@@ -2001,25 +2001,22 @@ ios_sim_debug_app(name = "app_ios_sim", app = ":app_ios", tags = ["manual"])
 flutter_drive_test(
     name = "drive_ios_test",
     app = ":app_ios_sim",
-    bundle_id = "com.example.app",
     driver = "test_driver/main_test.dart",
-    platform = "ios",
     deps = ["@deps//:flutter_driver", "@deps//:test"],
 )
 ```
 
-Build the app in debug mode (`bazel test -c dbg :drive_test`): a release app hosts no Dart VM service for the driver to connect to.
+Build the app in debug mode (`bazel test -c dbg :drive_test`; `ios_sim_debug_app` transitions the iOS app to debug simulator automatically): a release app hosts no Dart VM service for the driver to connect to.
 
 | Attribute | Description |
 | --- | --- |
-| `app` | Required. The app under test: an Android app as `flutter_android_app` builds it, or an iOS simulator app (an `.ipa`) as `ios_sim_debug_app` builds it. A target of neither kind fails analysis naming `app`. |
+| `app` | Required. The app under test: an Android app as `flutter_android_app` builds it, or an iOS simulator app (an `.ipa`) as `ios_sim_debug_app` builds it. An iOS simulator `app` tags the test `exclusive` and restricts it to macOS (`size = "enormous"`). A target of neither kind fails analysis naming `app`. |
 | `driver` | Required. The host driver — either a `.dart` script (compiled with the hermetic Dart toolchain against `deps` and `srcs`) or a `dart_binary` target. Its exit status is the test's. A missing `driver` fails analysis naming `driver`. |
-| `package_name` | The Android application ID of `app`. Required for an Android app. |
-| `bundle_id` | The bundle identifier of an iOS simulator `app`; defaults to `package_name`. Required for an iOS app. |
-| `platform` | Macro argument: `"android"` (default) or `"ios"`. `"ios"` makes the target `enormous`, `exclusive` and macOS-only. |
+| `package_name` | The Android application ID of `app`. Required for an Android app; also serves as a fallback for `bundle_id` on iOS. |
+| `bundle_id` | Optional bundle identifier of an iOS simulator `app`; defaults to the app's `CFBundleIdentifier` (or `package_name`). |
 | `deps`, `srcs` | Optional Dart dependencies (from the pinned pub lock) and helper `.dart` files when `driver` is a `.dart` script. |
 | `data`, `env` | Optional runtime files and extra environment variables (`$(rlocationpath ...)` expanded over `data`). |
-| `size`, `tags` | `size` defaults to `large` (`enormous` for iOS); `manual` is always added to `tags`, so the test stays out of wildcard test runs. |
+| `size`, `tags` | `size` defaults to `large` (`enormous` for an iOS simulator `app`); `manual` is always added to `tags` (`exclusive` too on iOS), so the test stays out of wildcard test runs. |
 
 Supported device kinds are the Android emulator and the iOS simulator. The driver runs with these variables in its environment, on top of the test's own:
 

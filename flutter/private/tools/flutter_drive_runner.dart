@@ -21,6 +21,7 @@ import 'flutter_integration_test_android.dart';
 import 'test_support.dart';
 
 export 'flutter_drive_common.dart';
+export 'flutter_drive_ios.dart';
 
 /// Paths to the pinned headless Android `emulator` and `adb` binaries.
 typedef AndroidRuntimePaths = ({String emulator, String adb});
