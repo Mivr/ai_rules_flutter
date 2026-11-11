@@ -15,6 +15,8 @@ This guidance tells us how to avoid that: we put the toolchain targets in the al
 with only the toolchain attribute pointing into the platform-specific repositories.
 """
 
+load(":xtool_sdk_render.bzl", "XTOOL_DARWIN_TARGETS")
+
 # Host platforms on which Flutter builds can run.
 # Keys are platform strings used in Flutter artifact URLs.
 HOST_PLATFORMS = {
@@ -313,6 +315,44 @@ toolchain(
             )
     return section
 
+def _xtool_toolchains_section(user_repository_name):
+    """Renders the xtool Darwin cc `toolchain()` targets that point into the xtool SDK repository.
+
+    The constraints mirror the `toolchain()` targets of `@<name>_xtool_darwin_sdk`
+    exactly, so registering this hub resolves the same toolchains, but Bazel
+    only loads (and so fetches) the SDK repository once a toolchain's
+    constraints and `use_xtool_backend` setting match the build.
+
+    Args:
+      user_repository_name: Base repository name prefix (e.g. `"flutter"`).
+
+    Returns:
+      The rendered `BUILD.bazel` section declaring the xtool cc `toolchain` targets.
+    """
+    section = ""
+    for target_key in sorted(XTOOL_DARWIN_TARGETS.keys()):
+        meta = XTOOL_DARWIN_TARGETS[target_key]
+        section += """
+toolchain(
+    name = "xtool_{key}_cc_toolchain",
+    exec_compatible_with = ["@platforms//os:linux"],
+    target_compatible_with = [
+        "{os_constraint}",
+        "{cpu_constraint}",
+    ],
+    target_settings = ["@rules_flutter//flutter/settings:use_xtool_backend"],
+    toolchain = "@{user_repository_name}_xtool_darwin_sdk//:{key}_cc_toolchain_impl",
+    toolchain_type = "@bazel_tools//tools/cpp:toolchain_type",
+    visibility = ["//visibility:public"],
+)
+""".format(
+            key = target_key,
+            os_constraint = meta.os_constraint,
+            cpu_constraint = meta.cpu_constraint,
+            user_repository_name = user_repository_name,
+        )
+    return section
+
 def generate_toolchains_build(user_repository_name):
     """Generates BUILD.bazel content for the toolchains repository.
 
@@ -344,6 +384,10 @@ def generate_toolchains_build(user_repository_name):
 
     # Desktop cross-platform toolchains (debug only — no aot_toolchain).
     build_content += _desktop_cross_toolchains_section(user_repository_name)
+
+    # xtool Darwin cc toolchains (gated by apple_backend_xtool; implementation
+    # lives in @<name>_xtool_darwin_sdk so non-xtool builds never fetch it).
+    build_content += _xtool_toolchains_section(user_repository_name)
 
     return build_content
 

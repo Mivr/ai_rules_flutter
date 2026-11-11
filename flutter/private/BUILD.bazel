@@ -1954,6 +1954,23 @@ bzl_library(
     name = "toolchains_repo",
     srcs = ["toolchains_repo.bzl"],
     visibility = ["//visibility:public"],
+    deps = [
+        ":xtool_sdk_render",
+    ],
+)
+
+bzl_library(
+    name = "tool_deps_extension",
+    srcs = ["tool_deps_extension.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":flutter_pub_lock_hub",
+        ":flutter_pub_overlays",
+        ":flutter_pub_package",
+        ":flutter_pub_tag",
+        ":pub_lock_sdks",
+        "@rules_dart//dart/pub:yaml_parser",
+    ],
 )
 
 bzl_library(
