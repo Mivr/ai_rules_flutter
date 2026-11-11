@@ -8,6 +8,7 @@ import plistlib
 import struct
 import sys
 import tempfile
+import threading
 import unittest
 import zipfile
 
@@ -103,6 +104,68 @@ class ChainTest(unittest.TestCase):
         spec = make_spec("ios", "debug", self.tmp)
         with self.assertRaises(floor.MissingToolError):
             floor.resolve_tools(spec, [os.path.join(self.tmp, "empty")])
+
+
+class SymlinkLayoutTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.real = os.path.join(self.tmp, "output_base", "external")
+        self.root = os.path.join(self.tmp, "execroot", "external")
+        os.makedirs(self.root)
+
+    def link_repo(self, name, files):
+        for rel in files:
+            touch(os.path.join(self.real, name, rel))
+        os.symlink(os.path.join(self.real, name),
+                   os.path.join(self.root, name))
+
+    def test_tool_behind_symlinked_directory(self):
+        self.link_repo("sdk", ["dart-sdk/bin/dartaotruntime"])
+        found = floor.find_tool("dartaotruntime", [self.root])
+        self.assertEqual(found, os.path.join(self.root, "sdk",
+                                             "dart-sdk/bin/dartaotruntime"))
+
+    def test_package_config_behind_symlink(self):
+        self.link_repo("pk", ["x/app.package_config.json"])
+        self.assertTrue(floor.find_package_config([self.root], "app")
+                        .endswith("app.package_config.json"))
+
+    def test_symlink_loop_ends(self):
+        self.link_repo("sdk", ["bin/dartaotruntime"])
+        os.symlink(self.root, os.path.join(self.real, "sdk", "up"))
+        os.symlink(os.path.join(self.real, "sdk"),
+                   os.path.join(self.real, "sdk", "self"))
+        done = []
+        thread = threading.Thread(target=lambda: done.append(
+            floor.find_tool("dartaotruntime", [self.root])), daemon=True)
+        thread.start()
+        thread.join(20)
+        self.assertFalse(thread.is_alive(), "search did not end")
+        self.assertTrue(done[0].endswith("dartaotruntime"))
+        with self.assertRaises(floor.MissingToolError):
+            floor.find_tool("nothere", [self.root])
+
+    def test_dangling_symlink_skipped(self):
+        os.symlink(os.path.join(self.tmp, "nowhere"),
+                   os.path.join(self.root, "dead"))
+        os.symlink(os.path.join(self.tmp, "nowhere"),
+                   os.path.join(self.root, "dartaotruntime"))
+        with self.assertRaises(floor.MissingToolError) as ctx:
+            floor.find_tool("dartaotruntime", [self.root])
+        self.assertIn("dartaotruntime", str(ctx.exception))
+        self.assertIn(self.root, str(ctx.exception))
+
+    def test_android_specs_resolve(self):
+        fake_sdk(os.path.join(self.tmp, "src"))
+        for name, rel in (("sdk", "sdk"), ("plat", "plat")):
+            src = os.path.join(self.tmp, "src", rel)
+            os.symlink(src, os.path.join(self.root, name))
+        for mode in ("debug", "release"):
+            spec = make_spec("android", mode, self.tmp)
+            tools = floor.resolve_tools(spec, [self.root])
+            self.assertEqual(set(tools), set(floor._tool_names(spec)))
+            for path in tools.values():
+                self.assertTrue(os.path.isfile(path))
 
 
 def make_apk(path, with_manifest=True, payload="assets/flutter_assets/kernel_blob.bin"):

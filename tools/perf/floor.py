@@ -80,21 +80,41 @@ class Step:
     detail: tuple = ()
 
 
+def _walk_files(root):
+    """Yield every file path under ``root``, entering symlinked directories.
+
+    A directory whose real path is already on the current path (a symlink
+    loop) is not entered again; a dangling symlink or an unreadable
+    directory is skipped.
+    """
+    stack = [(root, (os.path.realpath(root),))]
+    while stack:
+        top, ancestors = stack.pop()
+        try:
+            with os.scandir(top) as entries:
+                listing = sorted(entries, key=lambda entry: entry.name)
+        except OSError:
+            continue
+        for entry in listing:
+            if entry.is_dir():
+                real = os.path.realpath(entry.path)
+                if real not in ancestors:
+                    stack.append((entry.path, ancestors + (real,)))
+            elif entry.is_file():
+                yield entry.path
+
+
 def find_tool(name, roots, hint=None):
     """Path of the tool whose path ends with ``name`` under the roots.
 
     ``name`` may be a path suffix (``flutter_patched_sdk/platform_strong.dill``).
-    A ``hint`` substring prefers matching paths. Raises MissingToolError
-    naming the tool and the roots searched.
+    Symlinked directories are searched too. A ``hint`` substring prefers
+    matching paths. Raises MissingToolError naming the tool and the roots
+    searched.
     """
     suffix = os.sep + name
-    found = []
-    for root in roots:
-        for dirpath, _, filenames in os.walk(root):
-            for filename in filenames:
-                path = os.path.join(dirpath, filename)
-                if path.endswith(suffix):
-                    found.append(path)
+    found = [path for root in roots for path in _walk_files(root)
+             if path.endswith(suffix)]
     if hint:
         preferred = [path for path in found if hint in path]
         found = preferred or found
@@ -108,18 +128,15 @@ def find_package_config(roots, name):
     """Path of the ``<name>.package_config.json`` the rules write.
 
     Only a file named exactly that matches; a bare ``package_config.json``
-    is never produced by the rules. Raises MissingToolError naming the file
-    and the roots searched.
+    is never produced by the rules. Symlinked directories are searched too.
+    Raises MissingToolError naming the file and the roots searched.
     """
-    wanted = name + ".package_config.json"
-    found = []
-    for root in roots:
-        for dirpath, _, filenames in os.walk(root):
-            if wanted in filenames:
-                found.append(os.path.join(dirpath, wanted))
+    wanted = os.sep + name + ".package_config.json"
+    found = [path for root in roots for path in _walk_files(root)
+             if path.endswith(wanted)]
     if not found:
         raise MissingToolError("floor package config %r not found under %s"
-                               % (wanted, ", ".join(roots) or "(no roots)"))
+                               % (wanted[1:], ", ".join(roots) or "(no roots)"))
     return sorted(found)[0]
 
 
