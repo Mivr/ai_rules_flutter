@@ -2,6 +2,7 @@
 # `<fixture>: <reason naming the missing host capability>`. Every fixture is
 # in exactly one of this file and golden_targets.txt; `exports_test` enforces it.
 
+android_aab: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
 android_apk_overlay: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
 android_app: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
 android_engine: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure

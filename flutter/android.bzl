@@ -54,11 +54,23 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//android:rules.bzl", _android_binary = "android_binary", _android_library = "android_library")
 load("@rules_java//java:java_import.bzl", _java_import = "java_import")
 load("@rules_kotlin//kotlin:android.bzl", _kt_android_library = "kt_android_library")
-load("//flutter/private:constants.bzl", _ANDROID_ABI_FOR_ARCH = "ANDROID_ABI_FOR_ARCH", _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION", _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION")
+load(
+    "//flutter/private:constants.bzl",
+    _ANDROID_MIN_SDK_VERSION = "ANDROID_MIN_SDK_VERSION",
+    _ANDROID_TARGET_SDK_VERSION = "ANDROID_TARGET_SDK_VERSION",
+)
+load("//flutter/private:flutter_android_aab.bzl", _flutter_android_aab_emit = "flutter_android_aab_emit")
 load(
     "//flutter/private:flutter_android_apk_overlay.bzl",
     _flutter_android_apk_overlay = "flutter_android_apk_overlay",
     _overlay_signing_select = "overlay_signing_select",
+)
+load(
+    "//flutter/private:flutter_android_app_wiring.bzl",
+    _android_discover_runner = "android_discover_runner",
+    _android_registrant = "android_registrant",
+    _short_abi_to_full = "short_abi_to_full",
+    _variant_overlay = "variant_overlay",
 )
 load(
     "//flutter/private:flutter_android_application.bzl",
@@ -74,7 +86,7 @@ load(
 )
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
 load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
-load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_plugins_aggregator = "flutter_android_plugins_aggregator", _flutter_android_registrant = "flutter_android_registrant")
+load("//flutter/private:flutter_android_registrant.bzl", _flutter_android_registrant = "flutter_android_registrant")
 
 # Re-export constants for user BUILD files.
 ANDROID_MIN_SDK_VERSION = _ANDROID_MIN_SDK_VERSION
@@ -442,38 +454,6 @@ def flutter_android_runner_lib_gen(
         **kwargs
     )
 
-def _variant_overlay(name, variant, manifest, base_manifest):
-    """Resolves a `flutter create` variant manifest (`debug` or `profile`).
-
-    Args:
-        name: The flutter_android_app name, for error messages.
-        variant: The build variant directory under android/app/src/.
-        manifest: The macro argument: False, None (discover) or a label.
-        base_manifest: The main manifest the variant merges into, or None.
-
-    Returns:
-        The overlay manifest, or None.
-    """
-    if manifest == False:
-        return None
-    if manifest == None:
-        discovered = native.glob(
-            ["android/app/src/%s/AndroidManifest.xml" % variant],
-            allow_empty = True,
-        )
-        overlay = discovered[0] if discovered else None
-    else:
-        overlay = manifest
-    if overlay != None and base_manifest == None:
-        fail(
-            ("flutter_android_app(name = %r): %s variant manifest %r has no main " +
-             "manifest to merge into. Add android/app/src/main/AndroidManifest.xml " +
-             "(flutter create output), pass `manifest`, or pass " +
-             "`%s_manifest = False` to ignore the variant manifest.") %
-            (name, variant, overlay, variant),
-        )
-    return overlay
-
 # -- Convenience macro (Tier 1) -----------------------------------------------
 
 def _android_bundle_and_engine(name, application, android_abi, internal_tags, analyze_size = False):
@@ -526,96 +506,6 @@ def _android_bundle_and_engine(name, application, android_abi, internal_tags, an
         output_group = "flutter_assets",
         tags = internal_tags,
     )
-
-def _android_registrant(name, application, android_abi, pub_hub_name, deps, internal_tags):
-    """Auto-wires the plugin registrant and returns its compile deps.
-
-    Generates `GeneratedPluginRegistrant.java` from the flutter_application's
-    transitive FlutterInfo plugin metadata, then wraps it in a
-    kt_android_library so the registrant class is on the runtime
-    classpath (called from the runner's MainActivity / FlutterActivity).
-
-    The registrant references each plugin's `PluginClass` by fully
-    qualified name, so its compile classpath must include every
-    plugin's `kt_android_library`, the hub aggregator, the workspace
-    `deps` (a workspace plugin reaches the app through them and the
-    registrant names its class), and the engine.
-    """
-    _flutter_android_registrant(
-        name = "__%s_registrant_src" % name,
-        application = application,
-        android_abi = _short_abi_to_full(android_abi),
-        tags = internal_tags,
-    )
-
-    _flutter_android_plugins_aggregator(
-        name = "__%s_android_plugins" % name,
-        application = application,
-        android_abi = _short_abi_to_full(android_abi),
-        tags = internal_tags,
-    )
-
-    registrant_deps = [
-        "__%s_engine" % name,
-        "__%s_android_plugins" % name,
-    ]
-    if pub_hub_name:
-        registrant_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
-    return registrant_deps + deps
-
-def _android_discover_runner(name, package_name, resources, binary_deps, base_manifest, internal_tags):
-    """Discovers flutter create output: manifest, resources, Kotlin sources.
-
-    Returns:
-      The `(base_manifest, resources)` tuple; `binary_deps` gains the runner
-      library when Kotlin sources are discovered.
-    """
-    if base_manifest:
-        return base_manifest, resources
-
-    # Try to discover flutter create output.
-    discovered_manifests = native.glob(
-        ["android/app/src/main/AndroidManifest.xml"],
-        allow_empty = True,
-    )
-    if not discovered_manifests:
-        return base_manifest, resources
-
-    # Flutter create case — preprocess manifest for Gradle variables.
-    # Same pattern as flutter_ios_app preprocessing Info.plist for Xcode
-    # variables (ios.bzl).
-    expand_template(
-        name = "__%s_manifest" % name,
-        template = discovered_manifests[0],
-        out = "__%s_AndroidManifest.xml" % name,
-        substitutions = {
-            "${applicationName}": "android.app.Application",
-        },
-        tags = internal_tags,
-    )
-
-    # Discover resources from flutter create output.
-    discovered_resources = native.glob(
-        ["android/app/src/main/res/**"],
-        allow_empty = True,
-    )
-    resources = list(resources) + discovered_resources
-
-    # Discover and compile Kotlin sources from flutter create output.
-    discovered_kotlin = native.glob(
-        ["android/app/src/main/kotlin/**/*.kt"],
-        allow_empty = True,
-    )
-    if discovered_kotlin:
-        _kt_android_library(
-            name = "__%s_runner" % name,
-            srcs = discovered_kotlin,
-            custom_package = package_name,
-            tags = internal_tags,
-            deps = ["__%s_engine" % name],
-        )
-        binary_deps.append("__%s_runner" % name)
-    return "__%s_manifest" % name, resources
 
 def _android_resolve_manifest(name, base_manifest, binary_deps, deps, manifest):
     """Resolves the effective manifest: variants, template, permissions.
@@ -778,6 +668,73 @@ def _android_binary_and_overlay(name, binary_deps, deps, apk):
         **proxy_kwargs
     )
 
+def _android_app_parts(name, app):
+    """Emits the internal targets both app macros share and returns their wiring.
+
+    Steps 1-8 of the app pipeline: bundle, engine, registrant, runner
+    discovery and the resolved manifest. The bundle's `native_libs` java_import
+    is not in the returned `binary_deps`.
+
+    Args:
+        name: The app name; internal targets derive from it.
+        app: Struct with `application`, `android_abi`, `pub_hub_name`, `deps`,
+            `internal_tags`, `analyze_size`, `resources` and `manifest` (a
+            struct of `package_name`, `display_name`, `min_sdk_version`,
+            `target_sdk_version`, `permissions`, `internal_tags`,
+            `debug_manifest`, `profile_manifest` and `base`).
+
+    Returns:
+        Struct with `actual_manifest`, `resources` and `binary_deps`.
+    """
+    _android_bundle_and_engine(
+        name,
+        app.application,
+        app.android_abi,
+        app.internal_tags,
+        analyze_size = app.analyze_size,
+    )
+
+    # 6. Auto-wire the plugin registrant. `deps` and
+    # `flutter_plugin(android_libs = ...)` too: a plugin written in the
+    # workspace reaches the app through them, and the registrant names its
+    # class.
+    registrant_deps = _android_registrant(
+        name,
+        app.application,
+        app.android_abi,
+        app.pub_hub_name,
+        app.deps,
+        app.internal_tags,
+    )
+    _kt_android_library(
+        name = "__%s_registrant" % name,
+        srcs = ["__%s_registrant_src" % name],
+        custom_package = "io.flutter.plugins",
+        tags = app.internal_tags,
+        deps = registrant_deps,
+    )
+
+    # 7. The payload (native_libs, flutter_assets) is not a base dep: see the
+    # callers. 8. Plugin auto-wiring: compile every transitively-needed
+    # plugin's Kotlin/Java via the hub's aggregator; spokes without Android
+    # sources contribute empty libraries.
+    binary_deps = ["__%s_engine" % name, "__%s_registrant" % name, "__%s_android_plugins" % name]
+    if app.pub_hub_name:
+        binary_deps.append("@%s//android:all_android_plugin_libs" % app.pub_hub_name)
+    base_manifest, resources = _android_discover_runner(
+        name,
+        app.manifest.package_name,
+        app.resources,
+        binary_deps,
+        app.manifest.base,
+        app.internal_tags,
+    )
+
+    # 8b/8c. Variant overlays, the app's own permissions and the permissions
+    # its Android libraries declare, resolved into one manifest.
+    actual_manifest = _android_resolve_manifest(name, base_manifest, binary_deps, app.deps, app.manifest)
+    return struct(actual_manifest = actual_manifest, resources = resources, binary_deps = binary_deps)
+
 def flutter_android_app(
         name,
         application,
@@ -876,7 +833,7 @@ def flutter_android_app(
     for the trade-off.
 
     Release signing: by default the APK signs with the debug keystore, as an
-    `android_binary` does. To ship to Google Play, pass `keystore` (a `.jks`
+    `android_binary` does. To sign the APK with a release key, pass `keystore` (a `.jks`
     or PKCS#12 `.p12` file label) together with `keystore_password_file` (a
     file label) and `key_alias` (a string); set `key_password_file` (a file
     label) as well when the key has its own password. The
@@ -895,8 +852,9 @@ def flutter_android_app(
     name a target with exactly one file — an empty or multi-file target
     fails analysis instead of silently debug-signing — and the release
     signing action runs locally only (`no-remote`), so the secrets never
-    reach remote execution or caches. See the README's Android
-    section.
+    reach remote execution or caches. Google Play takes new apps as an
+    Android App Bundle, not an APK: see `flutter_android_aab`. See the
+    README's Android section.
 
     Release signing never passes `debug_signing_lineage_file` to apksigner:
     the release APK carries no `--lineage` and the overlay reports no
@@ -971,78 +929,31 @@ def flutter_android_app(
             fails analysis in debug mode.
         **kwargs: Passed through to android_binary.
     """
-    display_name = app_name or name
     tags = kwargs.pop("tags", ["manual"])
     internal_tags = _android_internal_tags(tags)
-
-    # -- Internal targets (all __{name}_ prefixed) --
-
-    _android_bundle_and_engine(name, application, android_abi, internal_tags, analyze_size = analyze_size)
-
-    # 6. Auto-wire the plugin registrant.
-    #
-    # `deps` and `flutter_plugin(android_libs = ...)` too: a plugin written in
-    # the workspace reaches the app through them, and the registrant names its
-    # class.
-    registrant_deps = _android_registrant(name, application, android_abi, pub_hub_name, deps, internal_tags)
-
-    _kt_android_library(
-        name = "__%s_registrant" % name,
-        srcs = ["__%s_registrant_src" % name],
-        custom_package = "io.flutter.plugins",
-        tags = internal_tags,
-        deps = registrant_deps,
-    )
-
-    # 7. Resolve manifests (main + debug variant), resources, and Kotlin
-    # sources.
-    base_manifest = manifest
-
-    # The android_binary below builds a payload-free base APK: neither the
-    # native_libs java_import (whose jar carries libapp.so through the dex
-    # chain) nor flutter_assets (which aapt2 would link into the resources
-    # APK) are its inputs, so Dart edits re-run neither resource linking nor
-    # dexing. The overlay (step 10) injects both after resource linking.
-    base_binary_deps = [
-        "__%s_engine" % name,
-        "__%s_registrant" % name,
-        "__%s_android_plugins" % name,
-    ]
-    binary_deps = list(base_binary_deps)
-
-    # 8. Plugin auto-wiring: compile every transitively-needed plugin's
-    # Kotlin/Java via the hub's aggregator. Each spoke unconditionally
-    # exposes `android:lib`; the hub's `all_android_plugin_libs` deps on
-    # all of them. Spokes without Android sources contribute empty
-    # libraries — no-op at link time, mechanical at the macro layer.
-    if pub_hub_name:
-        binary_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
-
-    discovered = _android_discover_runner(name, package_name, resources, binary_deps, base_manifest, internal_tags)
-    base_manifest, resources = discovered
-
-    # Resolve the variant overlays — every state explicit:
-    #   False → no variant handling, even if the file exists.
-    #   None  → discover flutter create's variant manifest.
-    #   label → use it, overriding discovery.
-    # 8b. Add the app's own permissions to whatever manifest the mode
-    # produced. 8c. Lift the permissions the app's Android libraries declare
-    # (plugins, AARs) into its own manifest, as Gradle does. Bazel's merger
-    # drops them unless --merge_android_manifest_permissions is set; done
-    # here, they reach the APK whatever the flags. The merger sees the full
-    # library list including the native libs java_import, exactly as before
-    # the payload-free split: native_libs first, then every binary dep.
-    manifest = struct(
-        package_name = package_name,
-        display_name = display_name,
-        min_sdk_version = min_sdk_version,
-        target_sdk_version = target_sdk_version,
-        permissions = permissions,
+    parts = _android_app_parts(name, struct(
+        application = application,
+        android_abi = android_abi,
+        pub_hub_name = pub_hub_name,
+        deps = deps,
         internal_tags = internal_tags,
-        debug_manifest = debug_manifest,
-        profile_manifest = profile_manifest,
-    )
-    actual_manifest = _android_resolve_manifest(name, base_manifest, binary_deps, deps, manifest)
+        analyze_size = analyze_size,
+        manifest = struct(
+            package_name = package_name,
+            display_name = app_name or name,
+            min_sdk_version = min_sdk_version,
+            target_sdk_version = target_sdk_version,
+            permissions = permissions,
+            internal_tags = internal_tags,
+            debug_manifest = debug_manifest,
+            profile_manifest = profile_manifest,
+            base = manifest,
+        ),
+        resources = resources,
+    ))
+    actual_manifest = parts.actual_manifest
+    resources = parts.resources
+    binary_deps = parts.binary_deps
 
     # 9. Final android_binary, behind a proxy that scopes rules_go pure mode
     # to this app, and 10. the payload overlay. The overlay is the target
@@ -1067,8 +978,94 @@ def flutter_android_app(
     )
     _android_binary_and_overlay(name, binary_deps, deps, apk)
 
-def _short_abi_to_full(abi):
-    """Convert short ABI name to full ABI string for flutter_android_bundle."""
-    if abi not in _ANDROID_ABI_FOR_ARCH:
-        fail("Unsupported android_abi '%s'. Use arm64 or x64." % abi)
-    return _ANDROID_ABI_FOR_ARCH[abi]
+def flutter_android_aab(
+        name,
+        application,
+        package_name,
+        app_name = None,
+        android_abi = "arm64",
+        min_sdk_version = ANDROID_MIN_SDK_VERSION,
+        target_sdk_version = ANDROID_TARGET_SDK_VERSION,
+        manifest = None,
+        debug_manifest = None,
+        profile_manifest = None,
+        permissions = [],
+        resources = [],
+        deps = [],
+        pub_hub_name = "deps",
+        **kwargs):
+    """Builds an unsigned Android App Bundle (`<name>.aab`) from a flutter_application.
+
+    Google Play requires an App Bundle for new apps. The bundle is **unsigned**:
+    this rule never debug-signs it and takes no signing attribute. Signing the
+    bundle with the release keystore is a separate step that has not landed, so
+    sign it yourself (for example with `jarsigner`) before uploading.
+
+    It wires the same runner, registrant, plugins and manifest as
+    `flutter_android_app`, then builds the bundle with rules_android's public
+    `android_application` macro (`@rules_android//android:rules.bzl`) and a
+    minimal bundle config. The proto-format resource link, the module
+    conversion and `bundletool build-bundle` are that macro's own actions, with
+    the sha256-pinned bundletool of its toolchain. The Flutter payload (native
+    libraries per ABI and `flutter_assets`) goes into the base module.
+    rules_android 0.8.0 is the floor this was built against.
+
+    Example:
+
+        flutter_android_aab(
+            name = "my_app_aab",
+            application = ":my_app",
+            package_name = "com.example.myapp",
+        )
+
+    Args:
+        name: Target name. Produces `<name>.aab`.
+        application: A flutter_application target (required).
+        package_name: Android package name, e.g. "com.example.myapp" (required).
+        app_name: User-facing display name. Defaults to name.
+        android_abi: Target ABI, "arm64" (default) or "x64".
+        min_sdk_version: Minimum Android SDK version.
+        target_sdk_version: Target Android SDK version.
+        manifest: Override AndroidManifest.xml; see `flutter_android_app`.
+        debug_manifest: Debug variant manifest; see `flutter_android_app`.
+        profile_manifest: Profile variant manifest; see `flutter_android_app`.
+        permissions: Permission names added to the manifest in every mode.
+        resources: Extra resource_files for the base module.
+        deps: Extra deps for the base module.
+        pub_hub_name: Name of the `flutter.pub` hub providing plugin spokes.
+        **kwargs: `tags` (defaults to `["manual"]`) and `visibility`.
+    """
+    tags = kwargs.pop("tags", ["manual"])
+    internal_tags = _android_internal_tags(tags)
+    parts = _android_app_parts(name, struct(
+        application = application,
+        android_abi = android_abi,
+        pub_hub_name = pub_hub_name,
+        deps = deps,
+        internal_tags = internal_tags,
+        analyze_size = False,
+        manifest = struct(
+            package_name = package_name,
+            display_name = app_name or name,
+            min_sdk_version = min_sdk_version,
+            target_sdk_version = target_sdk_version,
+            permissions = permissions,
+            internal_tags = internal_tags,
+            debug_manifest = debug_manifest,
+            profile_manifest = profile_manifest,
+            base = manifest,
+        ),
+        resources = resources,
+    ))
+    _flutter_android_aab_emit(name, struct(
+        package_name = package_name,
+        min_sdk_version = min_sdk_version,
+        target_sdk_version = target_sdk_version,
+        actual_manifest = parts.actual_manifest,
+        resources = parts.resources,
+        binary_deps = parts.binary_deps,
+        deps = deps,
+        tags = tags,
+        internal_tags = internal_tags,
+        visibility = kwargs.pop("visibility", None),
+    ))

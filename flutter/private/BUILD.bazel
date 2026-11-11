@@ -223,6 +223,15 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_android_aab",
+    srcs = ["flutter_android_aab.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@bazel_skylib//rules:write_file",
+    ],
+)
+
+bzl_library(
     name = "flutter_android_apk_overlay",
     srcs = ["flutter_android_apk_overlay.bzl"],
     visibility = ["//visibility:public"],
@@ -231,6 +240,17 @@ bzl_library(
         "@bazel_skylib//rules:common_settings",
         "@rules_android//providers:providers_bzl",
         "@rules_java//java/common",
+    ],
+)
+
+bzl_library(
+    name = "flutter_android_app_wiring",
+    srcs = ["flutter_android_app_wiring.bzl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":constants",
+        ":flutter_android_registrant",
+        "@bazel_skylib//rules:expand_template",
     ],
 )
 

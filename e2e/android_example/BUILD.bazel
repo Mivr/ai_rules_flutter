@@ -5,6 +5,7 @@ load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
 load(
     "@rules_flutter//flutter:android.bzl",
+    "flutter_android_aab",
     "flutter_android_apk_overlay",
     "flutter_android_app",
     "flutter_android_bundle",
@@ -19,6 +20,7 @@ load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library
 load("@rules_flutter//flutter:web.bzl", "flutter_web_bundle")
 load("@rules_java//java:java_import.bzl", "java_import")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+load(":aab_test.bzl", "aab_build_bundle_test")
 
 exports_files(["pubspec.lock"])
 
@@ -72,6 +74,14 @@ flutter_android_app(
     # An app that networks declares it here, and gets it in every
     # compilation mode. Verified from inside the built APK by
     # :verify_android_permissions_test.
+    permissions = ["android.permission.INTERNET"],
+)
+
+# Unsigned Android App Bundle (`app_aab.aab`) of the same app.
+flutter_android_aab(
+    name = "app_aab",
+    package_name = "com.example.flutterapp",
+    application = ":app_flutter",
     permissions = ["android.permission.INTERNET"],
 )
 
@@ -350,4 +360,36 @@ flutter_library(
     deps = [
         "@deps//:flutter",
     ],
+)
+
+# =============================================================================
+# flutter_android_aab: unsigned App Bundle
+# =============================================================================
+
+# One `BuildBundle` action from rules_android's `android_application`, whose
+# output is `<name>_unsigned.aab`, with the pinned bundletool as input.
+aab_build_bundle_test(
+    name = "app_aab_build_bundle_test",
+    size = "small",
+    target_under_test = ":__app_aab_application",
+    unsigned_aab = "__app_aab_application_unsigned.aab",
+)
+
+# Inspects the produced `app_aab.aab` with the bundletool of rules_android's
+# toolchain (the pinned `com.android.tools.build:bundletool` artifact):
+# `validate` must exit 0 and `dump manifest` must name the package.
+dart_test(
+    name = "verify_android_aab_test",
+    size = "medium",
+    data = [
+        ":app_aab",
+        "@rules_android//tools/android:bundletool",
+    ],
+    env = {
+        "AAB": "$(rootpath :app_aab)",
+        "BUNDLETOOL": "$(rootpath @rules_android//tools/android:bundletool)",
+        "EXPECTED_PACKAGE": "com.example.flutterapp",
+    },
+    main = "test/verify_android_aab_test.dart",
+    target_compatible_with = ["@platforms//os:linux"],
 )
