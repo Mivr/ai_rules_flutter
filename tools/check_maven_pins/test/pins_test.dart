@@ -507,9 +507,20 @@ void _registerRepositoryTests() {
   test('the repository passes across all Android workspaces', () {
     expect(root, isNotNull, reason: 'repository checkout not reachable');
     final List<String> workspaces = discoverMavenWorkspaces(root!);
-    expect(workspaces, hasLength(7));
-    expect(workspaces, contains('e2e/pub_scc'));
-    expect(countInstalls(root, workspaces), 14);
+    expect(
+      workspaces,
+      containsAll(<String>[
+        'e2e/android_example',
+        'e2e/android_no_go_sdk',
+        'e2e/android_sharedprefs',
+        'e2e/hello_world',
+        'e2e/integration_android',
+        'e2e/min_versions',
+        'e2e/plugin_example',
+        'e2e/pub_scc',
+      ]),
+    );
+    expect(countInstalls(root, workspaces), greaterThanOrEqualTo(16));
     expect(checkAllWorkspaces(rootPath: root), isEmpty);
   });
 }
