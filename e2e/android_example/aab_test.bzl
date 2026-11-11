@@ -10,6 +10,7 @@ a rules_android bump that renames the output or the mnemonic fails loudly.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
 def _aab_build_bundle_impl(ctx):
+    """Asserts one `BuildBundle` action emitting `unsigned_aab` with pinned bundletool."""
     env = analysistest.begin(ctx)
     bundle_actions = [a for a in analysistest.target_actions(env) if a.mnemonic == "BuildBundle"]
     asserts.equals(env, 1, len(bundle_actions))
@@ -34,5 +35,11 @@ def _aab_build_bundle_impl(ctx):
 
 aab_build_bundle_test = analysistest.make(
     _aab_build_bundle_impl,
-    attrs = {"unsigned_aab": attr.string(mandatory = True)},
+    attrs = {
+        "unsigned_aab": attr.string(
+            doc = "Expected `<name>_unsigned.aab` output basename of `BuildBundle`.",
+            mandatory = True,
+        ),
+    },
+    doc = "Checks the `BuildBundle` action registered by `flutter_android_aab`.",
 )

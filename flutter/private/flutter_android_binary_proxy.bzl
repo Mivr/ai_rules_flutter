@@ -371,6 +371,7 @@ def flutter_android_aab_emit(name, aab):
             "applicationId": aab.package_name,
             "minSdkVersion": aab.min_sdk_version,
             "targetSdkVersion": aab.target_sdk_version,
+            "versionCode": "1",
         },
         resource_files = aab.resources if aab.resources else None,
         assets = ["__%s_aab_assets" % name],

@@ -60,5 +60,9 @@ Future<void> main() async {
     stderr.writeln('Manifest does not name package $expectedPackage:\n$text');
     exit(1);
   }
+  if (!text.contains('versionCode=')) {
+    stderr.writeln('Manifest does not carry a versionCode:\n$text');
+    exit(1);
+  }
   print('OK: $aab validates and names package $expectedPackage');
 }
