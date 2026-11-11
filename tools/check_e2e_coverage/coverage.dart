@@ -16,9 +16,6 @@ import 'dart:io';
 /// each saying why. A reason for a module that IS covered is an error, so
 /// the table cannot go stale.
 const Map<String, String> uncoveredReasons = {
-  'e2e/android_sharedprefs':
-      'Needs the Android SDK and its Maven closure like android_example, '
-      'which runs only in the nightly workflow; no push-CI slot is left.',
   'e2e/macos_example':
       'Apple-only; the macOS bundle signal is covered by hello_world\'s '
       'macos_bundle_build_test, the full app awaits a macOS runner slot.',
