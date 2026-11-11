@@ -193,7 +193,7 @@ def flutter_ios_xcframeworks(name, application = None, minimum_os_version = IOS_
 ios_sim_debug_app = _ios_sim_debug_app
 
 # Runs a host-side driver script against an app launched on the iOS simulator
-# (`platform = "ios"`) or the Android emulator; also exported from android.bzl.
+# or the Android emulator; also exported from android.bzl.
 flutter_drive_test = _flutter_drive_test
 
 # -- Composable rules (Tier 2) ------------------------------------------------
