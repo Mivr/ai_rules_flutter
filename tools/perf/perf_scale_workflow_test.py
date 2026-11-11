@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import workflow_inputs_test
 from perf_linux_workflow_test import (
-    block_items, child, direct_keys, parse_step, top_level)
+    block_items, child, direct_keys, mapping_entries, parse_fields,
+    parse_step, top_level)
 
 WORKFLOWS = ("perf-scale-linux.yaml", "perf-scale-ios.yaml")
 SETUP_BAZEL = ("bazel-contrib/setup-bazel@"
@@ -35,6 +36,27 @@ def workflow_text(name):
         return fh.read()
 
 
+def _step_env(block):
+    """The `env:` mapping of one step block, or {}."""
+    entries = mapping_entries(block)
+    if not entries:
+        return {}
+    base = min(entry[1] for entry in entries)
+    for index, indent, key, _ in entries:
+        if indent == base and key == "env":
+            return parse_fields(block, index, indent)
+    return {}
+
+
+def _parse_step(block):
+    """One workflow step as a dict, with `with:` and `env:` fields nested."""
+    step = parse_step(block)
+    env = _step_env(block)
+    if env:
+        step["env"] = env
+    return step
+
+
 def steps(lines):
     """Every step of the `measure` and `report` jobs as parsed dicts."""
     jobs = [e for e in top_level(lines) if e[2] == "jobs"][0]
@@ -42,7 +64,7 @@ def steps(lines):
     for name in ("measure", "report"):
         job = child(lines, jobs[0], jobs[1], name)
         entry = child(lines, job[0], job[1], "steps")
-        parsed += [parse_step(block)
+        parsed += [_parse_step(block)
                    for block in block_items(lines, entry[0], entry[1])]
     return parsed
 
@@ -120,6 +142,79 @@ class ScaleWorkflowTest(unittest.TestCase):
         for name, text, _ in self.each():
             self.assertEqual(
                 workflow_inputs_test.find_unquoted_scalars(text), [], name)
+
+    def test_no_workflow_inputs_in_run_blocks(self):
+        text = workflow_text("perf-scale-ios.yaml")
+        lines = text.splitlines()
+        pattern = re.compile(
+            r"(?:\$\{\{\s*(?:github\.event\.)?inputs\.|"
+            r"(?:\$\{\{|\b)github\.event\.inputs\.)([A-Za-z0-9_]+)"
+        )
+        violations = []
+        for step in steps(lines):
+            run_script = step.get("run")
+            if not run_script:
+                continue
+            matches = pattern.findall(run_script)
+            for inp in matches:
+                step_name = step.get("name", "<unnamed>")
+                violations.append(
+                    f"step {step_name!r} contains input {inp!r} in run: script"
+                )
+        self.assertEqual(
+            violations,
+            [],
+            "Workflow inputs must not appear in run: scripts:\n"
+            + "\n".join(violations),
+        )
+
+    def test_script_inputs_are_bound_in_env_and_referenced_as_variables(self):
+        text = workflow_text("perf-scale-ios.yaml")
+        lines = text.splitlines()
+        parsed_steps = {s.get("name"): s for s in steps(lines) if "name" in s}
+
+        expected = {
+            "Generate pristine monorepo": {
+                "SEED": ("seed", "${{ inputs.seed || '1' }}"),
+            },
+            "Measure speed-of-light": {
+                "REPEATS": ("repeats", "${{ inputs.repeats || '1' }}"),
+            },
+            "Summarize speed-of-light": {
+                "REPEATS": ("repeats", "${{ inputs.repeats || '1' }}"),
+                "SEED": ("seed", "${{ inputs.seed || '1' }}"),
+            },
+        }
+
+        for step_name, env_bindings in expected.items():
+            self.assertIn(step_name, parsed_steps)
+            step = parsed_steps[step_name]
+            step_env = step.get("env", {})
+            script = step.get("run", "")
+
+            for var_name, (input_name, expected_val) in env_bindings.items():
+                self.assertIn(
+                    var_name,
+                    step_env,
+                    f"step {step_name!r} must bind input {input_name!r} "
+                    f"in env as {var_name}",
+                )
+                self.assertEqual(
+                    step_env.get(var_name),
+                    expected_val,
+                    f"step {step_name!r} env entry for {var_name}",
+                )
+                self.assertIn(
+                    f'"${var_name}"',
+                    script,
+                    f"step {step_name!r} script must reference \"${var_name}\"",
+                )
+                self.assertNotIn(
+                    f"inputs.{input_name}",
+                    script,
+                    f"step {step_name!r} script must not contain "
+                    f"expression for {input_name}",
+                )
 
 
 if __name__ == "__main__":
