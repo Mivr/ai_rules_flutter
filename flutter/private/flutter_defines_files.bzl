@@ -3,6 +3,8 @@
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("//flutter/private:validation.bzl", "merge_dart_defines_with_flavor")
 
+visibility(["//flutter/..."])
+
 DEFINES_FILES_DOC = (
     "Files of Dart environment defines in `.json` or `.env` format. " +
     "A `.json` file must define a top-level JSON object whose values are " +

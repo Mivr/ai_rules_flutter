@@ -7,6 +7,8 @@ so the lookup replays the scan's first-match-in-declaration-order rule
 through dict lookups instead of a linear scan per file.
 """
 
+visibility(["//flutter/..."])
+
 def covering_entry_lookup(parsed_assets):
     """Index asset declarations for linear covering-entry lookup.
 

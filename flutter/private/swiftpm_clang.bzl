@@ -20,6 +20,8 @@ with its hub format). Every detail names the target.
 load(":swiftpm_paths.bzl", "swiftpm_join_path", "swiftpm_normalize_relative_path")
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr")
 
+visibility(["//flutter/..."])
+
 def _swiftpm_module_spec_failure(detail):
     """The `swiftpm_clang_module_spec` failure result."""
     return struct(

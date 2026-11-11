@@ -11,6 +11,8 @@ sources import by basename; the compile reaches it only through
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 
+visibility(["//flutter/..."])
+
 def _package_path(label):
     """The package-relative path of a source label, or `None` when it is not in this package."""
     if label.startswith(":"):

@@ -12,6 +12,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_linux_application.bzl", "gtk3_sysroot_link_inputs")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _LIB_DIR = "external/sysroot/usr/lib/x86_64-linux-gnu"
 
 def _fake_file(dirname, basename):

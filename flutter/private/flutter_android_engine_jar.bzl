@@ -22,6 +22,8 @@ load("@rules_cc//cc:find_cc_toolchain.bzl", "find_cc_toolchain", "use_cc_toolcha
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("//flutter/private:common.bzl", "ANDROID_ABIS", "android_platform_for_abi", "resolve_exec_dart_vm")
 
+visibility(["//flutter/..."])
+
 _TOOL = Label("//flutter/private/tools:strip_native_libs")
 
 def _engine_jar_transition_impl(_settings, attr):

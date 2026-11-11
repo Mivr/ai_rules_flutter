@@ -12,6 +12,8 @@ The tools are not here: `flutter_kernel_compile_tools()` in
 one would let two call sites resolve the same files differently.
 """
 
+visibility(["//flutter/..."])
+
 def flutter_kernel_sources(
         main,
         srcs,

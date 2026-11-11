@@ -13,6 +13,8 @@ still generated because `register_toolchains` names its targets at module
 load.
 """
 
+visibility("private")
+
 _BASE = "https://dl.google.com/android/repository/"
 
 # The API level and build-tools release the floor workspace installs. They

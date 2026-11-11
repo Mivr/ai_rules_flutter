@@ -22,6 +22,8 @@ load(
     _parse_normalize_apply_path = "gradle_normalize_apply_path",
 )
 
+visibility(["//flutter/..."])
+
 _GRADLE_APPLY_MAX_DEPTH = 10
 
 def _gradle_dollar_slashy_end(text, pos, n):

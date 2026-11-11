@@ -10,6 +10,8 @@ with plain strings and lists.
 
 load(":flutter_pub_apple.bzl", "detect_apple_plugin_sources")
 
+visibility(["//flutter/..."])
+
 plugin_defines_attr = attr.string_list(
     doc = "Preprocessor defines for this package's Apple libraries, from " +
           "`flutter.pub(ios_plugin_defines = ...)`. A non-empty list on a " +

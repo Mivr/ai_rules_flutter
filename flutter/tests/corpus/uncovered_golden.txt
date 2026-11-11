@@ -8,6 +8,7 @@ android_app: needs the Android SDK and rules_android toolchains, which this Linu
 android_engine: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
 android_plugin: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
 android_runner: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
+android_stripped_engine_jar: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
 apple_xcframework: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 darwin_xcframework: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 drive_test: needs the Android SDK and rules_android toolchains, which this Linux-x64 host does not configure
@@ -19,6 +20,7 @@ ios_native_frameworks: incompatible with the host: @platforms//:incompatible, ne
 ios_plugin: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 ios_plugins: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 ios_privacy_manifests: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
+ios_raw_framework: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 ios_registrant: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 ios_runner_lib: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 ios_sim_debug: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
@@ -32,6 +34,7 @@ macos_framework: incompatible with the host: @platforms//:incompatible, needs th
 macos_info_plist: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 macos_menu_xib: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 macos_native_libs: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
+macos_objc_plugin: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 macos_plugin: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 macos_plugins: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)
 macos_privacy_manifests: incompatible with the host: @platforms//:incompatible, needs the Apple toolchain (macOS only)

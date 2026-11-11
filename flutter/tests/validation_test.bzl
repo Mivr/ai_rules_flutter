@@ -5,6 +5,8 @@ load("//flutter/private:runner_module.bzl", "runner_module_name")
 load("//flutter/private:validation.bzl", "is_valid_dart_define", "is_valid_swift_module_name")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _accepts_simple_define_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.true(env, is_valid_dart_define("FOO=bar"))

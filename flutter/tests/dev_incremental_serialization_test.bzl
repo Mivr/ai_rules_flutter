@@ -12,6 +12,8 @@ absent and the argv has no marker. The setting alone never reaches the
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load(":incr_kernel_fixture.bzl", "ReqInfo", "incr_caller")
 
+visibility(["//flutter/tests/..."])
+
 _MARKER = "--dev-incremental-serialization"
 _INCR = str(Label("//flutter:incremental_kernel"))
 _DEV = str(Label("//flutter:dev_incremental_serialization"))

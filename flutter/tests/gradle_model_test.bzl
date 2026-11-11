@@ -16,6 +16,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # Verbatim `android/build.gradle:65` from firebase_messaging 15.2.1: a
 # quoted literal inside a `${...}` body whose own arguments are quoted.
 _FIREBASE_MESSAGING_BOM = 'implementation platform("com.google.firebase:firebase-bom:${getRootProjectExtOrCoreProperty("FirebaseSDKVersion", firebaseCoreProject)}")'

@@ -13,6 +13,8 @@ own manifest fragment.
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 
+visibility(["//flutter/..."])
+
 _DEFAULT_MANIFEST_TEMPLATE = """\
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"

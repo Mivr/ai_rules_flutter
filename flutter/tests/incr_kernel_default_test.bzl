@@ -9,6 +9,8 @@ debug compile that opts out with the flag set to false keep the stock
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load(":incr_kernel_fixture.bzl", "ReqInfo", "incr_caller")
 
+visibility(["//flutter/tests/..."])
+
 _INCR = str(Label("//flutter:incremental_kernel"))
 _MODE = "//command_line_option:compilation_mode"
 

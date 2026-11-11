@@ -9,6 +9,8 @@ paths is written once in the bundle config.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter/tests:action_content.bzl", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 def _bundle_config(ctx):
     """The bundle action's written `.asset_bundle_config.json`."""
     env = analysistest.begin(ctx)

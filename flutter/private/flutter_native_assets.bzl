@@ -42,6 +42,8 @@ discretion.
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo", "FlutterNativeAssetInfo")
 
+visibility(["//flutter/..."])
+
 # Map (target_os, arch) → the Target string Dart's
 # `Target.fromArchitectureAndOS` would produce. Keep this mirrored
 # with the `hooks_runner` package's `lib/src/model/target.dart`

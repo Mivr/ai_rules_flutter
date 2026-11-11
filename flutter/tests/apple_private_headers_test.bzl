@@ -10,6 +10,8 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:ios.bzl", "flutter_apple_plugin_library")
 
+visibility(["//flutter/tests/..."])
+
 def _surface_test_impl(ctx):
     """The inner ObjC target lists public headers in `hdrs` and private ones in `srcs`."""
     env = unittest.begin(ctx)

@@ -20,6 +20,8 @@ Every helper fails rather than falling back to the network: a local
 repository never downloads.
 """
 
+visibility(["//flutter/..."])
+
 def resolve_local_sdk_root(repository_ctx, local_path):
     """Resolves a `local_path` toolchain value to a watched SDK root path.
 

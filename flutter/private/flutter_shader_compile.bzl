@@ -13,6 +13,8 @@ selected based on the target platform.
 # - flutter_tester (`flutter test`): SKSL + Vulkan, Impeller's backend there
 load("//flutter:providers.bzl", "resolve_exec_dart_vm")
 
+visibility(["//flutter/..."])
+
 SHADER_PLATFORM_FLAGS = {
     "ios": ["--runtime-stage-metal"],
     "macos": ["--sksl", "--runtime-stage-metal"],

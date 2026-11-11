@@ -11,6 +11,8 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_android//providers:providers.bzl", "StarlarkAndroidResourcesInfo")
 load("//flutter:android.bzl", "flutter_android_manifest_merge", "flutter_android_plugin_library")
 
+visibility(["//flutter/tests/..."])
+
 def _plugin_synth_manifest_action_test_impl(ctx):
     env = analysistest.begin(ctx)
     actions = analysistest.target_actions(env)

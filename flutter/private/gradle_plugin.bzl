@@ -21,6 +21,8 @@ load(
     _model_package_reader = "gradle_package_reader",
 )
 
+visibility(["//flutter/..."])
+
 def resolve_plugin_maven_deps(ctx, build_file, build_content):
     """Translate the spoke's Android build deps to Bazel labels.
 

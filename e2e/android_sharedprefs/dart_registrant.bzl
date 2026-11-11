@@ -10,6 +10,8 @@ to, verifies `FlutterKernelCompile` consumes `<name>_plugin_registrant.dart`
 under `-Dflutter.dart_plugin_registrant=`, and exposes the file for testing.
 """
 
+visibility("private")
+
 _DartRegistrantInfo = provider(
     doc = "Carries the Dart plugin registrant generated for an Android-configured `flutter_application`.",
     fields = {

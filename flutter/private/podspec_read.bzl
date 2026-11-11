@@ -27,6 +27,8 @@ load(
 )
 load(":starlark_literal.bzl", "starlark_string_literal")
 
+visibility(["//flutter/..."])
+
 _STMT_SKIP_RECVS = (
     "if",
     "unless",

@@ -25,6 +25,8 @@ load(
 )
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions")
 
+visibility(["//flutter/..."])
+
 _TOOL = Label("//flutter/private/tools:generate_asset_manifest")
 
 # Re-exported from `//flutter/private:flutter_asset_bundle_action.bzl`, where the

@@ -57,6 +57,8 @@ applies is a loud failure, where a rewrite would quietly drift.
 load("//flutter/private:local_sdk.bzl", "copy_local_text_file", "read_local_sdk_version", "resolve_local_sdk_root")
 load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 
+visibility(["//flutter/..."])
+
 # The exact closure of `src/localizations/gen_l10n.dart` once the six import
 # edges are cut. Listed explicitly rather than globbed: the subset boundary is
 # the whole point of this repository, so it is stated, not inferred. Files the

@@ -88,6 +88,8 @@ load(
     "web_integration_test_rule",
 )
 
+visibility(["//flutter/..."])
+
 # The iOS bootstrap shares the Linux bootstrap's shape (a JIT build with
 # dart:io available, driven via `RemoteListener`), but not its harness-URL
 # read: on iOS `Platform.environment` is always empty, so the iOS bootstrap

@@ -23,6 +23,8 @@ load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 load(":action_content.bzl", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 def _compiled_shaders_bundle_impl(ctx):
     files = [
         entry.file

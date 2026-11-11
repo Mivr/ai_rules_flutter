@@ -14,6 +14,8 @@ load(
 )
 load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 
+visibility(["//flutter/..."])
+
 def format_message_9(plugin = None, lock_label = None, package = None):
     """Format Message 9 when a plugin has iOS sources but no lock entry and no Package.swift.
 

@@ -31,6 +31,8 @@ load(
     "flutter_test_bootstrap",
 )
 
+visibility("private")
+
 def _custom_test_kernel_impl(ctx):
     tools = flutter_kernel_compile_tools(ctx)
     bootstrap = ctx.actions.declare_file(ctx.label.name + "_bootstrap.dart")

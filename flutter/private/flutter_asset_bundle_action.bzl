@@ -8,6 +8,8 @@ load cycle.
 
 load("//flutter/private:asset_uri.bzl", "decode_asset_key")
 
+visibility(["//flutter/..."])
+
 # Regex-like DPR directory patterns we detect in Starlark.
 # A directory named like "2x", "1.5x", "3.0x" indicates a resolution variant.
 _DPR_SUFFIXES = {

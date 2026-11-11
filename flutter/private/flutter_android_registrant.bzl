@@ -22,6 +22,8 @@ load("//flutter/private:constants.bzl", "ANDROID_ABI_FOR_ARCH")
 load("//flutter/private:flutter_android_application.bzl", "android_platform_transition")
 load("//flutter/private:plugin_registrant.bzl", "generate_native_plugin_registrant")
 
+visibility(["//flutter/..."])
+
 FlutterAndroidPluginManifestsInfo = provider(
     doc = "Exported AndroidManifest.xml files from transitive flutter_plugin(android_libs = ...) targets.",
     fields = {

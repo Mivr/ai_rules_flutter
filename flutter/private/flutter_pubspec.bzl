@@ -58,6 +58,8 @@ load(
     "validate_pubspec_root",
 )
 
+visibility(["//flutter/..."])
+
 def parse_pubspec(content):
     """Parse pubspec.yaml content into a Starlark dict.
 

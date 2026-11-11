@@ -19,6 +19,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _BIGINT_REV = "63feef7820abb1a8fb08587d7da56bb0b7db8751"
 _BIGINT_SHA = "55fc8a63f655a09d9216f2c9bc062c508f98d4eca4b8ebefaf295a3ea4ac8f22"
 

@@ -7,6 +7,21 @@ load(
     _resolve_exec_dart = "resolve_exec_dart",
     _resolve_flutter_sdk_info = "resolve_flutter_sdk_info",
 )
+load("//flutter/private:flutter_sdk_binary.bzl", _flutter_sdk_binary = "flutter_sdk_binary")
+load(
+    "//flutter/private:xtool_darwin_sdk_repo.bzl",
+    _xtool_darwin_cc_toolchain_config = "xtool_darwin_cc_toolchain_config",
+    _xtool_darwin_sdk_status = "xtool_darwin_sdk_status",
+    _xtool_darwin_sdk_target = "xtool_darwin_sdk_target",
+)
+
+visibility("public")
+
+# Re-exported so generated repositories and `//dart` load them from a public file.
+flutter_sdk_binary = _flutter_sdk_binary
+xtool_darwin_cc_toolchain_config = _xtool_darwin_cc_toolchain_config
+xtool_darwin_sdk_status = _xtool_darwin_sdk_status
+xtool_darwin_sdk_target = _xtool_darwin_sdk_target
 
 FLUTTER_OPTIONAL_TOOLCHAINS = _FLUTTER_OPTIONAL_TOOLCHAINS
 resolve_exec_dart = _resolve_exec_dart

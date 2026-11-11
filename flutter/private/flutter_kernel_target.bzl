@@ -8,6 +8,8 @@ load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_ATTRS", "MODULAR_KERNEL_TOOL
 load("//flutter/private:common.bzl", "AGENT_EXTENSIONS_ATTR", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_DEPS_DOC", "KERNEL_COMPILE_ATTRS", "flutter_compile_kernel", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info")
 load("//flutter/private:flutter_kernel_module.bzl", "flutter_kernel_module_aspect")
 
+visibility(["//flutter/..."])
+
 def _flutter_kernel_target_impl(ctx):
     flutter_sdk_info = resolve_flutter_sdk_info(ctx)
     kernel_dill = flutter_compile_kernel(

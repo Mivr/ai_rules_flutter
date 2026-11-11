@@ -32,6 +32,8 @@ load(
     "flutter_modular_test_kernel",
 )
 
+visibility(["//flutter/tests/..."])
+
 _GLOBAL_TEST_URI = "package:modular_api_b/b.dart"
 
 def _refusal_test_kernel_impl(ctx):

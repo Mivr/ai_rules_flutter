@@ -59,6 +59,8 @@ slices, and UTF-8 validity is checked on the byte values with integer
 arithmetic.
 """
 
+visibility(["//flutter/..."])
+
 # Every byte value 0-255 at its own index, so `_BYTES.find(unit)` reads a
 # byte and `_BYTES[v:v + 1]` writes one. Octal escapes are the only way to
 # spell bytes past 0x7F in a .bzl literal.

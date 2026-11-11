@@ -8,12 +8,16 @@ CI fetches each separately and greps the exact failure message (or the
 fetched bytes, for the correct digests).
 """
 
-load(":download.bzl", "pinned_download", "pinned_download_and_extract")
+load("@rules_flutter//flutter:utils.bzl", "pinned_download", "pinned_download_and_extract")
+
+visibility("private")
 
 def _fixture_url(repository_ctx):
+    """Returns a `file://` URL pointing at the repository's `fixture` attribute."""
     return "file://" + str(repository_ctx.path(repository_ctx.attr.fixture))
 
 def _digest_download_impl(repository_ctx):
+    """Fetches `fixture` via `pinned_download` and exports `fetched.bin`."""
     pinned_download(
         repository_ctx,
         url = _fixture_url(repository_ctx),
@@ -39,6 +43,7 @@ digest_download = repository_rule(
 )
 
 def _digest_extract_impl(repository_ctx):
+    """Fetches and extracts `fixture` via `pinned_download_and_extract`."""
     pinned_download_and_extract(
         repository_ctx,
         url = _fixture_url(repository_ctx),

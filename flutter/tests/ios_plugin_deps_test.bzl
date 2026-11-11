@@ -18,6 +18,8 @@ load(
 load("//flutter/private:swiftpm_resolved.bzl", "pub_spoke_swiftpm_attrs")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _mapped_no_label_test_impl(ctx):
     """mapped_apple_plugin_deps with no label returns mapped=False and empty lists."""
     env = unittest.begin(ctx)

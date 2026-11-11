@@ -6,6 +6,8 @@ Generates GeneratedPluginRegistrant.swift from FlutterApplicationInfo plugin met
 load("//flutter:providers.bzl", "FlutterApplicationInfo")
 load("//flutter/private:plugin_registrant.bzl", "generate_ios_objc_registrant", "generate_native_plugin_registrant")
 
+visibility(["//flutter/..."])
+
 def _flutter_ios_registrant_impl(ctx):
     plugins = ctx.attr.application[FlutterApplicationInfo].plugins
     if ctx.attr.language == "objc":

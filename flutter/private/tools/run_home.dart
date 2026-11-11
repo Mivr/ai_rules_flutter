@@ -112,7 +112,7 @@ bool _isProgramFile(String arg) {
 /// A command (`pub`, `format`, `help`, ...) is not a program file either.
 /// Mirrors the shell launcher (`RUN_HOME_SH` in
 /// `//flutter/private:run_home.bzl` and the Windows `.bat` in
-/// `//dart:flutter_sdk_binary`).
+/// `//flutter/private:flutter_sdk_binary.bzl`).
 bool isFileForm(List<String> args) {
   final List<String> rest = _positionalArgs(args);
   if (rest.isEmpty) return false;

@@ -30,6 +30,8 @@ load(
     "flutter_modular_test_kernel",
 )
 
+visibility("private")
+
 def _custom_modular_test_kernel_impl(ctx):
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
     base_dill = flutter_modular_test_kernel(

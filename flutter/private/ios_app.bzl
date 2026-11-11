@@ -30,6 +30,8 @@ load("//flutter/private:runner_module.bzl", "runner_module_name")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 load("//flutter/private:xtool_version.bzl", _resolve_xtool_version = "resolve_xtool_version")
 
+visibility(["//flutter/..."])
+
 IOS_MINIMUM_OS_VERSION = _IOS_MINIMUM_OS_VERSION
 
 IOS_DEFAULT_LAUNCH_STORYBOARD = "@rules_flutter//flutter/private/runners/ios:Base.lproj/LaunchScreen.storyboard"

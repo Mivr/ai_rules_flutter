@@ -2,6 +2,8 @@
 
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 
+visibility(["//flutter/..."])
+
 def make_runner_engine(library_file, import_library = None, header_files = [], include_dir = None):
     """The engine files a desktop runner compiles and links against.
 

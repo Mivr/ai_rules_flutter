@@ -2,6 +2,8 @@
 
 load("@rules_apple//apple:macos.bzl", "macos_extension")
 
+visibility("private")
+
 def example_macos_extension(name, **kwargs):
     """A `macos_extension` as `name` and its team-signed twin as `name + "_team"`.
 

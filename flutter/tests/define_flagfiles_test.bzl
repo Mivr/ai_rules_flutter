@@ -16,6 +16,8 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//flutter:defs.bzl", "flutter_application")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "define_flagfiles_fixture"
 _MAIN = "lib/language_version_main.dart"
 _FLAGFILE = "_define_flagfiles_secret.defines"

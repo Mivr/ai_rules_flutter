@@ -1,5 +1,7 @@
 """Reproducibility canary rule that produces nondeterministic output."""
 
+visibility("private")
+
 def _repro_canary_impl(ctx):
     """Executes /bin/dd reading at most 32 bytes from /dev/urandom into the declared output.
 

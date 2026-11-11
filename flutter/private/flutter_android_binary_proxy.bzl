@@ -36,38 +36,10 @@ load(
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_drive_test.bzl", _flutter_drive_test = "flutter_drive_test")
 
+visibility(["//flutter/..."])
+
 # Re-exported so `flutter/android.bzl` reaches the rule through its existing dep.
 flutter_drive_test = _flutter_drive_test
-
-# AndroidX deps of flutter.jar, mirroring the dependency list of Flutter's
-# official io.flutter:flutter_embedding_* Maven POM (the deps every
-# Gradle-built Flutter app ships): lifecycle for FlutterActivity's
-# LifecycleRegistry, window/window-java for foldable display features, core
-# for ContextCompat/ViewCompat/input, tracing for the engine's TraceSection,
-# fragment for FlutterFragment(Activity), exifinterface for image decoding,
-# and relinker for engine .so loading. The POM's lifecycle-common-java8 and
-# lifecycle-process entries are omitted: at the lifecycle version pinned here
-# their classes live in lifecycle-common, and the embedding never references
-# lifecycle-process types.
-#
-# `flutter_android_engine` *exports* these: the POM declares them at compile
-# scope, so in Gradle builds everything that compiles against the embedding
-# AAR — runner sources, the plugin registrant, and every Flutter plugin —
-# sees them on its compile classpath transitively. Exporting reproduces
-# that contract. It adds nothing to the APK that the engine target wasn't
-# already carrying at runtime.
-ANDROIDX_EMBEDDING_DEPS = [
-    "@rules_android_maven//:androidx_annotation_annotation",
-    "@rules_android_maven//:androidx_core_core",
-    "@rules_android_maven//:androidx_exifinterface_exifinterface",
-    "@rules_android_maven//:androidx_fragment_fragment",
-    "@rules_android_maven//:androidx_lifecycle_lifecycle_common",
-    "@rules_android_maven//:androidx_lifecycle_lifecycle_runtime",
-    "@rules_android_maven//:androidx_tracing_tracing",
-    "@rules_android_maven//:androidx_window_window",
-    "@rules_android_maven//:androidx_window_window_java",
-    "@rules_android_maven//:com_getkeepsafe_relinker_relinker",
-]
 
 # The aapt2 default no-compress extension list that both the overlay tool and
 # android_binary's own packaging apply. Reference apps in e2e tests pass this to

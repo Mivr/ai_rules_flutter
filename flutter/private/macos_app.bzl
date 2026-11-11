@@ -27,6 +27,8 @@ load("//flutter/private:runner_module.bzl", "runner_module_name")
 load("//flutter/private:validation.bzl", "validate_minimum_os_version")
 load("//flutter/private:xtool_version.bzl", _resolve_xtool_version = "resolve_xtool_version")
 
+visibility(["//flutter/..."])
+
 MACOS_MINIMUM_OS_VERSION = _MACOS_MINIMUM_OS_VERSION
 
 def _engine_framework_select():

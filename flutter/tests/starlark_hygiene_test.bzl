@@ -1,13 +1,11 @@
 """Tests that xtool actions carry progress messages and output-scoped `TMPDIR`s."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-
-# buildifier: disable=bzl-visibility
 load("//flutter/private:flutter_xtool_bundle.bzl", "flutter_xtool_ios_bundle", "flutter_xtool_macos_bundle")
-
-# buildifier: disable=bzl-visibility
 load("//flutter/private:xtool_version.bzl", "bundle_version_progress_message", "flutter_xtool_bundle_version")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
+
+visibility(["//flutter/tests/..."])
 
 def _progress_message_test_impl(ctx):
     """Checks the bundle-version progress message names the label."""

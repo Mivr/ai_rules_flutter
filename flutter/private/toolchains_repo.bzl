@@ -17,6 +17,8 @@ with only the toolchain attribute pointing into the platform-specific repositori
 
 load(":xtool_sdk_render.bzl", "XTOOL_DARWIN_TARGETS")
 
+visibility(["//flutter/..."])
+
 # Host platforms on which Flutter builds can run.
 # Keys are platform strings used in Flutter artifact URLs.
 HOST_PLATFORMS = {

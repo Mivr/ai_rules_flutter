@@ -14,6 +14,8 @@ load("//flutter/private:flutter_pub_assets.bzl", "asset_entry_problem_error")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _assert_refused(env, content, key, detail_fragment, line):
     """Assert `content` yields exactly one `key` refusal at `line`.
 

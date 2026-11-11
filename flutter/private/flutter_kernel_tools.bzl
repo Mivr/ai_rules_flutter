@@ -8,6 +8,8 @@ Dart SDK, and reads the global `//flutter:extra_dart_defines` setting the way
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:utils.bzl", "kernel_tools_for")
 
+visibility(["//flutter/..."])
+
 def _global_extra_defines(ctx):
     defines = []
     if hasattr(ctx.attr, "_extra_dart_defines") and ctx.attr._extra_dart_defines != None:

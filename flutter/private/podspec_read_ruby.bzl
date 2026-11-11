@@ -20,6 +20,8 @@ load(
     "skip_interpolation",
 )
 
+visibility(["//flutter/..."])
+
 _PAIRED_CLOSERS = {
     "[": "]",
     "(": ")",

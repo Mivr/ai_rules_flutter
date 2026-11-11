@@ -12,6 +12,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter/private:flutter_android_application.bzl", "flutter_android_aar")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 
+visibility(["//flutter/tests/..."])
+
 _RELEASE = {"//command_line_option:compilation_mode": "opt"}
 _PROFILE = {
     "//command_line_option:compilation_mode": "opt",

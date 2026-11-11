@@ -2,6 +2,8 @@
 
 load("//flutter/private:common.bzl", "detect_target_platform")
 
+visibility(["//flutter/..."])
+
 def target_platform_from_constraints(ctx):
     """Reads the target platform constraints into a platform record.
 

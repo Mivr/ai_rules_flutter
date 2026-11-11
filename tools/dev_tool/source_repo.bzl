@@ -11,4 +11,6 @@ Lives in its own `.bzl` because `Label` is only callable from Starlark
 files, not directly from BUILD files.
 """
 
+visibility(["//tools/dev_tool/..."])
+
 SOURCE_REPO = Label("//tools/dev_tool:flutter_bazel").workspace_name

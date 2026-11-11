@@ -23,6 +23,8 @@ load(
     "integration_test_kernel",
 )
 
+visibility(["//flutter/..."])
+
 def android_integration_app_kernel(ctx, setup, sources, native_assets):
     """Compiles the Android integration-test app kernel, including `defines_files`.
 

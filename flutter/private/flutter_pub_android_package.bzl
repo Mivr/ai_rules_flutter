@@ -40,6 +40,8 @@ load(
 )
 load(":starlark_literal.bzl", "starlark_string_literal")
 
+visibility(["//flutter/..."])
+
 # Kotlin/Java source extensions for Android plugin libraries.
 _ANDROID_SRC_EXTENSIONS = ("kt", "java")
 

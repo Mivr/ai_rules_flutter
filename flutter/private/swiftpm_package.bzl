@@ -26,6 +26,8 @@ load(
     "translate_swiftpm_package",
 )
 
+visibility(["//flutter/..."])
+
 # The archive extracts here first; its single top-level directory (named
 # `<Repo>-<revision>` by GitHub) is then moved up to become the repo root.
 _SWIFTPM_EXTRACT_DIR = ".swiftpm_extract"

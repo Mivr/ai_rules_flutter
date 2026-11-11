@@ -4,6 +4,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_android//providers:providers.bzl", "ApkInfo")
 load("//flutter:android.bzl", "flutter_drive_test")
 
+visibility(["//flutter/tests/..."])
+
 def _app_stub_impl(ctx):
     """Stands in for `flutter_android_app`: one signed APK carrying `ApkInfo`.
 

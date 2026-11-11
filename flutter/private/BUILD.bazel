@@ -191,15 +191,6 @@ bzl_library(
 )
 
 bzl_library(
-    name = "digest_case_repos",
-    srcs = ["digest_case_repos.bzl"],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":download",
-    ],
-)
-
-bzl_library(
     name = "download",
     srcs = ["download.bzl"],
     visibility = ["//visibility:public"],
@@ -209,6 +200,15 @@ bzl_library(
     name = "engine_helpers",
     srcs = ["engine_helpers.bzl"],
     visibility = ["//visibility:public"],
+)
+
+bzl_library(
+    name = "engine_repo_files",
+    srcs = ["engine_repo_files.bzl"],
+    visibility = [
+        "//docs:__subpackages__",
+        "//flutter:__subpackages__",
+    ],
 )
 
 bzl_library(
@@ -254,6 +254,18 @@ bzl_library(
         "@bazel_skylib//rules:write_file",
         "@rules_android//providers:providers_bzl",
         "@rules_java//java/common",
+    ],
+)
+
+bzl_library(
+    name = "flutter_android_engine",
+    srcs = ["flutter_android_engine.bzl"],
+    visibility = [
+        "//docs:__subpackages__",
+        "//flutter:__subpackages__",
+    ],
+    deps = [
+        "@rules_java//java:core_rules",
     ],
 )
 
@@ -506,6 +518,9 @@ bzl_library(
     name = "flutter_desktop_plugin_info",
     srcs = ["flutter_desktop_plugin_info.bzl"],
     visibility = ["//visibility:public"],
+    deps = [
+        "//flutter:providers",
+    ],
 )
 
 bzl_library(
@@ -660,6 +675,10 @@ bzl_library(
     deps = [
         ":app_entrypoint",
         ":common",
+        ":constants",
+        ":flutter_android_application",
+        ":flutter_android_engine",
+        ":flutter_android_manifest_merge",
         ":flutter_android_registrant",
         ":flutter_integration_android_app",
         ":flutter_integration_test_bootstrap",
@@ -667,7 +686,6 @@ bzl_library(
         ":flutter_integration_test_ios",
         ":flutter_kernel_module",
         ":native_sources",
-        "//flutter:android",
         "//flutter:providers",
         "@bazel_skylib//rules:write_file",
         "@rules_dart//dart:providers",
@@ -2063,14 +2081,25 @@ bzl_library(
     visibility = ["//visibility:public"],
 )
 
-# `run_home.bzl` is loaded by shell-template launchers outside
-# `//flutter` (`//dart:flutter_sdk_binary`) and read as data by the
-# `run_home` unit test, so the file itself is exported wider than the
-# `bzl_library` above.
+bzl_library(
+    name = "flutter_sdk_binary",
+    srcs = ["flutter_sdk_binary.bzl"],
+    visibility = [
+        "//docs:__subpackages__",
+        "//flutter:__subpackages__",
+    ],
+    deps = [
+        ":run_home",
+        "//flutter:providers",
+    ],
+)
+
+# `run_home.bzl` is read as data by the `run_home` unit test in
+# `//flutter/private/tools/test`, so the file itself is exported to
+# `//flutter:__subpackages__`.
 exports_files(
     ["run_home.bzl"],
     visibility = [
-        "//dart:__subpackages__",
         "//flutter:__subpackages__",
     ],
 )

@@ -11,6 +11,8 @@ load(
     "integration_test_binding_substitutions",
 )
 
+visibility(["//flutter/..."])
+
 def make_web_integration_bootstrap_content(test_import, has_integration_test = False):
     """Build the substitutions for the web integration test bootstrap template.
 

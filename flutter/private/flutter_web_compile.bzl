@@ -8,6 +8,8 @@ not a kernel .dill.
 load("//flutter/private:app_entrypoint.bzl", "stage_generated_inputs")
 load("//flutter/private:common.bzl", "flutter_build_mode")
 
+visibility(["//flutter/..."])
+
 def web_renderer_defines(renderer):
     """The Dart renderer defines a web compile carries for `renderer`.
 

@@ -13,6 +13,8 @@ load("@rules_android//providers:providers.bzl", "ApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_android_apk_overlay.bzl", "flutter_android_apk_overlay", "overlay_signing_select")
 
+visibility(["//flutter/tests/..."])
+
 def _fake_android_binary_impl(ctx):
     """Stands in for `android_binary`: an unsigned APK plus deploy info."""
     unsigned_apk = ctx.actions.declare_file(ctx.label.name + "_unsigned.apk")

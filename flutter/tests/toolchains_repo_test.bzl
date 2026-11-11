@@ -30,6 +30,8 @@ load(
 load("//flutter/settings:apple_backend.bzl", "APPLE_BACKEND_VALUES")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _desktop_cross_pairs_keys_are_host_platforms_test_impl(ctx):
     """Every key in DESKTOP_CROSS_PAIRS must be a valid HOST_PLATFORMS key."""
     env = unittest.begin(ctx)

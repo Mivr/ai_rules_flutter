@@ -53,11 +53,7 @@ load(
     "shader_sources",
 )
 load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
-load(
-    "//flutter/private:flutter_kernel_module.bzl",
-    "MODULAR_KERNEL_ATTRS",
-    "flutter_kernel_module_aspect",
-)
+load("//flutter/private:flutter_kernel_module.bzl", "MODULAR_KERNEL_ATTRS", "flutter_kernel_module_aspect")
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "resolve_font_subset_tools")
 load(
     "//flutter/private:flutter_web_compile.bzl",
@@ -95,6 +91,8 @@ load(
     "make_web_wrapper_main_content",
 )
 load("//flutter/private:web_templates.bzl", "web_substituted_templates")
+
+visibility(["//flutter/..."])
 
 # The index.html the rule falls back to when the target supplies none.
 #

@@ -21,6 +21,8 @@ load(
     _parse_stmt_token = "gradle_stmt_token",
 )
 
+visibility(["//flutter/..."])
+
 # Map well-known maven coordinates the plugin's `build.gradle` may pull
 # in to labels under `@rules_android_maven`. We translate
 # `implementation("group:artifact:version")` declarations into Bazel

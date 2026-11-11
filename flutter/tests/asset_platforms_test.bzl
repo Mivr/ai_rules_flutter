@@ -36,6 +36,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # -- pub_asset_matches_target ---------------------------------------------------
 
 def _matches_unconditional_everywhere_test_impl(ctx):

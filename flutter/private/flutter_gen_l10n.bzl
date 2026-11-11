@@ -16,6 +16,8 @@ Bazel files the generator never writes, and the build would fail with an opaque
 grouping below is what keeps that correct.
 """
 
+visibility(["//flutter/..."])
+
 def _locale_of(basename, prefix, label):
     """The locale a template-prefixed arb filename encodes, e.g. `es_419`."""
     if not basename.endswith(".arb"):

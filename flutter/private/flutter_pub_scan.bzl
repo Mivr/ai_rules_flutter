@@ -34,6 +34,8 @@ load("@rules_dart//dart/pub:pub_scan.bzl", "check_package_symlinks", "run_pub_ar
 load("//flutter/private:artifact_urls.bzl", "require_sha256")
 load("//flutter/private:download.bzl", "pinned_download")
 
+visibility(["//flutter/..."])
+
 def scan_hosted_archive(ctx, archive_path, package_name):
     """Runs rules_dart's header scan over one downloaded archive.
 

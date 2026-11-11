@@ -15,6 +15,8 @@ the old quoting. Names no Bazel target can name fail the fetch instead,
 naming the package, the declaring entry and the file.
 """
 
+visibility(["//flutter/..."])
+
 def starlark_string_literal(value):
     """Render `value` as a Starlark string literal that parses back to it.
 

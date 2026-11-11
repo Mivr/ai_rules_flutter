@@ -16,6 +16,8 @@ list in order and the first root holding a template for the package wins,
 so listing the root's roots first is what makes the root's overlay win.
 """
 
+visibility(["//flutter/..."])
+
 def hub_overlay_roots(root_roots, owner_roots, owner_is_root):
     """Overlay roots for one hub, with the root module's roots first.
 

@@ -40,11 +40,7 @@ load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package", "flutte
 load("//flutter/private:flutter_pub_path.bzl", "foreign_lock_path_error", "is_absolute_lock_path", "is_relative_path_dependency", "workspace_relative_lock_path")
 load("//flutter/private:flutter_pub_plugin_defines.bzl", "ios_plugin_defines_lock_error")
 load("//flutter/private:flutter_pub_plugin_deps.bzl", "ios_plugin_deps_lock_error")
-load(
-    "//flutter/private:flutter_pub_scc_plan.bzl",
-    "create_scc_spokes",
-    "plan_hub_sccs",
-)
+load("//flutter/private:flutter_pub_scc_plan.bzl", "create_scc_spokes", "plan_hub_sccs")
 load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag", "validate_swift_package_product_deps")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_plugin_block")
 load("//flutter/private:flutter_sdk_package.bzl", "declare_sdk_source", "declare_sdk_spokes")
@@ -56,6 +52,8 @@ load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source")
 load("//flutter/private:versions.bzl", "custom_engine_base_url", "custom_source_url", "flutter_source_sha256", "merge_custom_versions", "unknown_version_message")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "resolve_darwin_sdk_from_modules")
 load(":repositories.bzl", "flutter_register_toolchains")
+
+visibility("public")
 
 _DEFAULT_NAME = "flutter"
 

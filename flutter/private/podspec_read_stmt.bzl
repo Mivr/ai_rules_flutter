@@ -1,5 +1,7 @@
 """Statement and block-header token scanning for the static podspec reader (POD-12)."""
 
+visibility(["//flutter/..."])
+
 _CONT_OPS = (
     "=",
     "+=",

@@ -34,14 +34,6 @@ load(
     "kt_android_library",
 )
 load(
-    "//flutter:android.bzl",
-    "ANDROID_MIN_SDK_VERSION",
-    "ANDROID_TARGET_SDK_VERSION",
-    "flutter_android_bundle",
-    "flutter_android_engine",
-    "flutter_android_manifest_merge",
-)
-load(
     "//flutter:providers.bzl",
     "FlutterApplicationInfo",
 )
@@ -57,6 +49,23 @@ load(
     "KERNEL_COMPILE_ATTRS",
     "PLATFORM_CONSTRAINT_ATTRS",
     "flutter_app_shader_aspect",
+)
+load(
+    "//flutter/private:constants.bzl",
+    "ANDROID_MIN_SDK_VERSION",
+    "ANDROID_TARGET_SDK_VERSION",
+)
+load(
+    "//flutter/private:flutter_android_application.bzl",
+    "flutter_android_bundle",
+)
+load(
+    "//flutter/private:flutter_android_engine.bzl",
+    "flutter_android_engine",
+)
+load(
+    "//flutter/private:flutter_android_manifest_merge.bzl",
+    "flutter_android_manifest_merge",
 )
 load(
     "//flutter/private:flutter_android_registrant.bzl",
@@ -102,6 +111,8 @@ load(
     "//flutter/private:native_sources.bzl",
     "native_sources_aspect",
 )
+
+visibility(["//flutter/..."])
 
 def _android_integration_app_setup(ctx):
     """Validates an Android app target and resolves its shared build inputs.

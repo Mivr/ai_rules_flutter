@@ -5,6 +5,8 @@ load("@rules_dart//dart:utils.bzl", "derive_lib_root", "derive_package_name")
 load("//flutter/private:flutter_info.bzl", "dedup_plugins")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _package_name_explicit_attr_wins_test_impl(ctx):
     env = unittest.begin(ctx)
     result = derive_package_name("my_explicit_pkg", "some/path/lib_name", "target_name")

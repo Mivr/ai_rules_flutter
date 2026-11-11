@@ -4,6 +4,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_asset_bundle.bzl", "build_asset_manifest", "detect_dpr")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _detect_dpr_no_variant_test_impl(ctx):
     env = unittest.begin(ctx)
     base, dpr = detect_dpr("assets/icon.png")

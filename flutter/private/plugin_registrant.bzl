@@ -12,6 +12,8 @@ load(
     "resolve_federated_plugins",
 )
 
+visibility(["//flutter/..."])
+
 def _dart_string(text):
     """A single-quoted Dart string literal for `text`, escaped so it reads back verbatim."""
     escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("$", "\\$")

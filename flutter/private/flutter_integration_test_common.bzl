@@ -85,6 +85,8 @@ load(
     "generate_dart_plugin_registrant",
 )
 
+visibility(["//flutter/..."])
+
 def integration_test_common_setup(ctx):
     """The checks and build-mode inputs the dart:io test rules share.
 

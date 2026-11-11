@@ -16,6 +16,8 @@ load("@rules_swift//swift:swift.bzl", "SwiftInfo")
 load("//flutter:macos.bzl", "flutter_apple_plugin_library")
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterApplicationInfo")
 
+visibility(["//flutter/tests/...", "//tests/rules_testing:__pkg__"])
+
 def _write_fake_macho(ctx, out_file, install_name):
     if ctx.attr.fat_macho:
         arm_slice = ctx.actions.declare_file(out_file.short_path + ".arm64")

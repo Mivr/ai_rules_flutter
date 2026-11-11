@@ -4,6 +4,8 @@ load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
 load("//flutter/private:flutter_info.bzl", "flutter_info", "flutter_pub_channels")
 load("//flutter/private:flutter_library.bzl", "build_pub_contributions")
 
+visibility(["//flutter/tests/..."])
+
 _PROFILE_FLAG = str(Label("//flutter:profile"))
 _EXTRA_DART_DEFINES_FLAG = str(Label("//flutter:extra_dart_defines"))
 

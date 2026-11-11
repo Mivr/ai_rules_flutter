@@ -1,5 +1,7 @@
 """Escape decoding and word splitting for Ruby `%` and double-quoted literals (POD-12)."""
 
+visibility(["//flutter/..."])
+
 def decode_double_escape(nxt):
     """Decode one escaped character `\\<nxt>` in a Ruby double-quoted string.
 

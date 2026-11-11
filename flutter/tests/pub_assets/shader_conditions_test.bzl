@@ -31,6 +31,8 @@ load("//flutter/private:flutter_pub_assets.bzl", "asset_entry_problem_error")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _CONDITIONED_PUBSPEC = """\
 name: shader_conditions
 flutter:

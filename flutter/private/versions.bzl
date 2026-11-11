@@ -24,6 +24,8 @@ ARTIFACT_CHECKSUMS maps version → artifact_path → sha256.
 
 load("//flutter/private:artifact_urls.bzl", "flutter_source_tarball_url")
 
+visibility(["//flutter/..."])
+
 def unknown_version_message(flutter_version):
     """Renders the failure message for a version no table knows.
 
@@ -122,11 +124,7 @@ def flutter_source_sha256(flutter_version, versions = None):
         The 64-character hex sha256 string.
     """
     table = FLUTTER_VERSIONS if versions == None else versions
-    if (
-        flutter_version not in table or
-        not hasattr(table[flutter_version], "source_sha256") or
-        not table[flutter_version].source_sha256
-    ):
+    if not getattr(table.get(flutter_version), "source_sha256", None):
         fail((
             "No source tarball checksum recorded for Flutter {v}, so its " +
             "framework source cannot be fetched safely.\n" +

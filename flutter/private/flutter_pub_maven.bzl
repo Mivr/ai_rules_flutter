@@ -8,6 +8,8 @@ plugin's, and `path_spoke_maven_inputs` names the pair the extension hands to
 every path spoke.
 """
 
+visibility(["//flutter/..."])
+
 # `flutter.pub(android_maven_deps)` additions to the built-in
 # Gradle-to-`@rules_android_maven` mapping. A plugin's runtime dependency
 # whose coordinate is in neither table fails the fetch; mapping it here is

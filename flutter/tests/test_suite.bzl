@@ -11,6 +11,8 @@ down, so no suite can forget it.
 load("@bazel_skylib//lib:partial.bzl", "partial")
 load("@bazel_skylib//lib:unittest.bzl", "unittest")
 
+visibility(["//flutter/tests/..."])
+
 def small_unittest_suite(name, *test_rules):
     """Defines a `unittest.suite` whose member test targets all have `size = "small"`.
 

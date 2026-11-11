@@ -3,6 +3,8 @@
 load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 load("//flutter/private:swiftpm_resolved.bzl", "swiftpm_check_json")
 
+visibility(["//flutter/..."])
+
 _VALID_POD_RESOLUTION_KINDS = ("skip", "label", "plugin", "drop", "unresolved")
 _POD_RESOLUTION_STRING_FIELDS = (
     "hub",

@@ -30,6 +30,8 @@ load("//flutter:providers.bzl", "FlutterInfo", "FlutterNativeAssetInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_native_channels", flutter_info_provider = "flutter_info")
 load("//flutter/private:native_sources.bzl", "collect_native_sources", "native_sources_aspect")
 
+visibility(["//flutter/..."])
+
 _VALID_LINK_MODES = (
     "dynamic_loading_bundle",
     "dynamic_loading_system",

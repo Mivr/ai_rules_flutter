@@ -10,6 +10,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _LOCK_LABEL = "//app/ios:Podfile.lock"
 
 _SYNTHETIC_LOCK = """PODS:

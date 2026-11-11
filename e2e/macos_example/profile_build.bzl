@@ -1,5 +1,7 @@
 """Builds targets in Flutter profile mode, whatever the command line asked for."""
 
+visibility("private")
+
 def _profile_transition_impl(_settings, _attr):
     return {
         "//command_line_option:compilation_mode": "opt",

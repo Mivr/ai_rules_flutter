@@ -22,6 +22,8 @@ load(
 load("//flutter/private:swiftpm_package.bzl", "swiftpm_select_target_files")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _setting(kind, name, value = "", platforms = None):
     condition = struct(platforms = platforms) if platforms != None else None
     return struct(category = "c", kind = kind, name = name, value = value, condition = condition, line = 1)

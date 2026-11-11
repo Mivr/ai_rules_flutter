@@ -8,6 +8,8 @@ load("//flutter/private:engine_helpers.bzl", "dart_binary_name", "dartaotruntime
 load("//flutter/private:flutter_kernel_tools.bzl", "find_flutter_kernel_module_tools", "is_same_sdk")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _provider_exists_test_impl(ctx):
     env = unittest.begin(ctx)
     asserts.true(env, FlutterSdkInfo != None, "FlutterSdkInfo should be defined")

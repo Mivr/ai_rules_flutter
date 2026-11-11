@@ -16,6 +16,8 @@ or `xz` binaries.
 load(":artifact_urls.bzl", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
 
+visibility(["//flutter/..."])
+
 ANDROID_EMULATOR_BUILD_ID = "16428233"
 
 ANDROID_EMULATOR_SHA256 = "b08fc43d8608d2955f607f1b287beb525041e730086bdca3af152accac3af9c1"

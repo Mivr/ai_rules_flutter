@@ -28,6 +28,8 @@ load(
 )
 load(":swiftpm_settings.bzl", "swiftpm_parse_target_setting")
 
+visibility(["//flutter/..."])
+
 def _swiftpm_fail(identity, line, detail):
     """The fetch failure for one manifest refusal.
 

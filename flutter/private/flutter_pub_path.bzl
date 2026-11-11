@@ -4,6 +4,8 @@ Lives apart from `extensions.bzl` so the extension file stays under the
 quality floor's per-file size cap; the extension `load()`s both helpers.
 """
 
+visibility(["//flutter/..."])
+
 def is_relative_path_dependency(relative_value):
     """Whether a lock `description.relative` value counts as `relative: true`.
 

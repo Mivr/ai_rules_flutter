@@ -15,6 +15,8 @@ Extracted entirely via Bazel's built-in JVM archive extractors (`ar`/`.deb` +
 load(":artifact_urls.bzl", "require_sha256")
 load(":download.bzl", "pinned_download_and_extract")
 
+visibility(["//flutter/..."])
+
 _DEBIAN_POOL_BASE_URL = "https://deb.debian.org/debian/"
 
 # Complete transitive closure of Debian 12 (bookworm) amd64 packages required

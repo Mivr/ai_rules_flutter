@@ -25,6 +25,8 @@ load(":flutter_xtool_bundle_pack.bzl", "run_xtool_pack_bundle")
 load(":xtool_import.bzl", "xtool_ios_transition", "xtool_macos_transition", "xtool_target_arch", _flutter_darwin_xcframework_import = "flutter_darwin_xcframework_import")
 load(":xtool_version.bzl", _flutter_xtool_bundle_version = "flutter_xtool_bundle_version")
 
+visibility(["//flutter/..."])
+
 # Re-exported for flutter_apple_plugin_library.bzl, flutter/ios.bzl,
 # flutter/macos.bzl and the bundling tests, which load them from this file.
 flutter_darwin_xcframework_import = _flutter_darwin_xcframework_import

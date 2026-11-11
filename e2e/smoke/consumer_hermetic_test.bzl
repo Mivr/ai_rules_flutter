@@ -13,6 +13,8 @@ alike, since both share the analysis checks.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
+visibility("private")
+
 def _reject_test_impl(ctx):
     env = analysistest.begin(ctx)
     asserts.expect_failure(env, "filesystem_roots")

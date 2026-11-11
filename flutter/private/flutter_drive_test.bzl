@@ -26,6 +26,8 @@ load(
 )
 load("//flutter:providers.bzl", "resolve_exec_dart_vm")
 
+visibility(["//flutter/..."])
+
 # The emulator needs the host (`/dev/kvm`, and loopback ports shared with its
 # adb server), so this test runs unsandboxed exactly as
 # `flutter_integration_test(platform = "android")` does. Kept here rather than

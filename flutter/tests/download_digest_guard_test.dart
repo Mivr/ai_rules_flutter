@@ -437,7 +437,7 @@ _dl(
 
     test('use_repo_rule proxy of another rule is ignored', () {
       const probe = '''
-sky = use_repo_rule("@rules_flutter//flutter/private:flutter_sky_engine_repo.bzl", "flutter_sky_engine_repo")
+sky = use_repo_rule("@rules_flutter//flutter:repositories.bzl", "flutter_sky_engine_repo")
 
 sky(
     name = "sky_engine",

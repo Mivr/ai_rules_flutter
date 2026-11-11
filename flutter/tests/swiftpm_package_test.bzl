@@ -7,6 +7,8 @@ load("//flutter/private:swiftpm_package.bzl", "swiftpm_hoist_package_root", "swi
 load("//flutter/private:swiftpm_paths.bzl", "swiftpm_normalize_relative_path")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _DOCS = """// swift-tools-version:5.9
 import PackageDescription
 let package = Package(

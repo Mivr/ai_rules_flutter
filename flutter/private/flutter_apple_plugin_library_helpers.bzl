@@ -9,6 +9,8 @@ load(
     "FlutterDarwinFrameworkInfo",
 )
 
+visibility(["//flutter/..."])
+
 def classify_plugin_srcs(files):
     """Split rule srcs into a struct of swift, objc and header Files plus include dirs.
 

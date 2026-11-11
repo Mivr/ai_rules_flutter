@@ -12,6 +12,8 @@ cannot read declares a package dependency at all.
 load(":swiftpm_manifest_lex.bzl", "lex_swiftpm_manifest")
 load(":swiftpm_translate.bzl", "swiftpm_url_identity")
 
+visibility(["//flutter/..."])
+
 def apple_swiftpm_declares_package(text):
     """Whether a manifest text spells a `.package` member anywhere in its code.
 

@@ -250,6 +250,8 @@ bzl_library(
         "//flutter/private:flutter_android_apk_overlay",
         "//flutter/private:flutter_android_application",
         "//flutter/private:flutter_android_binary_proxy",
+        "//flutter/private:flutter_android_engine",
+        "//flutter/private:flutter_android_engine_jar",
         "//flutter/private:flutter_android_manifest_merge",
         "//flutter/private:flutter_android_plugin_library",
         "//flutter/private:flutter_android_registrant",
@@ -414,6 +416,7 @@ bzl_library(
         "//flutter/private:constants",
         "//flutter/private:download",
         "//flutter/private:engine_helpers",
+        "//flutter/private:engine_repo_files",
         "//flutter/private:engine_support_repos",
         "//flutter/private:flutter_android_engine_repo",
         "//flutter/private:flutter_cross_repo",
@@ -442,6 +445,8 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         ":providers",
+        "//flutter/private:flutter_sdk_binary",
+        "//flutter/private:xtool_darwin_sdk_repo",
     ],
 )
 
@@ -451,8 +456,12 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         "//flutter/private:app_entrypoint",
+        "//flutter/private:common",
+        "//flutter/private:download",
+        "//flutter/private:flutter_aot_compile",
         "//flutter/private:flutter_compile",
         "//flutter/private:flutter_kernel_module",
+        "//flutter/private:flutter_pub_scc_target",
         "//flutter/private:flutter_test_common",
     ],
 )

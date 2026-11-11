@@ -5,6 +5,8 @@ load("//flutter/private:common.bzl", "detect_target_platform", "launch_build_arg
 load("//flutter/private:plugin_registrant.bzl", "DEV_REGISTRANT_PLATFORMS")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _ios_detection_test_impl(ctx):
     env = unittest.begin(ctx)
     result = detect_target_platform(

@@ -9,6 +9,8 @@ skipped whole: dynamic defines come from `flutter.pub(ios_plugin_defines = ...)`
 load(":flutter_apple_plugin_defines.bzl", "dedupe_plugin_defines")
 load(":starlark_literal.bzl", "decode_starlark_escapes", "starlark_string_literal")
 
+visibility(["//flutter/..."])
+
 _DEFINES_KEY = "GCC_PREPROCESSOR_DEFINITIONS"
 _XCCONFIG_ATTRS = ("pod_target_xcconfig", "xcconfig")
 _PLUGIN_DEFINES_MARKER = "    plugin_defines = "

@@ -14,6 +14,8 @@ load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "gen_snapshot_host_platform", "platform_to_arch", "platform_to_os")
 load(":local_sdk.bzl", "link_local_file", "read_local_sdk_version", "resolve_local_sdk_root")
 
+visibility(["//flutter/..."])
+
 def generate_cross_repo_build(
         flutter_version,
         engine_revision,

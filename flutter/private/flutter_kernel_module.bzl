@@ -55,6 +55,8 @@ load(
     "flutter_test_bootstrap_action",
 )
 
+visibility(["//flutter/..."])
+
 FlutterKernelModuleInfo = provider(
     doc = "Modular Flutter kernel info for a DartInfo target.",
     fields = {
@@ -641,9 +643,7 @@ def _compile_product_kmod(ctx, tools, flutter_sdk_info, spec):
         order = "postorder",
         transitive = [k.transitive_koutlines for k in spec.dep_product_kernels],
     )
-    product_upstream_excluded = depset(
-        transitive = [k.closure_excluded for k in spec.dep_product_kernels],
-    )
+    product_upstream_excluded = depset(transitive = [k.closure_excluded for k in spec.dep_product_kernels])
     product_kmod = ctx.actions.declare_directory(spec.target_name + ".flutter_product.kmod")
     product_koutline = ctx.actions.declare_directory(spec.target_name + ".flutter_product.koutline")
     product_excluded = flutter_kernel_module_action(

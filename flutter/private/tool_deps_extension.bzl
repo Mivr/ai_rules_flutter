@@ -12,6 +12,8 @@ load("//flutter/private:flutter_pub_package.bzl", "flutter_pub_package")
 load("//flutter/private:flutter_pub_tag.bzl", "flutter_pub_tag")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256")
 
+visibility(["//flutter/..."])
+
 def register_tool_pub_hub(
         module_ctx,
         pub_tag,

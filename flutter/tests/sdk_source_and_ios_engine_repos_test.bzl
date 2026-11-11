@@ -9,14 +9,12 @@ in the unselected mode's repository.
 
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:artifact_urls.bzl", "engine_artifact_url", "ios_engine_artifact_path")
-
-# buildifier: disable=bzl-visibility
 load("//flutter/private:flutter_ios_engine_repo.bzl", "flutter_ios_engine_mode_repo_impl", "flutter_ios_engine_repos", "ios_engine_hub_build")
-
-# buildifier: disable=bzl-visibility
 load("//flutter/private:flutter_sdk_package.bzl", "copy_sdk_package_from_source", "declare_sdk_source", "declare_sdk_spokes")
 load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
+
+visibility(["//flutter/tests/..."])
 
 _REVISION = "0123456789abcdef0123456789abcdef01234567"
 _BASE = "https://engines.example.com"

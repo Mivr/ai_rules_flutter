@@ -9,6 +9,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _TAIL = """\
   s.frameworks = ["StoreKit"]
   s.weak_frameworks = 'MetricKit'

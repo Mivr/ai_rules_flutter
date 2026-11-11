@@ -1,10 +1,10 @@
 """Unit tests for the Flutter toolchain version selection in the `flutter` extension."""
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts", "unittest")
-
-# buildifier: disable=bzl-visibility
 load("//flutter/private:toolchain_selection.bzl", "select_toolchain_source", "select_toolchain_version")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
+
+visibility(["//flutter/tests/..."])
 
 def _req(version, is_root = False, module = ""):
     return struct(version = version, is_root = is_root, module = module)

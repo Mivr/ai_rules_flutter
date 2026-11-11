@@ -8,6 +8,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_test.bzl", "test_coverage_libraries")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _file(short_path):
     return struct(path = short_path, short_path = short_path, owner = None)
 

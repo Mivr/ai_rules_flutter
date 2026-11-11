@@ -35,6 +35,8 @@ load("@rules_android//providers:providers.bzl", "AndroidFeatureFlagSet", "Androi
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_android_binary_proxy.bzl", _overlay_output_groups = "overlay_output_groups")
 
+visibility(["//flutter/..."])
+
 _ANDROID_SDK_TOOLCHAIN_TYPE = Label("@rules_android//toolchains/android_sdk:toolchain_type")
 _DART_EXEC_TOOLCHAIN_TYPE = Label("@rules_dart//dart:exec_tools_toolchain_type")
 

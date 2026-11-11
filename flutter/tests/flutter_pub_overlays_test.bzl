@@ -11,6 +11,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_pub_overlays.bzl", "hub_overlay_roots")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _root_hub_uses_only_root_roots_test_impl(ctx):
     """A root hub sees the root's roots even when a dependency overlays too."""
     env = unittest.begin(ctx)

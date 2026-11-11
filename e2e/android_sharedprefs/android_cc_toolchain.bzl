@@ -13,6 +13,8 @@ load("@rules_cc//cc:cc_toolchain_config_lib.bzl", "tool_path")
 load("@rules_cc//cc:defs.bzl", "CcToolchainConfigInfo", "cc_toolchain")
 load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 
+visibility("private")
+
 def _android_cc_toolchain_config_impl(ctx):
     """Returns a minimal CcToolchainConfigInfo for Android target analysis.
 

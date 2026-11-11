@@ -16,6 +16,8 @@ load(
     _flutter_kernel_sources = "flutter_kernel_sources",
 )
 
+visibility(["//flutter/..."])
+
 # `vm_flags` entries analysis accepts, as flag names without the leading
 # `--`. The Dart VM interprets every flag before the snapshot, so only flags
 # with no file, network or compilation-semantics side effects are allowed:

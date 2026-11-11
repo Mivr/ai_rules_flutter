@@ -11,6 +11,8 @@ load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_AP
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
 load("//flutter/private:platform_constraints.bzl", "target_platform_from_constraints")
 
+visibility(["//flutter/..."])
+
 def _check_aot_cross_compile(flutter_sdk_info, is_debug):
     """Guards against unsupported desktop cross-compilation or missing gen_snapshot."""
     if not is_debug and flutter_sdk_info.target_os in ("linux", "macos", "windows"):

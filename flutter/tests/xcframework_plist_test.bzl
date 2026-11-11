@@ -4,6 +4,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:flutter_ios_xcframework_plist.bzl", "IOS_DEVICE", "IOS_SIMULATOR", "xcframework_info_plist")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _entry(identifier, path):
     return (
         "            <key>LibraryIdentifier</key>\n" +

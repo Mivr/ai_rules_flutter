@@ -23,6 +23,8 @@ load("//flutter/private:flutter_android_binary_proxy.bzl", "flutter_android_bina
 load("//flutter/private:flutter_aot_target.bzl", "flutter_aot_target")
 load("//flutter/private:flutter_application.bzl", "flutter_application")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "analyze_size_fixture"
 _MAIN = "lib/language_version_main.dart"
 

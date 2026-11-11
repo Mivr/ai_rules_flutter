@@ -12,6 +12,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _no_plugins_returns_empty_test_impl(ctx):
     env = unittest.begin(ctx)
     result = make_registrant_content([])

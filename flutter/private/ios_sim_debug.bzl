@@ -11,6 +11,8 @@ analyse this app in debug mode instead of failing in `flutter_build_mode`,
 which rejects profile mode outside `-c opt`.
 """
 
+visibility(["//flutter/..."])
+
 _PROFILE_FLAG = str(Label("//flutter:profile"))
 
 def ios_sim_debug_transition_impl(_settings, _attr):

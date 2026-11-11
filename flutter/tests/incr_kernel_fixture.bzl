@@ -7,6 +7,8 @@ read the `execution_requirements` Starlark cannot read back from an action.
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs")
 load("//flutter:utils.bzl", "FLUTTER_KERNEL_COMPILE_ATTRS", "FLUTTER_KERNEL_COMPILE_TOOLCHAINS", "compile_package_config", "flutter_kernel_compile_action", "flutter_kernel_compile_tools", "flutter_kernel_dills", "flutter_kernel_options", "flutter_kernel_outputs", "flutter_kernel_sources")
 
+visibility(["//flutter/tests/..."])
+
 ReqInfo = provider(
     doc = "What the compile passed to `ctx.actions.run`, which Starlark cannot read back from an action.",
     fields = {"requirements": "The `execution_requirements` dict of the `FlutterKernelCompile` run."},

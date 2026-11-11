@@ -7,6 +7,8 @@ load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps", "dedup
 load("//flutter/private:plugin_federation.bzl", "resolve_federated_plugins")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _default_only_test_impl(ctx):
     """With no other implementation, the default implementation stays."""
     env = unittest.begin(ctx)

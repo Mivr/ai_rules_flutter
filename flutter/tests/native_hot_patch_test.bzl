@@ -12,6 +12,8 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//flutter:defs.bzl", "flutter_native_library")
 load("//flutter:native_hot_patch.bzl", "HOT_PATCH_OUTPUT_GROUP", "flutter_native_hot_patch_aspect")
 
+visibility(["//flutter/tests/..."])
+
 def _fake_launch_impl(_ctx):
     return [DefaultInfo()]
 

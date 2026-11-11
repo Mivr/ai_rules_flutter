@@ -21,6 +21,8 @@ load(
 )
 load(":local_sdk.bzl", "engine_cache_dir", "link_local_dir", "macos_framework_cache_path", "resolve_local_sdk_root")
 
+visibility(["//flutter/..."])
+
 def _link_local_desktop_engine(repository_ctx, target_os, target_arch, artifact_path):
     """Links the desktop engine (and the Windows wrapper) out of a local SDK."""
     sdk_root = resolve_local_sdk_root(repository_ctx, getattr(repository_ctx.attr, "local_path", ""))

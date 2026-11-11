@@ -11,6 +11,8 @@ runner's start-up keys twice.
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "runfiles_path")
 
+visibility(["//flutter/..."])
+
 def make_bootstrap_content(test_relative_import, golden_comparator_import = None):
     """Generate the per-test bootstrap Dart source.
 

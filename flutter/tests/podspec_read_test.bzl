@@ -27,6 +27,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _WEBRTC_PODSPEC = """\
 Pod::Spec.new do |s|
   s.name             = 'flutter_webrtc'

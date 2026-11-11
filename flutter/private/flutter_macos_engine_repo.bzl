@@ -8,6 +8,8 @@ Detects host arch at repo-rule time so users can reference a stable
 `@flutter_macos_engine` name instead of the host-specific `@flutter_darwin-{arch}`.
 """
 
+visibility(["//flutter/..."])
+
 def _flutter_macos_engine_repo_impl(repository_ctx):
     # Detect host architecture at repo-rule time.
     arch = repository_ctx.os.arch

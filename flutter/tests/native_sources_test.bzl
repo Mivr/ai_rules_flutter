@@ -11,6 +11,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load("//flutter/private:native_sources.bzl", "NativeSourcesInfo", "native_sources_aspect")
 
+visibility(["//flutter/tests/..."])
+
 def _collects_impl(ctx):
     env = analysistest.begin(ctx)
     target = analysistest.target_under_test(env)

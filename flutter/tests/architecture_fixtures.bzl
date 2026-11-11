@@ -10,6 +10,8 @@ load("//flutter/private:flutter_library.bzl", "flutter_library")
 load("//flutter/private:flutter_plugin.bzl", "flutter_plugin")
 load("//flutter/private:flutter_test.bzl", "flutter_test")
 
+visibility(["//flutter/tests/..."])
+
 _SRC = "architecture_fixture_main.dart"
 _TEST_API = "//flutter/tests/flutter_test_analyze_fixture/fake_test_api"
 _VISIBILITY = ["//tests/rules_testing:__pkg__"]

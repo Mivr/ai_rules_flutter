@@ -7,6 +7,8 @@ with its writable home beside its own output (never the shared `/tmp`).
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
+visibility(["//flutter/tests/..."])
+
 def _tool_kernel_action(env):
     """The single `FlutterToolKernel` action of the target under test."""
     actions = [

@@ -6,6 +6,8 @@ configuration) and the tool that decides what a reload may do with it (built for
 the machine the dev tool runs on).
 """
 
+visibility("private")
+
 def _c_hot_patch_impl(ctx):
     library = [
         f

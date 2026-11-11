@@ -19,6 +19,8 @@ load("//flutter/private:common.bzl", "HOST_COMPATIBLE", "check_unreplaced_hooks"
 load("//flutter/private:flutter_native_assets.bzl", "bridge_dart_code_assets", "native_asset_framework_name", "native_assets_target_string", "write_native_assets_manifest")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # -- Pure-function tests for the manifest helpers ----------------------
 
 def _target_string_macos_arm64_impl(ctx):

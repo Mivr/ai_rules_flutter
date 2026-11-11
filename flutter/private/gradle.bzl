@@ -45,6 +45,8 @@ load(
     _facade_parse_gradle_android_namespace = "parse_gradle_android_namespace",
 )
 
+visibility(["//flutter/..."])
+
 maven_labels_for_gradle = _facade_maven_labels_for_gradle
 gradle_collect_files = _facade_gradle_collect_files
 detect_android_namespace = _facade_detect_android_namespace

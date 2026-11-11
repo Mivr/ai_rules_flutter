@@ -29,6 +29,8 @@ load(
 )
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 
+visibility(["//flutter/..."])
+
 def scc_flutter_test_package_bzl_content(ctx = None):
     """Returns the `flutter_test_package.bzl` content for a `test` SCC member.
 
@@ -142,10 +144,7 @@ def make_scc_merged_spoke_build_content(repo_name, members, dep_labels, apple_al
         alias_lines.append(alias_target)
 
     return """load("@rules_dart//dart:defs.bzl", "dart_library")
-load(
-    "@rules_flutter//flutter/private:flutter_pub_scc_target.bzl",
-    "flutter_pub_scc_member_target",
-)
+load("@rules_flutter//flutter:utils.bzl", "flutter_pub_scc_member_target")
 
 dart_library(
     name = "merged",

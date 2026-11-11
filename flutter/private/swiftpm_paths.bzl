@@ -9,6 +9,8 @@ target. This is the one normalization both the repo rule
 use, so an entry and its escape check cannot disagree.
 """
 
+visibility(["//flutter/..."])
+
 def swiftpm_normalize_relative_path(path):
     """Normalize one SwiftPM relative path and report whether it escapes.
 

@@ -9,6 +9,8 @@ a rules_android bump that renames the output or the mnemonic fails loudly.
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 
+visibility("private")
+
 def _aab_build_bundle_impl(ctx):
     """Asserts one `BuildBundle` action emitting `unsigned_aab` with pinned bundletool."""
     env = analysistest.begin(ctx)

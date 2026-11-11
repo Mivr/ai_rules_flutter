@@ -22,6 +22,8 @@ load("//flutter/private:flutter_sky_engine_repo.bzl", "list_local_files")
 load("//flutter/private:local_sdk.bzl", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
 load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 
+visibility(["//flutter/..."])
+
 def make_flutter_sdk_build_content(name, deps, language_version):
     """Generate BUILD content for a Flutter SDK spoke.
 

@@ -42,6 +42,8 @@ load(
 load("//flutter/private:flutter_pub_path.bzl", "is_absolute_lock_path")
 load("//flutter/private:pub_lock_sdks.bzl", "hosted_package_sha256")
 
+visibility(["//flutter/..."])
+
 parser_texts_digest = _parser_texts_digest
 hosted_fact_key = _hosted_fact_key
 lookup_fact_deps = _lookup_fact_deps

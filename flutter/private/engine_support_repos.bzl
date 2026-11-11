@@ -9,6 +9,8 @@ load("//flutter/private:download.bzl", "pinned_download_and_extract")
 load("//flutter/private:local_sdk.bzl", "host_engine_cache_dir", "link_local_dir", "link_local_file", "resolve_local_sdk_root")
 load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 
+visibility(["//flutter/..."])
+
 def flutter_patched_sdk_product_repo_impl(repository_ctx):
     """Fetches or links the product patched SDK.
 

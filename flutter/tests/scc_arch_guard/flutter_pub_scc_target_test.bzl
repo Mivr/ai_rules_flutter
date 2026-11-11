@@ -23,6 +23,8 @@ load(
 load("//flutter/private:flutter_pub_scc_target.bzl", "flutter_pub_scc_member_target")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _FIXTURE = "//flutter/tests/scc_arch_guard:scc_fixture_target"
 
 def _target_providers_test_impl(ctx):

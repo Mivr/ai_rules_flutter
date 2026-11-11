@@ -7,6 +7,8 @@ so a header there stays public even when `sources:` does not name it.
 
 load(":swiftpm_paths.bzl", "swiftpm_join_path")
 
+visibility(["//flutter/..."])
+
 def swiftpm_split_headers(public_root, rel_dir, headers, files):
     """Split headers into public and private, and find the explicit map.
 

@@ -13,6 +13,8 @@ and the path. The refusal text is flutter_tools' own, for example
 load("//flutter/private:asset_uri.bzl", "normalize_asset_uri")
 load("//flutter/private:flutter_manifest_validate.bzl", "dart_str", "dart_type")
 
+visibility(["//flutter/..."])
+
 # The weights flutter_tools accepts (`_validateFonts` in
 # `packages/flutter_tools/lib/src/flutter_manifest.dart`). A present weight
 # outside this table is an invalid value, never silently unset.

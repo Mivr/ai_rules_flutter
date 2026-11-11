@@ -82,11 +82,7 @@ load(
     _pubspec_name_refusal = "pubspec_name_refusal",
     _pubspec_version_refusal = "pubspec_version_refusal",
 )
-load(
-    ":flutter_pub_walk.bzl",
-    "PUB_WALK_BOUND",
-    "heredoc_blocks_bound_error",
-)
+load(":flutter_pub_walk.bzl", "PUB_WALK_BOUND", "heredoc_blocks_bound_error")
 load(
     ":gradle.bzl",
     _gradle_is_java_package_name = "is_java_package_name",
@@ -97,6 +93,8 @@ load(
 )
 load(":starlark_literal.bzl", "check_spoke_file_name", "decode_starlark_escapes", "starlark_string_literal")
 load(":swiftpm_resolved.bzl", "pub_spoke_swiftpm_rule_attrs")
+
+visibility(["//flutter/..."])
 
 malformed_pub_version_refusal = _malformed_pub_version_refusal
 merge_pub_asset_conditions = _merge_pub_asset_conditions

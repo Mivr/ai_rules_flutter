@@ -18,6 +18,8 @@ inspects.
 
 load("@rules_apple//apple:providers.bzl", "AppleDynamicFrameworkInfo")
 
+visibility("private")
+
 def _ios_device_opt_transition_impl(_settings, _attr):
     return {
         "//command_line_option:compilation_mode": "opt",

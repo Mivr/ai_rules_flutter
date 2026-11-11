@@ -39,6 +39,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _TEST_IMPORT = "../../integration_test/app_test.dart"
 
 def _chrome_headless_shell_pins_test_impl(ctx):

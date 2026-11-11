@@ -35,6 +35,8 @@ load("@rules_android//providers:providers.bzl", "ApkInfo", "StarlarkApkInfo")
 load("@rules_java//java/common:java_info.bzl", "JavaInfo")
 load("//flutter/private:flutter_android_apk_overlay.bzl", "flutter_android_apk_overlay", "release_execution_requirements")
 
+visibility(["//flutter/tests/..."])
+
 _STORE_PASS = "release-test-store-pass"
 _KEY_PASS = "release-test-key-pass"
 _ALIAS = "release-test-alias"

@@ -4,6 +4,8 @@ Resolves federated plugin implementations according to Flutter's
 resolvePlatformImplementation rules per target platform.
 """
 
+visibility(["//flutter/..."])
+
 def _dart_plugin_entry(plugin, info):
     """Builds the registrant entry for one plugin's Dart class info.
 

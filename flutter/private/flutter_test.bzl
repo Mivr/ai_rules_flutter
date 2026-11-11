@@ -108,6 +108,8 @@ load(
 )
 load("//flutter/private:platform_constraints.bzl", "target_platform_from_constraints")
 
+visibility(["//flutter/..."])
+
 # Re-exported from `//flutter/private:flutter_test_common.bzl`, which holds the
 # bootstrap implementation both test rules share. Kept under this name so
 # existing loads of `make_bootstrap_content` from this module keep working.

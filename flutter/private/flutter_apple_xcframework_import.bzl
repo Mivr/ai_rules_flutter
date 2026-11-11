@@ -22,6 +22,8 @@ load("@rules_apple//apple:apple.bzl", "apple_dynamic_framework_import", "apple_d
 load(":flutter_apple_framework_modulemap.bzl", "apple_framework_modulemap_import")
 load(":flutter_xtool_bundle.bzl", "flutter_darwin_xcframework_import")
 
+visibility(["//flutter/..."])
+
 _XCFRAMEWORK_SUFFIX = ".xcframework"
 _FRAMEWORK_SUFFIX = ".framework"
 

@@ -12,6 +12,8 @@ locks it (pub's `Version.none`): unversioned `publish_to: none` monorepo
 packages agree with the lock instead of failing every fetch.
 """
 
+visibility(["//flutter/..."])
+
 def pub_version_text(value):
     """The comparison text for a raw `version:` scalar.
 

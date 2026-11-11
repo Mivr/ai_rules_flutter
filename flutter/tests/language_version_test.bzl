@@ -41,6 +41,8 @@ load("//flutter/private:flutter_test.bzl", "flutter_test")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load(":action_content.bzl", "package_entry", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 # The version the fixtures state. Deliberately not the SDK's own: a fixture
 # pinning the current version would pass whether or not the value was ever
 # forwarded, because the absent-key default is that same version.

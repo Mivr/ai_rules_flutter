@@ -6,6 +6,8 @@ flutter_desktop_engine_repo.bzl, flutter_cross_repo.bzl, and
 flutter_desktop_cross_repo.bzl.
 """
 
+visibility(["//flutter/..."])
+
 # -- Engine filegroup templates ------------------------------------------------
 # Each template defines a filegroup named "engine_library" for a given OS.
 

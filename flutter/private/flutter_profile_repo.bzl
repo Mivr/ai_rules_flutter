@@ -14,6 +14,8 @@ load(":download.bzl", "pinned_download_and_extract")
 load(":engine_helpers.bzl", "PLATFORM_PREFIX_TO_OS", "engine_arch_for_os", "extract_macos_inner_framework")
 load(":local_sdk.bzl", "engine_cache_dir", "host_engine_cache_dir", "link_local_dir", "link_local_file", "macos_framework_cache_path", "resolve_local_sdk_root")
 
+visibility(["//flutter/..."])
+
 def local_host_profile_downloads(platform):
     """The profile downloads dict for one host platform in local mode.
 

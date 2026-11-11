@@ -4,6 +4,8 @@
 Split from `common.bzl`; pure string builders with no rule context.
 """
 
+visibility(["//flutter/..."])
+
 def _web_ui_web_head_lines():
     """Imports, `bootstrapEngine` and handler stubs heading the `dart:ui_web` stub."""
     return [

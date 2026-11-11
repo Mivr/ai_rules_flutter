@@ -27,6 +27,8 @@ setting or condition.
 
 load(":swiftpm_paths.bzl", "swiftpm_join_path", "swiftpm_normalize_relative_path")
 
+visibility(["//flutter/..."])
+
 _SWIFTPM_SETTING_CATEGORIES = {
     "cSettings": "c",
     "cxxSettings": "cxx",

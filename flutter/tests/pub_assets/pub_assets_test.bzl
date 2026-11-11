@@ -21,6 +21,8 @@ load("//flutter/private:flutter_pub_package.bzl", "check_spoke_file_names")
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # -- variant directory names ------------------------------------------------------
 
 def _variant_dir_names_test_impl(ctx):

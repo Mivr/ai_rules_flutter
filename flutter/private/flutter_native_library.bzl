@@ -32,6 +32,8 @@ behaviour exactly.
 
 load("//flutter:providers.bzl", "FlutterNativeLibraryInfo")
 
+visibility(["//flutter/..."])
+
 # A wasm module belongs here for the same reason a dylib does: the page
 # instantiates it once and a hot reload cannot replace the instance, so the
 # bindings about to be injected have to be ones that instance can serve. What

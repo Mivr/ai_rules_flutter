@@ -25,6 +25,8 @@ load("@rules_apple//apple/internal:providers.bzl", "new_applebundleinfo")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterDarwinFrameworkInfo")
 load("//flutter/private:constants.bzl", "MACOS_MINIMUM_OS_VERSION")
 
+visibility(["//flutter/..."])
+
 # -- flutter_macos_framework (App.framework assembly) -------------------------
 
 _APP_FRAMEWORK_INFO_PLIST = """\

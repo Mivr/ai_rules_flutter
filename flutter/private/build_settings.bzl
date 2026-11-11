@@ -3,6 +3,8 @@
 load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load(":validation.bzl", "validate_dart_defines")
 
+visibility(["//flutter/..."])
+
 def _dart_defines_flag_impl(ctx):
     validate_dart_defines(ctx.build_setting_value, "--%s" % ctx.label)
     return BuildSettingInfo(value = ctx.build_setting_value)

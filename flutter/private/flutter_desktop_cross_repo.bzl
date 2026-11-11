@@ -12,6 +12,8 @@ load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 load(":engine_helpers.bzl", "dart_binary_name", "dartaotruntime_binary_name", "platform_to_arch", "platform_to_os")
 load(":local_sdk.bzl", "read_local_sdk_version", "resolve_local_sdk_root")
 
+visibility(["//flutter/..."])
+
 def _flutter_desktop_cross_repo_impl(repository_ctx):
     host_platform = repository_ctx.attr.host_platform
     target_platform = repository_ctx.attr.target_platform

@@ -12,6 +12,8 @@ validates that each break names an edge its own pubspec declares. Both
 helpers are pure so unit tests drive them with plain strings and lists.
 """
 
+visibility(["//flutter/..."])
+
 def cycle_breaks_lock_error(cycle_breaks, lock_packages, sdk_packages = ()):
     """Refuses a `cycle_breaks` key or value that names no lock package.
 

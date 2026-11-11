@@ -16,6 +16,8 @@ load(
     "plugin_defines_xtool_refusal",
 )
 
+visibility(["//flutter/tests/..."])
+
 _IOS_ENGINE = "//flutter/private:apple_engine_framework_ios"
 
 def _objc_target_surface_test_impl(ctx):

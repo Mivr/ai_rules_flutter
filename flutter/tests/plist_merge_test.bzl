@@ -11,6 +11,8 @@ additions must still produce one.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter/private:flutter_plist_merge.bzl", "flutter_entitlements_merge", "flutter_plist_merge")
 
+visibility(["//flutter/tests/..."])
+
 def _merge_action(env):
     actions = analysistest.target_actions(env)
     merge_actions = [a for a in actions if a.mnemonic == "FlutterPlistMerge"]

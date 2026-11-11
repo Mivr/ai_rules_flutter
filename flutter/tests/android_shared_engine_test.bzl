@@ -11,6 +11,8 @@ label each generated library names is compared.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter/private:flutter_pub_android_package.bzl", "make_android_subpackage_build_content")
 
+visibility(["//flutter/tests/..."])
+
 _EngineDepsInfo = provider(
     doc = "The labels a plugin library lists in its `deps`.",
     fields = {"labels": "List of label strings."},

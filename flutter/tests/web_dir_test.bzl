@@ -6,6 +6,8 @@ load("//flutter:web.bzl", "flutter_web_app")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
 load(":action_content.bzl", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 def _sources_by_dst(env):
     """The bundle's copy list as {destination: source path}."""
     bundle = written_json(env, "_web_bundle_config.json")

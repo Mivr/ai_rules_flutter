@@ -10,6 +10,8 @@ Usage: see flutter/private/flutter_xtool_bundle_pack.bzl.
 
 load("//flutter:providers.bzl", "FlutterApplePluginInfo", "FlutterDarwinFrameworkInfo")
 
+visibility(["//flutter/..."])
+
 def _extract_framework_dirs_from_files(files):
     """The ordered, unique `.framework` / `.xcframework` directories `files` live in."""
     dirs = []

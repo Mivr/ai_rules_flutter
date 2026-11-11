@@ -5,6 +5,8 @@ comment, bracket, or block would otherwise be read as a truncated statement
 and silently skip every later attribute and refusal.
 """
 
+visibility(["//flutter/..."])
+
 _CLOSERS = {")": "(", "]": "[", "}": "{"}
 
 def podspec_syntax_error(plugin, podspec_path, line, what):

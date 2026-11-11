@@ -11,6 +11,8 @@ load("//flutter/private:toolchains_repo.bzl", "generate_toolchains_build")
 load("//flutter/private:xtool_darwin_sdk_repo.bzl", "XTOOL_DARWIN_TARGETS", "generate_xtool_darwin_sdk_build")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _hub_xtool_toolchains_test_impl(ctx):
     """The hub declares one xtool cc toolchain per Darwin target, pointing into the SDK repository."""
     env = unittest.begin(ctx)

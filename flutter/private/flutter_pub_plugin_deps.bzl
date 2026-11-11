@@ -7,6 +7,8 @@ targets, because either way the dependency would reach nothing. Every
 helper is pure so unit tests drive them with plain strings and lists.
 """
 
+visibility(["//flutter/..."])
+
 def ios_plugin_deps_lock_error(plugin_deps, lock_packages, sdk_packages = ()):
     """Refuses a plugin deps key that names no package in the lock.
 

@@ -32,6 +32,8 @@ load(
     "outputs_under_target_dir_test",
 )
 
+visibility(["//flutter/tests/..."])
+
 def _ios_device_transition_impl(_settings, _attr):
     return {
         "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),

@@ -8,6 +8,8 @@ user template gets.
 
 load("//flutter/private:web_service_worker.bzl", "SERVICE_WORKER_VERSION")
 
+visibility(["//flutter/..."])
+
 # What `flutter_bazel run -d chrome` actually serves, whatever the bundle is.
 #
 # The dev loop compiles with DDC and serves `main.dart.js` as its own loader

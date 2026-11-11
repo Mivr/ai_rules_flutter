@@ -6,6 +6,8 @@ load("//flutter:defs.bzl", "flutter_application", "flutter_library")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 load(":action_content.bzl", "written_json")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "flavor_test_fixture"
 _MAIN = "lib/language_version_main.dart"
 

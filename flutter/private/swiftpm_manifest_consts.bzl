@@ -14,6 +14,8 @@ where a statement ends, and one implementation avoids a load cycle between
 them.
 """
 
+visibility(["//flutter/..."])
+
 _SWIFTPM_NON_VALUE_WORDS = {
     "else": True,
     "false": True,

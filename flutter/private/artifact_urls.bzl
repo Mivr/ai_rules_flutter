@@ -23,6 +23,8 @@ this file:
     The URL is built here rather than restated in each of them.
 """
 
+visibility(["//flutter/..."])
+
 _GCS_BASE = "https://storage.googleapis.com/flutter_infra_release/flutter"
 
 _SOURCE_TARBALL_TEMPLATE = "https://github.com/flutter/flutter/archive/refs/tags/{version}.tar.gz"

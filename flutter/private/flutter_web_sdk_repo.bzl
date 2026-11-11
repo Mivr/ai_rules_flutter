@@ -12,6 +12,8 @@ load(":download.bzl", "pinned_download_and_extract")
 load(":local_sdk.bzl", "link_local_dir", "resolve_local_sdk_root")
 load(":toolchains_repo.bzl", "HOST_PLATFORMS")
 
+visibility(["//flutter/..."])
+
 EXPECTED_WEB_SDK_TARGETS = ("dartdevc", "dart2js", "wasm")
 EXPECTED_DART_SDK_INCLUDE = "../dart-sdk/lib/libraries.json"
 EXPECTED_WEB_SDK_LIBRARIES = ("ui", "ui_web")

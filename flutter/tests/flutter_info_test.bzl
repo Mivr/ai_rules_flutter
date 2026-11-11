@@ -22,6 +22,8 @@ load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
 load("//flutter:providers.bzl", "FlutterInfo")
 load("//flutter/private:flutter_info.bzl", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
 
+visibility(["//flutter/tests/..."])
+
 def _contributing_library_impl(ctx):
     return [
         DefaultInfo(files = depset(ctx.files.assets)),

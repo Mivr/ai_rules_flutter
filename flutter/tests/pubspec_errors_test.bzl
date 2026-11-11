@@ -17,6 +17,8 @@ load(
 )
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # A block sequence at its key's own column, outside `flutter:` (`topics`)
 # and inside it (`assets`).
 _COMPACT_PUBSPEC = """\

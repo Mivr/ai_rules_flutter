@@ -15,6 +15,8 @@ identical paths with identical extensions would otherwise collide silently.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 
+visibility(["//flutter/tests/..."])
+
 def _resources_probe_impl(ctx):
     got = sorted([
         f.basename

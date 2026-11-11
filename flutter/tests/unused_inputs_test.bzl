@@ -14,6 +14,8 @@ load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME")
 load("//flutter/private:flutter_kernel_module.bzl", "flutter_kernel_module_action")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _kernel_actions(env):
     actions = analysistest.target_actions(env)
     kernel_actions = [a for a in actions if a.mnemonic == "DartKernel"]

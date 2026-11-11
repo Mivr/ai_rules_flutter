@@ -6,6 +6,8 @@ without evaluating Ruby. Scanners advance `ctx["line"]` across newlines and
 report whether the construct closed before end of input.
 """
 
+visibility(["//flutter/..."])
+
 _VALUE_KEYWORDS = (
     "if",
     "unless",

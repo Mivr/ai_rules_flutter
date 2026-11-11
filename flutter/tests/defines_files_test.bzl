@@ -17,6 +17,8 @@ load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("//flutter:defs.bzl", "flutter_application", "flutter_integration_test")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "defines_files_fixture"
 _MAIN = "lib/language_version_main.dart"
 _JSON_FILE = "_defines_fixture.json"

@@ -16,6 +16,8 @@ action, so no consumer computes a key a second time and every platform bundle
 load("//flutter:providers.bzl", "FlutterInfo")
 load(":asset_uri.bzl", "encode_asset_key")
 
+visibility(["//flutter/..."])
+
 def _listing_dir(workspace_root, package):
     """The listing target's package directory in `File.short_path` space.
 

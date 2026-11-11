@@ -21,6 +21,8 @@ without `asset` whose other keys are clean) stay silent. An empty
 flutter_tools 3.47.7 crashes reading one, so it cannot build.
 """
 
+visibility(["//flutter/..."])
+
 def _refusal(path, key, detail, line):
     """One `asset_errors` refusal for a malformed `flutter:` section shape.
 

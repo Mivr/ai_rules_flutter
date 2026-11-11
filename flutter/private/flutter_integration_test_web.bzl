@@ -88,6 +88,8 @@ load(
 )
 load("//flutter/private:web_stubs.bzl", "make_web_wrapper_main_content")
 
+visibility(["//flutter/..."])
+
 def _web_sdk_file_list(ctx):
     """All files the web SDK target carries (renderer/template lookup)."""
     return ctx.attr._web_sdk.files.to_list() if ctx.attr._web_sdk else []

@@ -17,6 +17,8 @@ bound-error helpers return their message instead of failing so unit tests
 can assert them; the caller `fail()`s with them.
 """
 
+visibility(["//flutter/..."])
+
 # Bound for every pub spoke directory walk: at most this many directory
 # pops before the fetch fails loudly. 1000000 covers the 2-5M-line
 # monorepos rules_flutter targets, where a large package legitimately

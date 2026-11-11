@@ -6,6 +6,8 @@ runs on the macOS host. The transition keeps the test runner in the default
 configuration while moving only the library it builds.
 """
 
+visibility("private")
+
 def _plugin_ios_build_impl(ctx):
     return [DefaultInfo(files = ctx.attr.target[0][DefaultInfo].files)]
 

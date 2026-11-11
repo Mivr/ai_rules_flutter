@@ -9,6 +9,8 @@ re-exports it, so existing users are unaffected.
 Usage: see flutter/private/flutter_xtool_bundle.bzl for public API.
 """
 
+visibility(["//flutter/..."])
+
 FlutterXtoolVersionInfo = provider(
     doc = "Carries host-agnostic bundle version metadata for the xtool backend.",
     fields = {

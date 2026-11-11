@@ -15,6 +15,8 @@ load(":xtool_darwin_sdk_repo.bzl", "FlutterXtoolSdkInfo", "UNCONFIGURED_SDK_ERRO
 load(":xtool_import.bzl", "xtool_target_arch")
 load(":xtool_version.bzl", "FlutterXtoolVersionInfo")
 
+visibility(["//flutter/..."])
+
 # -- Shared bundle helpers -----------------------------------------------------
 
 _SOURCE_SUFFIXES = (".swift", ".m", ".mm", ".c", ".cc", ".cpp")

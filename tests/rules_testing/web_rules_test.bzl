@@ -11,6 +11,8 @@ load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
 load("//flutter:web.bzl", "flutter_web_app", "flutter_web_bundle", "flutter_web_manifest_gen")
 load(":rule_coverage.bzl", "expect_action", "expect_argv_suffixes", "expect_default_outputs")
 
+visibility(["//tests/..."])
+
 _MAIN = "lib/web_fixture_main.dart"
 
 def _expect_web_bundle_providers(env, target):

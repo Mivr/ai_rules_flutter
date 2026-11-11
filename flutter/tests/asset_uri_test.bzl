@@ -26,6 +26,8 @@ load(
 load("//flutter/private:flutter_pubspec.bzl", "parse_flutter_assets_block")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 # The oracle file name below is built in pieces: the spellchecker reads its
 # first three letters as a misspelling and rewrites the expected key, so the
 # name is never written whole.

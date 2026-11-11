@@ -6,6 +6,8 @@ Output format depends on the target platform:
 - macOS/iOS: Mach-O dylib (App.framework/App) via --snapshot_kind=app-aot-macho-dylib
 """
 
+visibility(["//flutter/..."])
+
 def _flutter_aot_action(ctx, gen_snapshot, kernel_dill, output, spec):
     """Internal helper for all AOT compilation variants.
 

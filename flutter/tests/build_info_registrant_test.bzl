@@ -9,6 +9,8 @@ load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("//flutter:defs.bzl", "flutter_application", "flutter_kernel_target")
 load("//flutter/private:common.bzl", "HOST_COMPATIBLE")
 
+visibility(["//flutter/tests/..."])
+
 _PACKAGE = "build_info_registrant_fixture"
 _MAIN = "lib/language_version_main.dart"
 _DEFINE = "USER_DEFINE=user-value"

@@ -12,6 +12,8 @@ load("//flutter/private:flutter_pub_apple_local.bzl", "apply_apple_native_deps")
 load("//flutter/private:starlark_literal.bzl", "starlark_string_literal")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _BIGINT_SHA = "55fc8a63f655a09d9216f2c9bc062c508f98d4eca4b8ebefaf295a3ea4ac8f22"
 
 _BIGINT_RESOLVED = """{

@@ -4,6 +4,8 @@ load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load("//flutter/private:repo_metadata.bzl", "download_mode_metadata")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 def _fake_ctx(attr):
     """A repository context that records the `reproducible` flag it was given."""
     return struct(

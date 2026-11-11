@@ -14,6 +14,8 @@ load(
     "stable_entry_path",
 )
 
+visibility(["//flutter/..."])
+
 def _sdk_root_from_dart(dart_file):
     p = dart_file.path
     for suffix in ("/bin/dart", "/bin/dart.exe"):

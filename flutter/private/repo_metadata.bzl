@@ -7,6 +7,8 @@ when the tree holds no link into the workspace or the host: download mode.
 Local mode links a user SDK by absolute path and must stay unmarked.
 """
 
+visibility(["//flutter/..."])
+
 def download_mode_metadata(rctx):
     """The `repo_metadata` result for a rule that has a download and a local mode.
 

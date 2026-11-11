@@ -19,6 +19,8 @@ load("//flutter/private:podfile_lock.bzl", "read_podfile_lock")
 load("//flutter/private:swiftpm_resolved.bzl", "read_ios_native_deps")
 load("//flutter/tests:test_suite.bzl", "small_unittest_suite")
 
+visibility(["//flutter/tests/..."])
+
 _FIXTURE_LOCK = """PODS:
   - Flutter (1.0.0)
   - FlutterMacOS (1.0.0)

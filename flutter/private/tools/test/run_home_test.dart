@@ -36,7 +36,8 @@ String _runHomeBzl() {
 // the `dart` CLI arguments, the home policy the launcher must apply, and the
 // exact argv the launcher must exec. The Dart unit test and the bash launcher
 // test below run this same table, and the Windows `.bat` in
-// `//dart:flutter_sdk_binary` mirrors it, so the three launchers agree.
+// `//flutter/private:flutter_sdk_binary.bzl` mirrors it, so the three launchers
+// agree.
 const _private = run_home.RunHomePolicy.privateHome;
 const _caller = run_home.RunHomePolicy.callerHomeSuppressed;
 

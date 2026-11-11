@@ -13,6 +13,8 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//flutter:ios.bzl", _ios_plugin = "flutter_apple_plugin_library")
 load("//flutter:macos.bzl", _macos_plugin = "flutter_apple_plugin_library")
 
+visibility(["//flutter/tests/..."])
+
 # The label form `native.existing_rules()` reports for a dep in the main repository.
 _IOS_ENGINE = "//flutter/private:apple_engine_framework_ios"
 _MACOS_ENGINE = "//flutter/private:apple_engine_framework_macos"

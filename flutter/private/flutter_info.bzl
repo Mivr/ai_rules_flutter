@@ -19,6 +19,8 @@ ordinary call with no arguments, not a special one.
 
 load("//flutter:providers.bzl", "FlutterInfo")
 
+visibility(["//flutter/..."])
+
 def _merge_depsets(dep_infos, direct, field):
     """Merges one plain depset channel: this target's files over its dependencies'."""
     return depset(direct = direct, transitive = [getattr(info, field) for info in dep_infos])

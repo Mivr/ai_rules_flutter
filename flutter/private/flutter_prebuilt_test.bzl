@@ -36,6 +36,8 @@ flutter_prebuilt_test(
 
 load("//flutter/private:flutter_test_common.bzl", "flutter_test_runner", "make_test_artifacts", "make_test_selection")
 
+visibility(["//flutter/..."])
+
 def _flutter_prebuilt_test_impl(ctx):
     if len(ctx.files.base_dill) > 1:
         fail("%s: base_dill holds at most one .dill, got %s." % (

@@ -13,6 +13,8 @@ load(":starlark_literal.bzl", "starlark_string_literal")
 load(":swiftpm_settings.bzl", "swiftpm_render_list_attr", "swiftpm_target_setting_entries")
 load(":swiftpm_translate.bzl", "swiftpm_c99name")
 
+visibility(["//flutter/..."])
+
 def local_missing_dir_error(plugin, target_name, target_dir):
     """The refusal naming a target whose directory does not exist.
 
@@ -448,7 +450,7 @@ def render_local_target_blocks(plugin, platform, targets, files_by_target, plugi
     )
 
 _LOCAL_OBJC_MACRO_LOAD = (
-    'load("@rules_flutter//flutter/private:flutter_apple_plugin_library.bzl", ' +
+    'load("@rules_flutter//flutter:macos.bzl", ' +
     '"flutter_apple_plugin_objc_library", "flutter_apple_plugin_objc_settings")'
 )
 

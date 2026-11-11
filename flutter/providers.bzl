@@ -1,5 +1,7 @@
 """Providers for Flutter rules."""
 
+visibility("public")
+
 FlutterSdkInfo = provider(
     doc = """Information about the Flutter engine provided by the toolchain.
 
@@ -413,5 +415,23 @@ FlutterApplePluginInfo = provider(
         "weak_sdk_frameworks": "list[str]: Linked Apple SDK weak frameworks.",
         "sdk_dylibs": "list[str]: Linked Apple SDK dylibs.",
         "framework_infos": "depset[FlutterDarwinFrameworkInfo] or None: Framework imports the plugin depends on, kept structured so the xtool bundle can tell static from dynamic. `None` (not supplied) means empty.",
+    },
+)
+
+FlutterLinuxPluginInfo = provider(
+    doc = "Source bundle for a Flutter plugin's Linux C++ implementation.",
+    fields = {
+        "srcs": "depset[File]: source files to compile.",
+        "hdrs": "depset[File]: header files (made available on the include path).",
+        "include_dirs": "depset[str]: relative include directories under the plugin package root.",
+    },
+)
+
+FlutterWindowsPluginInfo = provider(
+    doc = "Source bundle for a Flutter plugin's Windows C++ implementation.",
+    fields = {
+        "srcs": "depset[File]: source files to compile.",
+        "hdrs": "depset[File]: header files (made available on the include path).",
+        "include_dirs": "depset[str]: relative include directories under the plugin package root.",
     },
 )

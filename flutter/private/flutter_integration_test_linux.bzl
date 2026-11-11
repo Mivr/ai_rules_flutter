@@ -74,6 +74,8 @@ load(
     "generate_native_plugin_registrant_header",
 )
 
+visibility(["//flutter/..."])
+
 def _linux_integration_test_setup(ctx):
     """Validates a Linux target and resolves its shared build inputs.
 

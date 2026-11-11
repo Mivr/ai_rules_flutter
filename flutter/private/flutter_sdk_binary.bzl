@@ -6,11 +6,9 @@ Usage:
 """
 
 load("//flutter:providers.bzl", "resolve_exec_dart")
-
-# The shell-template launcher lives in //dart while the helper lives with
-# the other private modules, like the macOS rule's rules_apple loads.
-# buildifier: disable=bzl-visibility
 load("//flutter/private:run_home.bzl", "RUN_HOME_SH", "RUN_HOME_SUPPRESS_ANALYTICS")
+
+visibility(["//flutter/..."])
 
 _BASH_RUNFILES_INIT = """\
 # --- begin runfiles.bash initialization v3 ---
@@ -124,9 +122,12 @@ def _runfiles_path(f, workspace_name):
     return workspace_name + "/" + f.short_path
 
 def _is_windows(ctx):
-    return ctx.target_platform_has_constraint(ctx.attr._windows_constraint[platform_common.ConstraintValueInfo])
+    """Whether the target platform satisfies the Windows OS constraint."""
+    constraint = ctx.attr._windows_constraint[platform_common.ConstraintValueInfo]
+    return ctx.target_platform_has_constraint(constraint)
 
 def _flutter_sdk_binary_impl(ctx):
+    """Writes a launcher script that invokes the resolved Flutter SDK's `dart` binary."""
     toolchain = ctx.toolchains["//flutter:toolchain_type"]
     flutter_sdk_info = toolchain.flutter_sdk_info
     dart = resolve_exec_dart(ctx, flutter_sdk_info)
@@ -166,12 +167,10 @@ run_home_exec "$DART" "$@"
             is_executable = True,
         )
 
-    dart_tc = (
-        ctx.toolchains["@rules_dart//dart:exec_tools_toolchain_type"] if "@rules_dart//dart:exec_tools_toolchain_type" in ctx.toolchains else None
-    )
-    sdk_files = (
-        dart_tc.dart_sdk_info.tool_files if (dart_tc and getattr(dart_tc, "dart_sdk_info", None)) else flutter_sdk_info.tool_files
-    )
+    exec_tc_type = "@rules_dart//dart:exec_tools_toolchain_type"
+    dart_tc = ctx.toolchains[exec_tc_type] if exec_tc_type in ctx.toolchains else None
+    has_dart_sdk = dart_tc and getattr(dart_tc, "dart_sdk_info", None)
+    sdk_files = dart_tc.dart_sdk_info.tool_files if has_dart_sdk else flutter_sdk_info.tool_files
     runfiles = ctx.runfiles(transitive_files = sdk_files)
     runfiles = runfiles.merge(ctx.attr._runfiles_lib[DefaultInfo].default_runfiles)
 
