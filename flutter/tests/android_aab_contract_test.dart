@@ -65,6 +65,7 @@ void main() {
       ),
     );
     expect(emitter, contains('bundle_config_file ='));
+    expect(_aabSection(), contains('"versionCode": "1"'));
     final Iterable<RegExpMatch> loads = RegExp(r'load\("([^"]+)"')
         .allMatches(emitter);
     for (final m in loads) {
