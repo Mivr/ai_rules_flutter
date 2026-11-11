@@ -81,6 +81,8 @@ class DriveConfig {
     required this.runtime,
     required this.driver,
     required this.tmp,
+    this.kvmPath = '/dev/kvm',
+    this.budgetScale = 1.0,
   });
 
   /// Reads the configuration from the test [env] and runfiles [r].
@@ -129,6 +131,17 @@ class DriveConfig {
 
   /// Scratch parent directory.
   final String tmp;
+
+  /// Device node whose read/write access gates the emulator boot.
+  final String kvmPath;
+
+  /// Factor applied to every step time budget; `1.0` keeps the real budgets.
+  final double budgetScale;
+
+  /// [base] scaled by [budgetScale].
+  Duration budget(Duration base) => budgetScale == 1.0
+      ? base
+      : Duration(microseconds: (base.inMicroseconds * budgetScale).round());
 }
 
 /// One emulator session: boot, install, launch, forward and tear down.
@@ -188,7 +201,7 @@ class DriveSession {
 
   /// Boots the emulator and waits for it to finish booting.
   Future<void> boot() async {
-    verifyKvmAvailable('/dev/kvm');
+    verifyKvmAvailable(config.kvmPath);
     final String sdkRoot = File(config.runtime.emulator).parent.parent.path;
     final scratch = Directory(
       '${config.tmp}/drive_${pid}_${DateTime.now().microsecondsSinceEpoch}',
@@ -216,9 +229,13 @@ class DriveSession {
       forwarding: EnvForwarding(tz: Platform.environment['TZ']),
     );
     _serial = 'emulator-${ports.consolePort}';
-    await runStep('start adb server', const Duration(seconds: 30), () async {
-      await _adb(const <String>['start-server']);
-    });
+    await runStep(
+      'start adb server',
+      config.budget(const Duration(seconds: 30)),
+      () async {
+        await _adb(const <String>['start-server']);
+      },
+    );
     _emulator = await Process.start(
       config.runtime.emulator,
       buildAndroidEmulatorArguments(
@@ -232,7 +249,11 @@ class DriveSession {
     );
     unawaited(_emulator!.stdout.drain<void>());
     unawaited(_emulator!.stderr.drain<void>());
-    await runStep('emulator boot', const Duration(seconds: 180), _waitBooted);
+    await runStep(
+      'emulator boot',
+      config.budget(const Duration(seconds: 180)),
+      _waitBooted,
+    );
   }
 
   Future<void> _waitBooted() async {
@@ -268,9 +289,13 @@ class DriveSession {
 
   /// Installs the APK, launches it and returns the host VM service URI.
   Future<String> launchApp() async {
-    await runStep('install apk', const Duration(seconds: 90), () async {
-      await _adbOrThrow(<String>['install', '-r', config.apk]);
-    });
+    await runStep(
+      'install apk',
+      config.budget(const Duration(seconds: 90)),
+      () async {
+        await _adbOrThrow(<String>['install', '-r', config.apk]);
+      },
+    );
     await _adbOrThrow(const <String>['logcat', '-b', 'all', '-c']);
     final Process logcat = await Process.start(
       config.runtime.adb,
@@ -297,27 +322,35 @@ class DriveSession {
         .map((m) => m!)
         .first;
     final String component = await _resolveComponent();
-    await runStep('launch app', const Duration(seconds: 60), () async {
-      final ProcessResult r = await _adbOrThrow(<String>[
-        'shell',
-        'am',
-        'start',
-        '-W',
-        '-n',
-        component,
-      ]);
-      if ('${r.stdout}'.contains('Error:')) {
-        throw StateError('am start $component failed:\n${r.stdout}');
-      }
-    });
+    await runStep(
+      'launch app',
+      config.budget(const Duration(seconds: 60)),
+      () async {
+        final ProcessResult r = await _adbOrThrow(<String>[
+          'shell',
+          'am',
+          'start',
+          '-W',
+          '-n',
+          component,
+        ]);
+        if ('${r.stdout}'.contains('Error:')) {
+          throw StateError('am start $component failed:\n${r.stdout}');
+        }
+      },
+    );
     final ({int port, String path}) svc = await runStep(
       'wait for VM service',
-      const Duration(seconds: 90),
+      config.budget(const Duration(seconds: 90)),
       () => found,
     );
-    await runStep('forward VM service port', const Duration(seconds: 30), () {
-      return _forward(svc.port);
-    });
+    await runStep(
+      'forward VM service port',
+      config.budget(const Duration(seconds: 30)),
+      () {
+        return _forward(svc.port);
+      },
+    );
     return 'http://127.0.0.1:$_hostPort${svc.path}';
   }
 
