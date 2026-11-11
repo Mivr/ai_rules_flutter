@@ -64,6 +64,7 @@ load("//flutter/private:debug_build.bzl", _debug_build = "debug_build")
 load("//flutter/private:flutter_apple_plugin_library.bzl", _flutter_apple_plugin_library_macro = "flutter_apple_plugin_library", _flutter_xtool_apple_plugin_library = "flutter_xtool_apple_plugin_library")
 load("//flutter/private:flutter_apple_plugins_aggregator.bzl", _flutter_apple_plugins_aggregator = "flutter_apple_plugins_aggregator")
 load("//flutter/private:flutter_apple_xcframework_import.bzl", _flutter_apple_xcframework_import = "flutter_apple_xcframework_import")
+load("//flutter/private:flutter_drive_test.bzl", _flutter_drive_test = "flutter_drive_test")
 load(
     "//flutter/private:flutter_ios_application.bzl",
     _flutter_ios_application = "flutter_ios_application",
@@ -187,6 +188,10 @@ def flutter_ios_xcframeworks(name, application = None, minimum_os_version = IOS_
 # for the `-c dbg`-only variant.
 # rule_test_coverage: no-actions
 ios_sim_debug_app = _ios_sim_debug_app
+
+# Runs a host-side driver script against an app launched on the iOS simulator
+# (`platform = "ios"`) or the Android emulator; also exported from android.bzl.
+flutter_drive_test = _flutter_drive_test
 
 # -- Composable rules (Tier 2) ------------------------------------------------
 #

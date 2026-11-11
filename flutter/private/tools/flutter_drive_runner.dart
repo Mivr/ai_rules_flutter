@@ -1,4 +1,5 @@
-/// Host-driven test launcher for `flutter_drive_test` (Android emulator).
+/// Host-driven test launcher for `flutter_drive_test` (Android emulator, with
+/// the iOS simulator leg in `flutter_drive_ios.dart`).
 ///
 /// Boots the pinned headless emulator the way `flutter_integration_test` does,
 /// installs and launches the debug APK, finds the app's Dart VM service URI in
@@ -14,30 +15,15 @@ import 'dart:io';
 
 import 'package:runfiles/runfiles.dart';
 
+import 'flutter_drive_common.dart';
+import 'flutter_drive_ios.dart';
 import 'flutter_integration_test_android.dart';
-import 'run_home.dart';
 import 'test_support.dart';
 
-/// Environment variable naming the VM service URI the driver connects to.
-const String vmServiceEnv = 'VM_SERVICE_URL';
+export 'flutter_drive_common.dart';
 
 /// Paths to the pinned headless Android `emulator` and `adb` binaries.
 typedef AndroidRuntimePaths = ({String emulator, String adb});
-
-/// Host command and arguments used to execute the user's driver.
-typedef DriverCommand = ({String executable, List<String> args});
-
-final RegExp _vmServiceLine = RegExp(
-  r'(?:Dart VM service|Observatory) is listening on http://127\.0\.0\.1:(\d+)(/[^\s]*)?',
-);
-
-/// Extracts `(port, path)` from a logcat line announcing the VM service, or
-/// `null` when [line] is not that announcement.
-({int port, String path})? parseVmServiceLine(String line) {
-  final RegExpMatch? m = _vmServiceLine.firstMatch(line);
-  if (m == null) return null;
-  return (port: int.parse(m.group(1)!), path: m.group(2) ?? '/');
-}
 
 /// Parses the `<package>/<activity>` component from `cmd package
 /// resolve-activity --brief` [output], falling back to `FlutterActivity` under
@@ -50,27 +36,6 @@ String parseLauncherComponent(String output, String packageName) {
   }
   return '$packageName/io.flutter.embedding.android.FlutterActivity';
 }
-
-/// Raised when a named launch step exceeds its time budget.
-class StepTimeout implements Exception {
-  /// Creates a timeout error for [step] after [limit].
-  const new(this.step, this.limit);
-
-  /// The step that ran out of time.
-  final String step;
-
-  /// The budget the step had.
-  final Duration limit;
-
-  @override
-  String toString() =>
-      'flutter_drive_test: timed out after ${limit.inSeconds}s during step '
-      '"$step"';
-}
-
-/// Runs [body] within [limit]; a timeout throws a [StepTimeout] naming [step].
-Future<T> runStep<T>(String step, Duration limit, Future<T> Function() body) =>
-    body().timeout(limit, onTimeout: () => throw StepTimeout(step, limit));
 
 /// Everything the run reads from the test environment.
 class DriveConfig {
@@ -87,24 +52,9 @@ class DriveConfig {
 
   /// Reads the configuration from the test [env] and runfiles [r].
   factory fromEnv(Map<String, String> env, Runfiles r) {
-    String requiredValue(String key) {
-      final String? v = env[key];
-      if (v == null || v.isEmpty) {
-        throw FormatException('$key must be set for flutter_drive_test.');
-      }
-      return v;
-    }
+    String requiredValue(String key) => requiredEnv(env, key);
 
-    final String driverPath = r.rlocation(
-      requiredValue('FLUTTER_DRIVE_DRIVER'),
-    );
-    final String? dartKey = env['FLUTTER_DRIVE_DART'];
-    final DriverCommand command = (dartKey != null && dartKey.isNotEmpty)
-        ? (
-            executable: r.rlocation(dartKey),
-            args: <String>['--enable-asserts', driverPath],
-          )
-        : (executable: driverPath, args: const <String>[]);
+    final DriverCommand command = driverCommandFromEnv(env, r);
     return DriveConfig(
       apk: r.rlocation(requiredValue('FLUTTER_DRIVE_ANDROID_APK')),
       package: requiredValue('FLUTTER_DRIVE_ANDROID_PACKAGE'),
@@ -427,26 +377,14 @@ class DriveSession {
 }
 
 /// Runs the driver on the host against [uri]; returns its exit code.
-Future<int> runDriver(DriveConfig config, DriveSession s, String uri) async {
-  final driverHome = Directory('${s.scratchPath}/driver_home')
-    ..createSync(recursive: true);
-  final Process p = await Process.start(
-    config.driver.executable,
-    config.driver.args,
-    environment: <String, String>{
-      ...privateHomeEnv(driverHome.path),
-      'TMPDIR': s.scratchPath,
+Future<int> runDriver(DriveConfig config, DriveSession s, String uri) =>
+    runDriverProcess(config.driver, s.scratchPath, <String, String>{
       'PATH': File(config.runtime.adb).parent.path,
-      'DART_SUPPRESS_ANALYTICS': 'true',
       vmServiceEnv: uri,
       'FLUTTER_DRIVE_VM_SERVICE_URI': uri,
       'FLUTTER_DRIVE_ANDROID_SERIAL': s.serial,
       'FLUTTER_DRIVE_PACKAGE': config.package,
-    },
-    mode: ProcessStartMode.inheritStdio,
-  );
-  return await p.exitCode;
-}
+    });
 
 /// Boots, launches and drives; always cleans up. Returns the exit status.
 Future<int> runDrive(DriveConfig config) async {
@@ -464,12 +402,17 @@ Future<int> runDrive(DriveConfig config) async {
 }
 
 Future<void> main() async {
-  final DriveConfig config;
+  final Map<String, String> env = Platform.environment;
+  final runfiles = Runfiles.create();
+  final bool ios = (env['FLUTTER_DRIVE_IOS_APP'] ?? '').isNotEmpty;
   try {
-    config = DriveConfig.fromEnv(Platform.environment, Runfiles.create());
+    exit(
+      ios
+          ? await runIosDrive(IosDriveConfig.fromEnv(env, runfiles))
+          : await runDrive(DriveConfig.fromEnv(env, runfiles)),
+    );
   } on FormatException catch (e) {
     stderr.writeln('flutter_drive_test: ${e.message}');
     exit(2);
   }
-  exit(await runDrive(config));
 }

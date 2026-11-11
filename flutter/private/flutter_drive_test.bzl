@@ -1,14 +1,17 @@
-"""`flutter_drive_test`: a host-run driver against an app on the Android emulator.
+"""`flutter_drive_test`: a host-run driver against an app on the Android emulator or iOS simulator.
 
-The test launches a debug Android app (as `flutter_android_app` builds it) on
-the pinned headless emulator the way `flutter_integration_test` does, runs
-`driver` on the host with the app's Dart VM service URI in its environment, and
-exits with the driver's exit status. `driver` may be either a `.dart` script
-(compiled here against `deps` with the hermetic Dart exec toolchain) or a
-prebuilt executable target such as `dart_binary`. Host Dart and driver packages
-come from the toolchain and the pinned pub lock; no host Flutter, emulator or
-Dart is read. The runtime (emulator, `adb`) is the one
-`flutter_integration_test` pins, so this adds no download.
+The test launches a debug app on a device the way `flutter_integration_test`
+does, runs `driver` on the host with the app's Dart VM service URI in its
+environment, and exits with the driver's exit status. `app` is either an
+Android app (as `flutter_android_app` builds it, run on the pinned headless
+emulator) or an iOS simulator app (an `.ipa` as `ios_sim_debug_app` builds it,
+run on a simulator booted or reused through `xcrun simctl`, macOS only).
+`driver` may be either a `.dart` script (compiled here against `deps` with the
+hermetic Dart exec toolchain) or a prebuilt executable target such as
+`dart_binary`. Host Dart and driver packages come from the toolchain and the
+pinned pub lock; no host Flutter or Dart is read. The Android runtime
+(emulator, `adb`) is the one `flutter_integration_test` pins, and the iOS leg
+uses the runner's Xcode, so this adds no download.
 """
 
 load("@rules_android//providers:providers.bzl", "ApkInfo")
@@ -37,7 +40,7 @@ _DRIVE_TEST_EXECUTION_REQUIREMENTS = {"no-sandbox": ""}
 _EXEC_TOOLS_TOOLCHAIN = "@rules_dart//dart:exec_tools_toolchain_type"
 
 def _drive_apk(ctx):
-    """Resolves the signed APK produced by the `app` target.
+    """Resolves the signed APK produced by the Android `app` target.
 
     Args:
         ctx: The rule context under analysis.
@@ -45,13 +48,8 @@ def _drive_apk(ctx):
     Returns:
         The signed `.apk` `File` of `ctx.attr.app`.
     """
-    if not ctx.attr.app:
-        fail("%s: attribute `app` is required: pass a `flutter_android_app` target." % ctx.label)
-    if ApkInfo not in ctx.attr.app:
-        fail("%s: attribute `app` (%s) is not an Android app; pass a `flutter_android_app` target." % (
-            ctx.label,
-            ctx.attr.app.label,
-        ))
+    if not ctx.attr.package_name:
+        fail("%s: attribute `package_name` is required." % ctx.label)
     apks = [
         f
         for f in ctx.attr.app[DefaultInfo].files.to_list()
@@ -63,6 +61,61 @@ def _drive_apk(ctx):
             ctx.attr.app.label,
         ))
     return apks[0]
+
+def _drive_ipa(ctx):
+    """Resolves the simulator `.ipa` of an iOS `app` target, or `None`.
+
+    Args:
+        ctx: The rule context under analysis.
+
+    Returns:
+        The `.ipa` `File` of `ctx.attr.app`, or `None` when it has none.
+    """
+    ipas = [f for f in ctx.attr.app[DefaultInfo].files.to_list() if f.path.endswith(".ipa")]
+    return ipas[0] if ipas else None
+
+def _drive_device(ctx, workspace_name):
+    """Picks the device kind of `app` and returns its launcher inputs.
+
+    Args:
+        ctx: The rule context under analysis.
+        workspace_name: The workspace name used to form runfiles paths.
+
+    Returns:
+        A struct with `env` (launcher variables), `files` and `transitive`
+        runfiles inputs.
+    """
+    if not ctx.attr.app:
+        fail("%s: attribute `app` is required: pass a `flutter_android_app` or iOS simulator app target." % ctx.label)
+    if ApkInfo in ctx.attr.app:
+        apk = _drive_apk(ctx)
+        return struct(
+            env = {
+                "FLUTTER_DRIVE_ANDROID_ADB": runfiles_path(ctx.file._android_adb, workspace_name),
+                "FLUTTER_DRIVE_ANDROID_APK": runfiles_path(apk, workspace_name),
+                "FLUTTER_DRIVE_ANDROID_EMULATOR": runfiles_path(ctx.file._android_emulator, workspace_name),
+                "FLUTTER_DRIVE_ANDROID_PACKAGE": ctx.attr.package_name,
+            },
+            files = [apk, ctx.file._android_emulator, ctx.file._android_adb],
+            transitive = ctx.files._android_runtime_all_files,
+        )
+    ipa = _drive_ipa(ctx)
+    if ipa == None:
+        fail((
+            "%s: attribute `app` (%s) is neither an Android app (`flutter_android_app`) nor an " +
+            "iOS simulator app (an `.ipa` from `ios_sim_debug_app`)."
+        ) % (ctx.label, ctx.attr.app.label))
+    bundle_id = ctx.attr.bundle_id or ctx.attr.package_name
+    if not bundle_id:
+        fail("%s: attribute `bundle_id` is required for an iOS simulator `app`." % ctx.label)
+    return struct(
+        env = {
+            "FLUTTER_DRIVE_IOS_APP": runfiles_path(ipa, workspace_name),
+            "FLUTTER_DRIVE_IOS_BUNDLE_ID": bundle_id,
+        },
+        files = [ipa],
+        transitive = [],
+    )
 
 def _exec_kernel_tools(ctx):
     """Resolves the hermetic Dart VM and kernel compiler from the exec toolchain.
@@ -235,10 +288,8 @@ def _flutter_drive_test_impl(ctx):
     Returns:
         The list of providers for the test target.
     """
-    if not ctx.attr.package_name:
-        fail("%s: attribute `package_name` is required." % ctx.label)
-    apk = _drive_apk(ctx)
     workspace_name = ctx.workspace_name
+    device = _drive_device(ctx, workspace_name)
     resolved = _resolve_driver(ctx, workspace_name)
     executable = ctx.actions.declare_file(ctx.label.name)
     ctx.actions.symlink(
@@ -246,17 +297,11 @@ def _flutter_drive_test_impl(ctx):
         target_file = ctx.executable._tool,
         is_executable = True,
     )
-    base_env = {
-        "FLUTTER_DRIVE_ANDROID_ADB": runfiles_path(ctx.file._android_adb, workspace_name),
-        "FLUTTER_DRIVE_ANDROID_APK": runfiles_path(apk, workspace_name),
-        "FLUTTER_DRIVE_ANDROID_EMULATOR": runfiles_path(ctx.file._android_emulator, workspace_name),
-        "FLUTTER_DRIVE_ANDROID_PACKAGE": ctx.attr.package_name,
-    }
+    base_env = dict(device.env)
     base_env.update(resolved.env)
     runfiles = ctx.runfiles(
-        files = [apk, ctx.file._android_emulator, ctx.file._android_adb] +
-                ctx.files._android_runtime_all_files + resolved.files + ctx.files.data,
-        transitive_files = depset(transitive = resolved.transitive),
+        files = device.files + resolved.files + ctx.files.data,
+        transitive_files = depset(device.transitive, transitive = resolved.transitive),
     )
     extra_runfiles = [ctx.attr._tool[DefaultInfo].default_runfiles] + resolved.runfiles + [
         d[DefaultInfo].default_runfiles
@@ -273,8 +318,12 @@ _flutter_drive_test = rule(
     implementation = _flutter_drive_test_impl,
     attrs = {
         "app": attr.label(
-            doc = "Required Android app target under test (as `flutter_android_app` builds in `-c dbg`); " +
-                  "defaults to `None` and fails analysis when omitted.",
+            doc = "Required app target under test: an Android app (as `flutter_android_app` builds in " +
+                  "`-c dbg`) or an iOS simulator app (an `.ipa`, as `ios_sim_debug_app` builds); " +
+                  "defaults to `None` and fails analysis when omitted or of neither kind.",
+        ),
+        "bundle_id": attr.string(
+            doc = "Bundle identifier of an iOS simulator `app`; defaults to `package_name` when empty.",
         ),
         "data": attr.label_list(
             allow_files = True,
@@ -296,8 +345,8 @@ _flutter_drive_test = rule(
                   "`data`); defaults to `{}`.",
         ),
         "package_name": attr.string(
-            doc = "Required Android application ID of `app` (for example `com.example.myapp`); " +
-                  "defaults to `\"\"` and fails analysis when empty.",
+            doc = "Android application ID of `app` (for example `com.example.myapp`), required for an " +
+                  "Android app; defaults to `\"\"`.",
         ),
         "srcs": attr.label_list(
             allow_files = [".dart"],
@@ -308,7 +357,7 @@ _flutter_drive_test = rule(
             executable = True,
             cfg = "exec",
             doc = "Default launcher binary (`//flutter/private/tools:flutter_drive_runner`) that boots " +
-                  "the emulator, starts the app and runs the driver.",
+                  "the emulator or simulator, starts the app and runs the driver.",
         ),
         "_android_emulator": attr.label(
             default = Label("@flutter_android_headless_runtime//:sdk/emulator/emulator"),
@@ -327,7 +376,7 @@ _flutter_drive_test = rule(
     },
     toolchains = [_EXEC_TOOLS_TOOLCHAIN],
     test = True,
-    doc = "Runs a host Dart driver against a debug Android app launched on the pinned headless emulator.",
+    doc = "Runs a host Dart driver against a debug app on the Android emulator or the iOS simulator.",
 )
 
 def flutter_drive_test(
@@ -336,34 +385,46 @@ def flutter_drive_test(
         driver = None,
         package_name = "",
         deps = [],
-        size = "large",
+        size = None,
         tags = [],
+        platform = "android",
         **kwargs):
-    """Runs a host-side Dart driver against an app launched on the Android emulator.
+    """Runs a host-side Dart driver against an app launched on the Android emulator or iOS simulator.
 
     Launches `app` on the pinned headless Android emulator (as
-    `flutter_integration_test(platform = "android")` does), runs `driver` on
-    the host with the VM service URI in `VM_SERVICE_URL`, and passes or fails
-    with the driver's exit status. Android only. The target is `large` and
-    tagged `manual`, so it stays out of the default Linux test set.
+    `flutter_integration_test(platform = "android")` does) or on an iOS
+    simulator (as `platform = "ios"` does), runs `driver` on the host with the
+    VM service URI in `VM_SERVICE_URL`, and passes or fails with the driver's
+    exit status. The target is tagged `manual`, so it stays out of the default
+    test set. With `platform = "ios"` it is `enormous`, `exclusive` (the
+    simulator is shared) and compatible with macOS only; otherwise it is `large`.
 
     Args:
         name: Unique name for this test target.
-        app: The Android app (`flutter_android_app`), built in debug mode (`-c dbg`).
+        app: The Android app (`flutter_android_app`) or the iOS simulator app
+            (`ios_sim_debug_app`), built in debug mode (`-c dbg`).
         driver: Host Dart driver — a `.dart` script (compiled with `deps`) or a `dart_binary`.
-        package_name: The Android application ID of `app` (for example `com.example.app`).
+        package_name: The Android application ID of `app` (for example `com.example.app`);
+            for an iOS app it is the bundle id unless `bundle_id` is given.
         deps: Dart package dependencies from the pinned pub lock when `driver` is a `.dart` file.
-        size: Test size, `large` by default like the Android integration test.
+        size: Test size; `large` for Android and `enormous` for iOS by default.
         tags: Extra Bazel tags; `manual` is always added so wildcard runs skip it.
-        **kwargs: Additional test attributes (`srcs`, `data`, `env`, `timeout`, `visibility`, ...).
+        platform: `"android"` (default) or `"ios"`; `"ios"` makes the target macOS-only and `exclusive`.
+        **kwargs: Additional test attributes (`srcs`, `data`, `env`, `bundle_id`, `timeout`, `visibility`, ...).
     """
+    if platform not in ("android", "ios"):
+        fail("flutter_drive_test %s: `platform` must be \"android\" or \"ios\", got %r." % (name, platform))
+    ios = platform == "ios"
+    all_tags = tags + [t for t in (["manual", "exclusive"] if ios else ["manual"]) if t not in tags]
+    if ios:
+        kwargs["target_compatible_with"] = kwargs.get("target_compatible_with", []) + ["@platforms//os:macos"]
     _flutter_drive_test(
         name = name,
         app = app,
         driver = driver,
         package_name = package_name,
         deps = deps,
-        size = size,
-        tags = tags + [t for t in ["manual"] if t not in tags],
+        size = size or ("enormous" if ios else "large"),
+        tags = all_tags,
         **kwargs
     )
