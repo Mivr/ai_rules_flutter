@@ -20,7 +20,7 @@ load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle")
 load("//flutter/private:flutter_info.bzl", "flutter_info", "flutter_pub_channels")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
-load(":kernel_target_modular_test.bzl", "kernel_target_dbg_test_impl")
+load(":kernel_target_modular_test.bzl", "assert_kernel_target_dbg_modular")
 
 visibility(["//flutter/tests/..."])
 
@@ -322,6 +322,14 @@ def _kernel_target_release_aot_test_impl(ctx):
     )
     modular_links = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"]
     asserts.equals(env, [], modular_links, "AOT flutter_kernel_target must not run DartKernelLink")
+    return analysistest.end(env)
+
+def _kernel_target_dbg_test_impl(ctx):
+    """In `-c dbg`, non-AOT `flutter_kernel_target` links per-package kernels instead of `FlutterKernelCompile`."""
+    env = analysistest.begin(ctx)
+    whole_program = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"]
+    asserts.equals(env, [], whole_program, "no whole-program compile")
+    assert_kernel_target_dbg_modular(env)
     return analysistest.end(env)
 
 def _kernel_target_aot_test_impl(ctx):
@@ -952,7 +960,7 @@ _aot_target_inputs_test = analysistest.make(_aot_target_inputs_test_impl, config
 _aot_target_dbg_inputs_test = analysistest.make(_aot_target_dbg_inputs_test_impl, config_settings = _DBG)
 _kernel_target_opt_test = analysistest.make(_kernel_target_release_aot_test_impl, config_settings = _OPT)
 _kernel_target_fastbuild_test = analysistest.make(_kernel_target_release_aot_test_impl, config_settings = _FASTBUILD)
-_kernel_target_dbg_test = analysistest.make(kernel_target_dbg_test_impl, config_settings = _DBG)
+_kernel_target_dbg_test = analysistest.make(_kernel_target_dbg_test_impl, config_settings = _DBG)
 _kernel_target_aot_test = analysistest.make(_kernel_target_aot_test_impl)
 _kernel_target_aot_dbg_test = analysistest.make(_kernel_target_aot_dbg_test_impl, config_settings = _DBG)
 _web_inputs_test = analysistest.make(_web_inputs_test_impl, config_settings = _OPT)

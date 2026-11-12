@@ -28,10 +28,12 @@ def _paths(action):
 def _has_output(action, suffix):
     return any([f.basename.endswith(suffix) for f in action.outputs.to_list()])
 
-def kernel_target_dbg_test_impl(ctx):
-    """A debug non-AOT `flutter_kernel_target` with the twin registers modules, one link, no whole-program compile."""
-    env = analysistest.begin(ctx)
-    asserts.equals(env, [], _by_mnemonic(env, "FlutterKernelCompile"), "no whole-program compile")
+def assert_kernel_target_dbg_modular(env):
+    """Asserts a debug non-AOT `flutter_kernel_target` with the twin registers modules and one link.
+
+    Args:
+        env: The analysis test environment.
+    """
     asserts.true(env, len(_by_mnemonic(env, "DartKernel")) > 0, "registers DartKernel modules")
     links = _by_mnemonic(env, "DartKernelLink")
     asserts.equals(env, 1, len(links), "one DartKernelLink")
@@ -45,7 +47,6 @@ def kernel_target_dbg_test_impl(ctx):
         paths = _paths(links[0])
         asserts.true(env, any([".flutter_registrant.kmod" in p for p in paths]), "the link uses the twin: %s" % paths)
         asserts.false(env, any([".flutter.flutter.kmod" in p for p in paths]), "the link drops the plain SDK module")
-    return analysistest.end(env)
 
 def _whole_program_impl(ctx):
     """A define, or a closure with no twin, keeps the whole-program compile and no link."""
