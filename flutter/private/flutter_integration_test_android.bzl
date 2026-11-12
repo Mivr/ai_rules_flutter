@@ -26,10 +26,6 @@ load(
     "runfiles_path",
 )
 load(
-    "@rules_java//java:java_import.bzl",
-    "java_import",
-)
-load(
     "@rules_kotlin//kotlin:android.bzl",
     "kt_android_library",
 )
@@ -56,10 +52,6 @@ load(
     "ANDROID_TARGET_SDK_VERSION",
 )
 load(
-    "//flutter/private:flutter_android_application.bzl",
-    "flutter_android_bundle",
-)
-load(
     "//flutter/private:flutter_android_engine.bzl",
     "flutter_android_engine",
 )
@@ -68,8 +60,12 @@ load(
     "flutter_android_manifest_merge",
 )
 load(
+    "//flutter/private:flutter_android_plugin_closure.bzl",
+    "declare_android_bundle_targets",
+    "declare_android_plugin_closure",
+)
+load(
     "//flutter/private:flutter_android_registrant.bzl",
-    "flutter_android_plugins_aggregator",
     "flutter_android_registrant",
 )
 load(
@@ -451,32 +447,16 @@ def _android_integration_test_app(name, package_name, deps, kwargs):
         **app_kwargs
     )
 
-    flutter_android_bundle(
-        name = "__%s_bundle" % name,
-        application = ":__%s_app" % name,
-        android_abi = "x86_64",
-        tags = helper_tags,
-        visibility = ["//visibility:private"],
-    )
-
-    native.filegroup(
-        name = "__%s_native_libs_jar" % name,
-        srcs = [":__%s_bundle" % name],
-        output_group = "native_libs_jar",
-        tags = helper_tags,
-        visibility = ["//visibility:private"],
-    )
-
-    java_import(
-        name = "__%s_native_libs" % name,
-        jars = [":__%s_native_libs_jar" % name],
-        tags = helper_tags,
-        visibility = ["//visibility:private"],
-    )
-
     flutter_android_engine(
-        name = "__%s_engine" % name,
+        name = "__%s_engine_raw" % name,
         android_abi = "x64",
+        tags = helper_tags,
+        visibility = ["//visibility:private"],
+    )
+    declare_android_bundle_targets(
+        name = name,
+        application = ":__%s_app" % name,
+        full_abi = "x86_64",
         tags = helper_tags,
         visibility = ["//visibility:private"],
     )
@@ -497,30 +477,28 @@ def _android_integration_test_app(name, package_name, deps, kwargs):
         visibility = ["//visibility:private"],
     )
 
-    flutter_android_plugins_aggregator(
-        name = "__%s_android_plugins" % name,
+    declare_android_plugin_closure(
+        name = name,
         application = ":__%s_app" % name,
         android_abi = "x86_64",
+        engine = ":__%s_engine" % name,
         tags = helper_tags,
         visibility = ["//visibility:private"],
     )
 
-def _android_integration_test_apk(name, android_package, pub_hub_name, android_deps):
+def _android_integration_test_apk(name, android_package, android_deps):
     """Declares the Android registrant, merged manifest and signed APK targets.
 
     Args:
         name: The test target's name the helper names derive from.
         android_package: The resolved Android application ID.
-        pub_hub_name: Optional `flutter.pub` hub whose plugin aggregator links.
         android_deps: Extra Android library targets.
     """
     helper_tags = ["manual"]
     registrant_deps = [
         ":__%s_engine" % name,
-        ":__%s_android_plugins" % name,
+        ":__%s_android_plugin_deps" % name,
     ]
-    if pub_hub_name:
-        registrant_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
     registrant_deps = registrant_deps + list(android_deps)
 
     kt_android_library(
@@ -536,10 +514,8 @@ def _android_integration_test_apk(name, android_package, pub_hub_name, android_d
         ":__%s_native_libs" % name,
         ":__%s_engine" % name,
         ":__%s_registrant" % name,
-        ":__%s_android_plugins" % name,
+        ":__%s_android_plugin_deps" % name,
     ]
-    if pub_hub_name:
-        binary_deps.append("@%s//android:all_android_plugin_libs" % pub_hub_name)
     binary_deps = binary_deps + list(android_deps)
 
     write_file(
@@ -586,14 +562,15 @@ def declare_android_integration_test(name, package_name, deps, android_package, 
         deps: The merged dependencies.
         android_package: Optional explicit Android application ID.
         android_deps: Extra Android library targets.
-        pub_hub_name: Optional `flutter.pub` hub whose plugin aggregator links.
+        pub_hub_name: Accepted for compatibility and no longer read; plugins come from `deps`.
         kwargs: The macro's extra attributes.
     """
+    _ = pub_hub_name
     resolved_android_package = android_package or (
         "com.example.%s" % sanitize_android_package_segment(package_name)
     )
     _android_integration_test_app(name, package_name, deps, kwargs)
-    _android_integration_test_apk(name, resolved_android_package, pub_hub_name, android_deps)
+    _android_integration_test_apk(name, resolved_android_package, android_deps)
 
     test_kwargs = {
         k: v

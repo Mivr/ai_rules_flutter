@@ -80,7 +80,12 @@ load(
 load("//flutter/private:flutter_android_engine.bzl", _flutter_android_engine = "flutter_android_engine")
 load("//flutter/private:flutter_android_engine_jar.bzl", _flutter_android_engine_jar = "flutter_android_engine_jar")
 load("//flutter/private:flutter_android_manifest_merge.bzl", _flutter_android_manifest_merge = "flutter_android_manifest_merge")
-load("//flutter/private:flutter_android_plugin_library.bzl", _flutter_android_plugin_library = "flutter_android_plugin_library")
+load(
+    "//flutter/private:flutter_android_plugin_library.bzl",
+    _declare_android_bundle_targets = "declare_android_bundle_targets",
+    _declare_android_plugin_closure = "declare_android_plugin_closure",
+    _flutter_android_plugin_library = "flutter_android_plugin_library",
+)
 load(
     "//flutter/private:flutter_android_registrant.bzl",
     _android_discover_runner = "android_discover_runner",
@@ -365,48 +370,19 @@ def flutter_android_runner_lib_gen(
 
 def _android_bundle_and_engine(name, application, android_abi, internal_tags, analyze_size = False):
     """Emits the bundle, native-libs wiring, engine and overlay-assets targets."""
-
-    # 1. Bundle Flutter outputs (native_libs.jar + flutter_assets).
-    _flutter_android_bundle(
-        name = "__%s_bundle" % name,
-        application = application,
-        android_abi = _short_abi_to_full(android_abi),
-        analyze_size = analyze_size,
-        tags = internal_tags,
-    )
-
-    if analyze_size:
-        native.filegroup(
-            name = "__%s_size_json" % name,
-            srcs = ["__%s_bundle" % name],
-            output_group = "analyze_size",
-            tags = internal_tags,
-        )
-
-    # 2. Extract native_libs.jar from the bundle.
-    native.filegroup(
-        name = "__%s_native_libs_jar" % name,
-        srcs = ["__%s_bundle" % name],
-        output_group = "native_libs_jar",
-        tags = internal_tags,
-    )
-
-    # 3. Wrap native_libs.jar as java_import.
-    _java_import(
-        name = "__%s_native_libs" % name,
-        jars = ["__%s_native_libs_jar" % name],
-        tags = internal_tags,
-    )
-
-    # 4. Import Flutter engine.
     flutter_android_engine(
-        name = "__%s_engine" % name,
+        name = "__%s_engine_raw" % name,
         android_abi = android_abi,
         tags = internal_tags,
     )
-
-    # 5. Extract flutter_assets for injection into the APK after resource
-    # linking (see flutter_android_apk_overlay).
+    _declare_android_bundle_targets(
+        name = name,
+        application = application,
+        full_abi = _short_abi_to_full(android_abi),
+        tags = internal_tags,
+        analyze_size = analyze_size,
+        java_import_fn = _java_import,
+    )
     native.filegroup(
         name = "__%s_overlay_assets" % name,
         srcs = ["__%s_bundle" % name],
@@ -584,9 +560,9 @@ def _android_app_parts(name, app):
 
     Args:
         name: The app name; internal targets derive from it.
-        app: Struct with `application`, `android_abi`, `pub_hub_name`, `deps`,
-            `internal_tags`, `analyze_size`, `resources` and `manifest` (a
-            struct of `package_name`, `display_name`, `min_sdk_version`,
+        app: Struct with `application`, `android_abi`, `deps`, `internal_tags`,
+            `analyze_size`, `resources` and `manifest` (a struct of
+            `package_name`, `display_name`, `min_sdk_version`,
             `target_sdk_version`, `permissions`, `internal_tags`,
             `debug_manifest`, `profile_manifest` and `base`).
 
@@ -601,15 +577,21 @@ def _android_app_parts(name, app):
         analyze_size = app.analyze_size,
     )
 
-    # 6. Auto-wire the plugin registrant. `deps` and
+    # 6. Auto-wire the plugin closure and registrant. `deps` and
     # `flutter_plugin(android_libs = ...)` too: a plugin written in the
     # workspace reaches the app through them, and the registrant names its
     # class.
+    _declare_android_plugin_closure(
+        name = name,
+        application = app.application,
+        android_abi = _short_abi_to_full(app.android_abi),
+        engine = ":__%s_engine" % name,
+        tags = app.internal_tags,
+    )
     registrant_deps = _android_registrant(
         name,
         app.application,
         app.android_abi,
-        app.pub_hub_name,
         app.deps,
         app.internal_tags,
     )
@@ -622,12 +604,9 @@ def _android_app_parts(name, app):
     )
 
     # 7. The payload (native_libs, flutter_assets) is not a base dep: see the
-    # callers. 8. Plugin auto-wiring: compile every transitively-needed
-    # plugin's Kotlin/Java via the hub's aggregator; spokes without Android
-    # sources contribute empty libraries.
-    binary_deps = ["__%s_engine" % name, "__%s_registrant" % name, "__%s_android_plugins" % name]
-    if app.pub_hub_name:
-        binary_deps.append("@%s//android:all_android_plugin_libs" % app.pub_hub_name)
+    # callers. 8. Plugin auto-wiring: the closure target carries the Android
+    # library of each plugin the app's Dart graph reaches, and no other.
+    binary_deps = ["__%s_engine" % name, "__%s_registrant" % name, "__%s_android_plugin_deps" % name]
     base_manifest, resources = _android_discover_runner(
         name,
         app.manifest.package_name,
@@ -721,11 +700,10 @@ def flutter_android_app(
         `kt_android_library` that goes into `binary_deps`. Every plugin
         whose `flutter.plugin.platforms.android.pluginClass` is set ends up
         registered with the FlutterEngine on startup — no manual wiring.
-      - Adds `@<pub_hub_name>//android:all_android_plugin_libs` to
-        `binary_deps`, pulling in every transitively-resolved plugin
-        spoke's Kotlin/Java sources (and resources) via the hub's
-        aggregator. Spokes without Android sources contribute empty
-        libraries (no-op).
+      - Adds the Android library (Kotlin/Java sources and resources) of
+        each plugin in the app's transitive Dart dependencies to
+        `binary_deps`, through one `flutter_android_plugin_closure` target.
+        A plugin the app does not depend on contributes nothing.
       - Permissions that plugins and AARs declare in their own manifests
         (e.g. record_android's RECORD_AUDIO) are lifted into the app's
         manifest, as AGP merges them. Bazel's own merger drops library
@@ -799,13 +777,11 @@ def flutter_android_app(
             A plugin written in the workspace goes here as its
             `flutter_android_plugin_library`: the registrant compiles
             against these too, so the plugin is both packaged and
-            registered. Pub plugins arrive through the hub instead.
-        pub_hub_name: Name of the `flutter.pub(name = ...)` hub providing
-            plugin spokes. The macro depends on
-            `@<pub_hub_name>//android:all_android_plugin_libs` to compile
-            all plugin Kotlin/Java automatically. Defaults to `"deps"`,
-            matching the convention in repo MODULE.bazel files. Set to
-            `None` to opt out (e.g. for a workspace with no pub plugins).
+            registered. Pub plugins arrive through the Dart graph instead.
+        pub_hub_name: Accepted for compatibility and no longer read: the
+            app's plugins come from its Dart dependencies, so no hub is
+            named. `@<hub>//android:all_android_plugin_libs` stays
+            available to a caller that names it in `deps`.
         nocompress_extensions: Extra asset extensions stored uncompressed in
             the final APK, on top of the aapt2 defaults (see
             FLUTTER_APK_AAPT_NO_COMPRESS_EXTENSIONS). Forwarded to both the
@@ -836,12 +812,12 @@ def flutter_android_app(
             fails analysis in debug mode.
         **kwargs: Passed through to android_binary.
     """
+    _ = pub_hub_name
     tags = kwargs.pop("tags", ["manual"])
     internal_tags = _android_internal_tags(tags)
     parts = _android_app_parts(name, struct(
         application = application,
         android_abi = android_abi,
-        pub_hub_name = pub_hub_name,
         deps = deps,
         internal_tags = internal_tags,
         analyze_size = analyze_size,
@@ -959,7 +935,7 @@ def flutter_android_aab(
         permissions: Permission names added to the manifest in every mode.
         resources: Extra resource_files for the base module.
         deps: Extra deps for the base module.
-        pub_hub_name: Name of the `flutter.pub` hub providing plugin spokes.
+        pub_hub_name: Accepted for compatibility and no longer read; see `flutter_android_app`.
         keystore: Release keystore (`.jks` or PKCS#12 `.p12` file label) signing
             the bundle. Needs `keystore_password_file` and `key_alias`; without
             them analysis fails naming the missing attribute. Unset (with the
@@ -973,12 +949,12 @@ def flutter_android_aab(
             (`-keypass:file`); when unset jarsigner uses the keystore password.
         **kwargs: `tags` (defaults to `["manual"]`) and `visibility`.
     """
+    _ = pub_hub_name
     tags = kwargs.pop("tags", ["manual"])
     internal_tags = _android_internal_tags(tags)
     parts = _android_app_parts(name, struct(
         application = application,
         android_abi = android_abi,
-        pub_hub_name = pub_hub_name,
         deps = deps,
         internal_tags = internal_tags,
         analyze_size = False,

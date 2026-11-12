@@ -150,9 +150,9 @@ def _make_android_native_build_unsupported_content(package_name, version):
 
     Emitted for plugins whose Gradle build compiles native code for Android
     (externalNativeBuild) when no overlay provides a Bazel translation.
-    Android builds load this file through the hub's
-    `android/all_android_plugin_libs` aggregator and fail with a clear
-    message; non-Android platforms never load it and are unaffected.
+    Android targets that depend on the plugin (or on the hub's
+    `android:all_android_plugin_libs` aggregator) load this file and fail with
+    a clear message; unrelated apps and non-Android platforms never load it.
 
     Args:
         package_name: The pub package whose native build cannot be modelled.

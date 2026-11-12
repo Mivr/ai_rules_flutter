@@ -314,10 +314,30 @@ bzl_library(
 )
 
 bzl_library(
+    name = "flutter_android_plugin_closure",
+    srcs = ["flutter_android_plugin_closure.bzl"],
+    visibility = [
+        "//docs:__subpackages__",
+        "//flutter:__subpackages__",
+    ],
+    deps = [
+        ":common",
+        ":flutter_android_application",
+        ":plugin_federation",
+        "//flutter:providers",
+        "@rules_android//providers:providers_bzl",
+        "@rules_cc//cc/common",
+        "@rules_java//java:core_rules",
+        "@rules_java//java/common",
+    ],
+)
+
+bzl_library(
     name = "flutter_android_plugin_library",
     srcs = ["flutter_android_plugin_library.bzl"],
     visibility = ["//visibility:public"],
     deps = [
+        ":flutter_android_plugin_closure",
         "@bazel_skylib//rules:write_file",
     ],
 )
@@ -334,8 +354,6 @@ bzl_library(
         ":plugin_registrant",
         "//flutter:providers",
         "@bazel_skylib//rules:expand_template",
-        "@rules_android//providers:providers_bzl",
-        "@rules_java//java/common",
     ],
 )
 
@@ -686,9 +704,9 @@ bzl_library(
         ":app_entrypoint",
         ":common",
         ":constants",
-        ":flutter_android_application",
         ":flutter_android_engine",
         ":flutter_android_manifest_merge",
+        ":flutter_android_plugin_closure",
         ":flutter_android_registrant",
         ":flutter_integration_android_app",
         ":flutter_integration_test_bootstrap",
@@ -700,7 +718,6 @@ bzl_library(
         "@bazel_skylib//rules:write_file",
         "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
-        "@rules_java//java:core_rules",
     ],
 )
 
@@ -1281,6 +1298,7 @@ bzl_library(
         ":flutter_pub_assets",
         ":flutter_pub_cover",
         ":flutter_pub_cycle_breaks",
+        ":flutter_pub_lock_hub",
         ":flutter_pub_maven",
         ":flutter_pub_mirror",
         ":flutter_pub_package_helpers",

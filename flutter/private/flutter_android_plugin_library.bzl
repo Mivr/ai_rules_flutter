@@ -12,8 +12,17 @@ own manifest fragment.
 
 load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
+load(
+    "//flutter/private:flutter_android_plugin_closure.bzl",
+    _declare_android_bundle_targets = "declare_android_bundle_targets",
+    _declare_android_plugin_closure = "declare_android_plugin_closure",
+)
 
 visibility(["//flutter/..."])
+
+# Re-exported so `flutter/android.bzl` wires the per-app closure without widening its load graph.
+declare_android_bundle_targets = _declare_android_bundle_targets
+declare_android_plugin_closure = _declare_android_plugin_closure
 
 _DEFAULT_MANIFEST_TEMPLATE = """\
 <?xml version="1.0" encoding="utf-8"?>
@@ -36,10 +45,11 @@ def flutter_android_plugin_library(
 
     Args:
         name: Target name. Add it to `flutter_android_app(deps = ...)`,
-            which packages it and registers its plugin class. The macro's
-            automatic wiring covers pub.dev plugins only — it deps on the
-            hub's `all_android_plugin_libs`, which knows the resolved spokes
-            and nothing about a target in this workspace.
+            which packages it and registers its plugin class. Plugins
+            reached through the app's Dart dependencies are wired
+            automatically (pub.dev plugins, or a workspace `flutter_plugin`
+            that names it in `android_libs`); a library only listed in
+            `deps` is packaged as given.
         srcs: Kotlin/Java source files (`.kt`, `.java`).
         java_package: Java package the plugin's classes live in
             (e.g. `io.flutter.plugins.urllauncher`). Used to generate a
