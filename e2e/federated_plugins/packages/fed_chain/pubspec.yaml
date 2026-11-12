@@ -15,4 +15,3 @@ flutter:
     platforms:
       linux:
         pluginClass: FedChainPlugin
-

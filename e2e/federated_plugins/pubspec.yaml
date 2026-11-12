@@ -17,4 +17,3 @@ dependencies:
     path: packages/fed_wrapper
   flutter:
     sdk: flutter
-

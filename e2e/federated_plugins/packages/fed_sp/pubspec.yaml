@@ -15,4 +15,3 @@ flutter:
     platforms:
       linux:
         default_package: fed_sp_linux
-
