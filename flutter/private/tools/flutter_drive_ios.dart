@@ -2,7 +2,8 @@
 ///
 /// Boots (or reuses) a simulator the way `flutter_integration_test` does,
 /// installs the debug `.ipa`, launches it and reads the app's Dart VM service
-/// URI from the launch console. The simulator shares the host's loopback, so
+/// URI from the launch console or, started before the launch, the simulator's
+/// unified log (whichever announces it first). The simulator shares the host's loopback, so
 /// the URI is usable as printed. The driver runs on the host with that URI and
 /// the test's exit status is the driver's. The app is terminated and a
 /// simulator this run booted is shut down however the run ends; a timeout
@@ -104,6 +105,13 @@ class IosDriveConfig {
   final String tmp;
 }
 
+/// Lines of console and unified-log output kept for timeout diagnostics.
+const int _tailLines = 40;
+
+const String _logPredicate =
+    'eventMessage contains "Observatory" or '
+    'eventMessage contains "Dart VM service"';
+
 /// One simulator session: boot, install, launch and tear down.
 class IosDriveSession {
   /// Creates a simulator session for [config].
@@ -132,6 +140,9 @@ class IosDriveSession {
   bool _launched = false;
   Directory? _scratch;
   ConsoleProcess? _console;
+  ConsoleProcess? _logStream;
+  final List<String> _consoleTail = <String>[];
+  final List<String> _logTail = <String>[];
 
   /// The booted simulator's UDID, or an empty string before boot.
   String get udid => _udid ?? '';
@@ -216,51 +227,102 @@ class IosDriveSession {
       udid,
       appDir,
     ], const Duration(seconds: 180));
-    final ConsoleProcess console = await consoleStarter('xcrun', <String>[
-      'simctl',
-      'launch',
-      '--console-pty',
-      '--terminate-running-process',
-      udid,
-      resolvedBundle,
-    ]);
+    // The log stream starts before the launch so no announcement is missed.
+    _logStream = await consoleStarter('xcrun', _logStreamArgs(udid));
+    // SIMCTL_CHILD_* variables reach the launched app; this one makes the
+    // engine's os_log output also reach the console.
+    final ConsoleProcess console = await consoleStarter(
+      '/usr/bin/env',
+      <String>[
+        'SIMCTL_CHILD_OS_ACTIVITY_DT_MODE=enable',
+        'xcrun',
+        'simctl',
+        'launch',
+        '--console-pty',
+        '--terminate-running-process',
+        udid,
+        resolvedBundle,
+      ],
+    );
     _console = console;
     _launched = true;
-    final Future<({int port, String path})> found = _vmServiceLines(console);
-    final ({int port, String path}) svc = await runStep(
-      'wait for VM service',
-      waitVmTimeout,
-      () => found,
+    final Future<({int port, String path})> found = _vmServiceLines(
+      console,
+      _logStream!,
     );
-    return 'http://127.0.0.1:${svc.port}${svc.path}';
+    try {
+      final ({int port, String path}) svc = await runStep(
+        'wait for VM service',
+        waitVmTimeout,
+        () => found,
+      );
+      return 'http://127.0.0.1:${svc.port}${svc.path}';
+    } on StepTimeout catch (e) {
+      throw StepTimeout(e.step, e.limit, detail: _tailReport());
+    } finally {
+      _logStream?.kill();
+    }
   }
 
-  Future<({int port, String path})> _vmServiceLines(ConsoleProcess console) {
-    final merged = StreamController<List<int>>();
-    final tail = <String>[];
-    var open = 2;
-    void done() {
-      if (--open == 0) unawaited(merged.close());
+  /// `simctl spawn <udid> log stream` arguments; the predicate is the one
+  /// `tools/dev_tool` uses for the same announcement.
+  static List<String> _logStreamArgs(String udid) => <String>[
+    'simctl',
+    'spawn',
+    udid,
+    'log',
+    'stream',
+    '--style',
+    'compact',
+    '--predicate',
+    _logPredicate,
+  ];
+
+  String _tailReport() =>
+      'last ${_consoleTail.length} console lines:\n'
+      '${_consoleTail.join('\n')}\n'
+      'last ${_logTail.length} unified-log lines:\n${_logTail.join('\n')}';
+
+  /// Completes with the first VM service announcement on the launch console
+  /// or the unified log; fails if the console exits first.
+  Future<({int port, String path})> _vmServiceLines(
+    ConsoleProcess console,
+    ConsoleProcess logStream,
+  ) {
+    final result = Completer<({int port, String path})>();
+    void watch(ConsoleProcess p, List<String> tail, {required bool isConsole}) {
+      var open = 2;
+      final merged = StreamController<List<int>>();
+      void done() {
+        if (--open == 0) unawaited(merged.close());
+      }
+
+      p.stdout.listen(merged.add, onDone: done);
+      p.stderr.listen(merged.add, onDone: done);
+      unawaited(() async {
+        await for (final String line
+            in merged.stream
+                .transform(const Utf8Decoder(allowMalformed: true))
+                .transform(const LineSplitter())) {
+          if (tail.length == _tailLines) tail.removeAt(0);
+          tail.add(line);
+          final ({int port, String path})? parsed = parseVmServiceLine(line);
+          if (parsed != null && !result.isCompleted) result.complete(parsed);
+        }
+        if (!isConsole || result.isCompleted) return;
+        final int code = await p.exitCode;
+        result.completeError(
+          StateError(
+            'simctl launch exited ($code) before announcing the Dart VM '
+            'service:\n${tail.join('\n')}',
+          ),
+        );
+      }());
     }
 
-    console.stdout.listen(merged.add, onDone: done);
-    console.stderr.listen(merged.add, onDone: done);
-    return () async {
-      await for (final String line
-          in merged.stream
-              .transform(const Utf8Decoder(allowMalformed: true))
-              .transform(const LineSplitter())) {
-        if (tail.length == 20) tail.removeAt(0);
-        tail.add(line);
-        final ({int port, String path})? parsed = parseVmServiceLine(line);
-        if (parsed != null) return parsed;
-      }
-      final int code = await console.exitCode;
-      throw StateError(
-        'simctl launch exited ($code) before announcing the Dart VM service:\n'
-        '${tail.join('\n')}',
-      );
-    }();
+    watch(console, _consoleTail, isConsole: true);
+    watch(logStream, _logTail, isConsole: false);
+    return result.future;
   }
 
   String _resolveApp() {
@@ -278,6 +340,7 @@ class IosDriveSession {
   /// scratch; never throws.
   Future<void> dispose() async {
     _console?.kill();
+    _logStream?.kill();
     final String id = udid;
     final String appBundle = bundleId;
     if (id.isNotEmpty && _launched && appBundle.isNotEmpty) {

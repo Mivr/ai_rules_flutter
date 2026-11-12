@@ -31,7 +31,7 @@ final RegExp _vmServiceLine = RegExp(
 /// Raised when a named launch step exceeds its time budget.
 class StepTimeout implements Exception {
   /// Creates a timeout error for [step] after [limit].
-  const new(this.step, this.limit);
+  const new(this.step, this.limit, {this.detail = ''});
 
   /// The step that ran out of time.
   final String step;
@@ -39,10 +39,13 @@ class StepTimeout implements Exception {
   /// The budget the step had.
   final Duration limit;
 
+  /// Extra diagnostics appended to the message, or empty.
+  final String detail;
+
   @override
   String toString() =>
       'flutter_drive_test: timed out after ${limit.inSeconds}s during step '
-      '"$step"';
+      '"$step"${detail.isEmpty ? '' : '\n$detail'}';
 }
 
 /// Runs [body] within [limit]; a timeout throws a [StepTimeout] naming [step].
