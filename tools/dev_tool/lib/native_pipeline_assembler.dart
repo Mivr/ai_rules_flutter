@@ -21,6 +21,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/android_splits.dart';
 import 'package:flutter_bazel_dev_tool/bazel.dart';
 import 'package:flutter_bazel_dev_tool/build_info.dart';
 import 'package:flutter_bazel_dev_tool/bundle_rebuild.dart';
@@ -138,14 +139,19 @@ class NativePipelineAssembler {
   /// every recompile, so a dev build that did not know the app's defines
   /// produces an app that loses them at the first reload.
   ///
+  /// The split output-groups flag is withheld: the groups exist on the
+  /// `flutter_android_app`, not on the `flutter_application` built here, and
+  /// with the flag the cquery that reads this build's outputs lists no dev
+  /// config. [_launchArgs] keeps it.
+  ///
   /// Deliberately not [BuildInfo.buildArgs]: the platform flags that value
   /// carries put a build in the app's *launch* configuration, and these outputs
   /// are read from the configuration this command builds them in.
-  List<String> get _devArgs => [
+  List<String> get _devArgs => withoutSplitOutputGroups([
     ...configDevice.buildArgs,
     ...dartDefineFlags(_info.dartDefines),
     ...userBuildArgs,
-  ];
+  ]);
 
   /// The flags the running app says produced it, used by every bazel
   /// invocation that has to reach the app's own configuration.

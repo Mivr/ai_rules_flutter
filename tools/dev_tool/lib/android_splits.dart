@@ -15,6 +15,18 @@ import 'dart:typed_data';
 /// single APK.
 const splitOutputGroupsFlag = '--output_groups=base_apk,payload_apk';
 
+/// [args] without [splitOutputGroupsFlag].
+///
+/// The split output groups belong to the `flutter_android_app` launch build. A
+/// `flutter_application` has neither group, and `cquery --output=files` lists
+/// only the files of the requested output groups, so a dev build that carried
+/// the flag would list no `_dev_config.json` and hot reload could not be
+/// assembled. Any other `--output_groups` value is left alone.
+List<String> withoutSplitOutputGroups(List<String> args) => [
+  for (final String arg in args)
+    if (arg != splitOutputGroupsFlag) arg,
+];
+
 /// The file-name suffixes `flutter_android_app` gives the files of its
 /// `base_apk` and `payload_apk` output groups.
 const _baseSuffix = '_base.apk';
