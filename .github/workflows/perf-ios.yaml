@@ -389,6 +389,8 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Upload ios-sol
+        id: up_sol
+        continue-on-error: true
         # Runs even when measuring failed: the artifact explains the run.
         # Single-arm runs only; A/B runs upload ios-ab instead.
         if: ${{ !cancelled() && inputs.mode == 'sol' && inputs.ab == 'off' }}
@@ -398,6 +400,8 @@ jobs:
           path: ios-sol.json
           retention-days: 3
       - name: Upload ios-ab
+        id: up_ab
+        continue-on-error: true
         # Runs even when measuring failed: the artifact explains the run.
         if: ${{ !cancelled() && inputs.mode == 'sol' && inputs.ab != 'off' }}
         uses: actions/upload-artifact@v4
@@ -406,6 +410,8 @@ jobs:
           path: ios-ab.json
           retention-days: 3
       - name: Upload ios-profile
+        id: up_profile
+        continue-on-error: true
         # Small profile companion to ios-sol / ios-ab: the gzipped Bazel
         # trace profiles and execution logs behind each flow's profile
         # record, no build outputs. A/B runs keep both arms' traces and
@@ -422,3 +428,53 @@ jobs:
             ab-results/treatment/**/trace.json.gz
             ab-results/treatment/**/execlog.json.gz
           retention-days: 3
+      - name: Wait before upload retry
+        if: ${{ !cancelled() && (steps.up_sol.outcome == 'failure' || steps.up_ab.outcome == 'failure' || steps.up_profile.outcome == 'failure') }}
+        run: sleep 60
+      - name: Retry upload ios-sol
+        id: retry_sol
+        if: ${{ !cancelled() && inputs.mode == 'sol' && inputs.ab == 'off' && steps.up_sol.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-sol
+          path: ios-sol.json
+          retention-days: 3
+      - name: Retry upload ios-ab
+        id: retry_ab
+        if: ${{ !cancelled() && inputs.mode == 'sol' && inputs.ab != 'off' && steps.up_ab.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ab
+          path: ios-ab.json
+          retention-days: 3
+      - name: Retry upload ios-profile
+        id: retry_profile
+        if: ${{ !cancelled() && inputs.mode == 'sol' && steps.up_profile.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-profile
+          path: |
+            sol-results/**/trace.json.gz
+            sol-results/**/execlog.json.gz
+            ab-results/control/**/trace.json.gz
+            ab-results/control/**/execlog.json.gz
+            ab-results/treatment/**/trace.json.gz
+            ab-results/treatment/**/execlog.json.gz
+          retention-days: 3
+      - name: Report failed uploads
+        # Names each artifact whose upload failed again after the retry.
+        if: ${{ !cancelled() && inputs.mode == 'sol' }}
+        env:
+          RETRY_SOL: ${{ steps.retry_sol.outcome }}
+          RETRY_AB: ${{ steps.retry_ab.outcome }}
+          RETRY_PROFILE: ${{ steps.retry_profile.outcome }}
+        run: |
+          report() {
+            if [ "$2" = failure ]; then
+              echo "Artifact $1: upload failed after a retry" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+          report ios-sol "$RETRY_SOL"
+          report ios-ab "$RETRY_AB"
+          report ios-profile "$RETRY_PROFILE"
+          exit 0
