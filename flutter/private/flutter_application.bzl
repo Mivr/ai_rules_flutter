@@ -15,13 +15,15 @@ This rule produces outputs that platform-specific wrappers consume:
 
 load("@apple_support//lib:apple_support.bzl", "apple_support")
 load("@bazel_skylib//lib:dicts.bzl", "dicts")
-load("@rules_dart//dart:utils.bzl", "dart_link_hook_actions", "link_hook_runner_attr")
+load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("@rules_dart//dart:utils.bzl", "MODULAR_KERNEL_ATTRS", "MODULAR_KERNEL_TOOLCHAINS", "dart_link_hook_actions", "link_hook_runner_attr")
 load("//flutter:providers.bzl", "FlutterApplicationInfo", "FlutterInfo")
-load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "make_bundle_inputs", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info", "shader_sources")
+load("//flutter/private:common.bzl", "COPY_TO_DIRECTORY_TOOLCHAINS", "FLUTTER_APPLICATION_ATTRS", "FLUTTER_DEPS_DOC", "PLATFORM_CONSTRAINT_ATTRS", "check_unreplaced_hooks", "collect_binding_contracts", "collect_native_libs", "declare_flutter_assets_dir", "detect_target_platform", "flutter_app_shader_aspect", "flutter_build_assets", "flutter_build_mode", "flutter_compile_kernel", "flutter_compile_shaders", "host_target_arch", "launch_build_args", "make_bundle_inputs", "make_kernel_inputs", "make_kernel_target", "resolve_flutter_sdk_info", "shader_sources")
 load("//flutter/private:flutter_aot_compile.bzl", "flutter_aot_elf_action", "flutter_aot_gen_snapshot_flags", "flutter_aot_macho_action", "macho_snapshot_options")
 load("//flutter/private:flutter_defines_files.bzl", "effective_flavor")
 load("//flutter/private:flutter_font_family.bzl", "FONTS_ATTR")
 load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
+load("//flutter/private:flutter_kernel_module.bzl", "DEBUG_MODULAR_APP_ATTR", "flutter_app_kernel_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "collect_application_native_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
 
@@ -49,23 +51,17 @@ def _check_aot_supported(flutter_sdk_info, is_debug):
             ),
         )
 
+def _has_constraint(ctx, constraint):
+    """Whether the target platform has the constraint value behind a private attribute."""
+    return ctx.target_platform_has_constraint(constraint[platform_common.ConstraintValueInfo])
+
 def _detect_application_platform(ctx):
     """Reads the platform constraints into flags plus a target-platform string."""
-    is_macos = ctx.target_platform_has_constraint(
-        ctx.attr._macos_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_ios = ctx.target_platform_has_constraint(
-        ctx.attr._ios_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_linux = ctx.target_platform_has_constraint(
-        ctx.attr._linux_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_windows = ctx.target_platform_has_constraint(
-        ctx.attr._windows_constraint[platform_common.ConstraintValueInfo],
-    )
-    is_android = ctx.target_platform_has_constraint(
-        ctx.attr._android_constraint[platform_common.ConstraintValueInfo],
-    )
+    is_macos = _has_constraint(ctx, ctx.attr._macos_constraint)
+    is_ios = _has_constraint(ctx, ctx.attr._ios_constraint)
+    is_linux = _has_constraint(ctx, ctx.attr._linux_constraint)
+    is_windows = _has_constraint(ctx, ctx.attr._windows_constraint)
+    is_android = _has_constraint(ctx, ctx.attr._android_constraint)
     return struct(
         target_platform = detect_target_platform(is_ios, is_macos, is_linux, is_windows, is_android),
         is_ios = is_ios,
@@ -87,20 +83,6 @@ def _fail_on_unreplaced_hooks(ctx):
     if hook_err != None:
         fail(hook_err)
 
-def _collect_transitive_assets(ctx):
-    """Aggregates transitive Native Assets so the manifest exists before kernel compile.
-
-    Plus any code assets rules_dart propagated through the Dart package
-    graph — a pub package that owns a native library contributes it just by
-    being depended on. Declarations made here with `flutter_native_asset`
-    win, since they are the deliberate ones.
-
-    Returns:
-      A `(native_assets_list, transitive_data_assets)` tuple.
-    """
-    assets = collect_application_native_assets(ctx)
-    return assets.list, assets.data_assets
-
 def _write_application_manifest(ctx, native_assets_list, target_platform, target_arch):
     """Declares and writes the `native_assets.json` manifest."""
     native_assets_manifest_file = ctx.actions.declare_file(ctx.label.name + ".native_assets.json")
@@ -118,7 +100,7 @@ def _compile_application_kernel(
         flutter_sdk_info,
         target_platform,
         is_ios,
-        native_assets_manifest_file,
+        assets,
         flutter_assets,
         recorded_uses):
     """Runs Step 1: mode-aware kernel compilation."""
@@ -127,7 +109,8 @@ def _compile_application_kernel(
         flutter_sdk_info = flutter_sdk_info,
         target = make_kernel_target(target_platform = target_platform),
         inputs = make_kernel_inputs(
-            native_assets_manifest = native_assets_manifest_file,
+            native_assets_manifest = assets.manifest_file,
+            native_assets = assets.native_assets,
             track_widget_creation = ctx.attr.track_widget_creation,
             assets_dir = flutter_assets,
             recorded_uses = recorded_uses,
@@ -549,14 +532,17 @@ def _application_default_files_with_dev_config(ctx, flutter_sdk_info, compilatio
 
 def _prepare_native_assets(ctx, flutter_sdk_info, target_platform):
     """Aggregates transitive Native Assets and writes the application manifest."""
-    native_assets_list, transitive_data_assets = _collect_transitive_assets(ctx)
+
+    # Plus any code assets rules_dart propagated through the Dart package graph; declarations made
+    # with `flutter_native_asset` win, since they are the deliberate ones.
+    assets = collect_application_native_assets(ctx)
+    native_assets_list = assets.list
     target_arch = host_target_arch(ctx, flutter_sdk_info)
-    manifest_file = _write_application_manifest(ctx, native_assets_list, target_platform, target_arch)
-    bundled_code = collect_bundled_code_asset_files(native_assets_list)
     return struct(
-        manifest_file = manifest_file,
-        transitive_data_assets = transitive_data_assets,
-        bundled_code_assets = bundled_code,
+        manifest_file = _write_application_manifest(ctx, native_assets_list, target_platform, target_arch),
+        native_assets = native_assets_list,
+        transitive_data_assets = assets.data_assets,
+        bundled_code_assets = collect_bundled_code_asset_files(native_assets_list),
     )
 
 def _flutter_application_impl(ctx):
@@ -598,7 +584,7 @@ def _flutter_application_impl(ctx):
         flutter_sdk_info,
         platform.target_platform,
         platform.is_ios,
-        assets.manifest_file,
+        assets,
         flutter_assets,
         recorded_uses,
     )
@@ -680,7 +666,7 @@ def _flutter_application_impl(ctx):
 flutter_application = rule(
     implementation = _flutter_application_impl,
     attrs = dicts.add(
-        FLUTTER_APPLICATION_ATTRS,
+        FLUTTER_APPLICATION_ATTRS | MODULAR_KERNEL_ATTRS | DEBUG_MODULAR_APP_ATTR,
         {
             "analyze_size": attr.bool(
                 default = False,
@@ -690,6 +676,12 @@ flutter_application = rule(
                 ),
             ),
             "fonts": FONTS_ATTR,
+            # The module aspect registers nothing unless the private debug_modular_app flag is on in a debug build.
+            "deps": attr.label_list(
+                doc = FLUTTER_DEPS_DOC,
+                providers = [DartInfo],
+                aspects = [flutter_app_shader_aspect, flutter_app_kernel_module_aspect],
+            ),
         },
         PLATFORM_CONSTRAINT_ATTRS,
         link_hook_runner_attr(),
@@ -706,6 +698,6 @@ flutter_application = rule(
         config_common.toolchain_type("@rules_flutter//flutter/private:aot_toolchain_type", mandatory = False),
         config_common.toolchain_type("@rules_flutter//flutter/private:font_subset_toolchain_type", mandatory = False),
         config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
-    ] + COPY_TO_DIRECTORY_TOOLCHAINS,
+    ] + COPY_TO_DIRECTORY_TOOLCHAINS + MODULAR_KERNEL_TOOLCHAINS,
     doc = "Compiles a Flutter application to AOT native code + asset bundle (release) or kernel .dill + assets (debug).",
 )

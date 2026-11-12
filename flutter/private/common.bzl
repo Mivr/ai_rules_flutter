@@ -461,7 +461,8 @@ def make_kernel_inputs(
         track_widget_creation = False,
         assets_dir = None,
         platform_build_args = [],
-        recorded_uses = None):
+        recorded_uses = None,
+        native_assets = []):
     """What else feeds the kernel compile besides sources and target.
 
     Args:
@@ -486,10 +487,12 @@ def make_kernel_inputs(
         recorded_uses: Optional declared File for the compiler's recorded
             `@RecordUse` uses, the input of package link hooks. Pass it for
             AOT compiles only.
+        native_assets: The resolved native asset list the manifest was
+            written from; a non-empty list keeps the whole-program compile.
 
     Returns:
         A struct with `native_assets_manifest`, `track_widget_creation`,
-        `assets_dir`, `platform_build_args` and `recorded_uses`.
+        `assets_dir`, `platform_build_args`, `recorded_uses` and `native_assets`.
     """
     return struct(
         native_assets_manifest = native_assets_manifest,
@@ -497,6 +500,7 @@ def make_kernel_inputs(
         assets_dir = assets_dir,
         platform_build_args = platform_build_args,
         recorded_uses = recorded_uses,
+        native_assets = native_assets,
     )
 
 _CONSTANT_REGISTRANT_URI = "%s:///%s/plugin_registrant.dart" % (APP_SCHEME, AGENT_DIR)
@@ -505,38 +509,35 @@ def _debug_registrant_modular(agent, reg, twins):
     """Whether the staged agent, native agent and registrant can ride the modular entry module."""
     if not (reg.registrant or agent.agent):
         return True
-    return bool(
-        twins and agent.constant and agent.agent and agent.native_agent and reg.registrant and
-        reg.location and reg.location.uri == _CONSTANT_REGISTRANT_URI,
-    )
+    staged = twins and agent.constant and agent.agent and agent.native_agent and reg.registrant
+    return bool(staged and reg.location and reg.location.uri == _CONSTANT_REGISTRANT_URI)
 
 def _use_modular_kernel(plan, agent, reg, flags, twins):
     # Whole-program (FlutterKernelCompile) is kept for: any define (attribute or global), define
-    # file, recorded use, frontend flag or native-assets manifest (the per-package modules are
+    # file, recorded use, frontend flag or native asset (the per-package modules are
     # built without them), AOT, profile, web, and a closure with no registrant twin of the SDK
     # `flutter` module (the SDK constant would not resolve to the registrant).
     return (
         not plan.aot and plan.mode != "profile" and
         plan.frontend_server_target == "flutter" and
         _debug_registrant_modular(agent, reg, twins) and
-        not plan.native_assets_manifest and not plan.recorded_uses and
+        not plan.native_assets and not plan.recorded_uses and
         not flags.extra_frontend and not flags.all_defines and
         not flags.define_flagfiles
     )
 
-def _modular_tools_or_none(ctx, flutter_sdk_info, packages):
+def _modular_tools_or_none(ctx, flutter_sdk_info, packages, native_assets):
     """The modular kernel tools, or None when the target needs a whole-program compile."""
     own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
-    return flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, [])
+    return flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, native_assets)
+
+def _kernel_package_config(ctx, st):
+    """The stable-URI `package_config.json` of the app's packages."""
+    roots = {st.app_pkg_name: True} if st.app_pkg_name else None
+    return compile_kernel_package_config(ctx, st.packages, st.colocate_inputs, roots = roots)
 
 def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
-    pc = compile_kernel_package_config(
-        ctx,
-        st.packages,
-        st.colocate_inputs,
-        roots = {st.app_pkg_name: True} if st.app_pkg_name else None,
-    )
-    config_file = pc.config_file
+    pc = _kernel_package_config(ctx, st)
     all_srcs = pc.srcs
     if reg.registrant:
         all_srcs = all_srcs + [reg.registrant]
@@ -558,7 +559,7 @@ def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
             main = entrypoint_info.file,
             entrypoint_uri = entrypoint_info.uri,
             srcs = all_srcs,
-            package_config = config_file,
+            package_config = pc.config_file,
             native_assets_manifest = plan.native_assets_manifest,
             dart_plugin_registrant_uri = reg.location.uri if reg.location else None,
         ),
@@ -575,14 +576,14 @@ def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
         ),
         flutter_kernel_dills(),
     )
-    return config_file
+    return pc.config_file
 
 def _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
-    # Only a target with no asset bundle (`flutter_kernel_target`) links the twin;
-    # applications keep the whole-program compile.
-    twins = flutter_closure_twins(ctx) if plan.assets_dir == None else []
+    # The closure holds a twin only for a `flutter_kernel_target`, or for a `flutter_application`
+    # with the private debug_modular_app flag on in a debug build (its `deps` aspect registers nothing otherwise).
+    twins = flutter_closure_twins(ctx)
     if _use_modular_kernel(plan, agent, reg, flags, twins):
-        modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages)
+        modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages, plan.native_assets)
         if modular_tools != None:
             files = [f for f in [agent.agent, agent.native_agent, reg.registrant] if f]
             compile_flutter_modular_app_kernel(
@@ -594,7 +595,9 @@ def _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
                 plan.platform_dill,
                 struct(files = files, twins = twins) if files else None,
             )
-            return None
+
+            # An application still publishes its package config; a kernel target has none to give.
+            return _kernel_package_config(ctx, st).config_file if plan.assets_dir != None else None
     return _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan)
 
 def flutter_compile_kernel(ctx, flutter_sdk_info, target, inputs):
@@ -658,6 +661,7 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, target, inputs):
             aot = aot,
             frontend_server_target = target.frontend_server_target,
             native_assets_manifest = inputs.native_assets_manifest,
+            native_assets = inputs.native_assets,
             recorded_uses = inputs.recorded_uses,
             assets_dir = inputs.assets_dir,
             kernel_dill = kernel_dill,
