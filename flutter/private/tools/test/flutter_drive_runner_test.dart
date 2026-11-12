@@ -128,6 +128,7 @@ void main() {
   _registerConfigTests();
   _registerIosBootTest();
   _registerIosReuseTest();
+  _registerIosDiscoveryTests();
 }
 
 void _registerConfigTests() {
@@ -308,6 +309,171 @@ void _registerIosReuseTest() {
       expect(spawner.calls.any((c) => c.contains('shutdown')), isFalse);
     },
   );
+}
+
+ConsoleProcess _fakeProcess(
+  Stream<List<int>> out, {
+  Future<int>? exitCode,
+  void Function()? kill,
+}) => ConsoleProcess(
+  stdout: out,
+  stderr: const Stream<List<int>>.empty(),
+  exitCode: exitCode ?? Completer<int>().future,
+  kill: kill ?? () {},
+);
+
+Stream<List<int>> _lines(List<String> lines) =>
+    Stream<List<int>>.fromIterable(lines.map((l) => utf8.encode('$l\n')));
+
+/// Runs a session whose console and log stream print [console] and [log].
+Future<(IosDriveSession, List<List<String>>, Object?, String?)> _launch(
+  List<String> console,
+  List<String> log, {
+  Duration timeout = const Duration(seconds: 5),
+  bool consoleExits = false,
+  void Function()? onLogKill,
+}) async {
+  final Directory tmp = Directory.systemTemp.createTempSync('ios_disc_');
+  addTearDown(() => tmp.deleteSync(recursive: true));
+  final Directory app = _writeFakeAppBundle(tmp, 'com.example.disc');
+  final spawner = _StubSpawner(
+    (cmd) => cmd.contains('list')
+        ? _simListJson(udid: 'SIM-D', state: 'Booted')
+        : '',
+  );
+  final started = <List<String>>[];
+  final session = IosDriveSession(
+    IosDriveConfig(
+      app: app.path,
+      bundleId: 'com.example.disc',
+      driver: (executable: '/bin/driver', args: const <String>[]),
+      tmp: tmp.path,
+    ),
+    spawner: spawner,
+    waitVmTimeout: timeout,
+    consoleStarter: (exe, args) async {
+      started.add(<String>[exe, ...args]);
+      final bool isLog = args.contains('stream');
+      if (isLog) {
+        return _fakeProcess(
+          _lines(log).followedByNever(),
+          kill: onLogKill,
+        );
+      }
+      return consoleExits
+          ? _fakeProcess(_lines(console), exitCode: Future<int>.value(7))
+          : _fakeProcess(_lines(console).followedByNever());
+    },
+  );
+  await session.boot();
+  try {
+    return (session, started, await session.launchApp(), null);
+  } on Object catch (e) {
+    return (session, started, null, e.toString());
+  } finally {
+    await session.dispose();
+  }
+}
+
+extension on Stream<List<int>> {
+  Stream<List<int>> followedByNever() async* {
+    yield* this;
+    await Completer<void>().future;
+  }
+}
+
+void _registerIosDiscoveryTests() {
+  const vm = 'The Dart VM service is listening on http://127.0.0.1:50123/tok=/';
+  test('iOS drive takes the VM service URI from the console', () async {
+    final (
+      IosDriveSession _,
+      List<List<String>> started,
+      Object? uri,
+      String? err,
+    ) = await _launch(<String>[
+      'flutter: $vm',
+    ], []);
+    expect(err, isNull);
+    expect(uri, 'http://127.0.0.1:50123/tok=/');
+    final List<String> launch = started.firstWhere(
+      (c) => c.contains('launch'),
+    );
+    expect(launch.first, '/usr/bin/env');
+    expect(launch, contains('SIMCTL_CHILD_OS_ACTIVITY_DT_MODE=enable'));
+  });
+
+  test(
+    'iOS drive takes the VM service URI from the log stream alone',
+    () async {
+      final (
+        IosDriveSession _,
+        List<List<String>> started,
+        Object? uri,
+        String? err,
+      ) = await _launch(
+        <String>['unrelated console line'],
+        <String>['Filtering the log data', '12:00 Df Runner[1:2] $vm'],
+      );
+      expect(err, isNull);
+      expect(uri, 'http://127.0.0.1:50123/tok=/');
+      // The log stream is started before the launch.
+      expect(
+        started.indexWhere((c) => c.contains('stream')),
+        lessThan(started.indexWhere((c) => c.contains('launch'))),
+      );
+      final List<String> stream = started.firstWhere(
+        (c) => c.contains('stream'),
+      );
+      expect(stream, containsAllInOrder(<String>['spawn', 'SIM-D', 'log']));
+      expect(stream.last, contains('Dart VM service'));
+    },
+  );
+
+  test(
+    'iOS drive fails when the console exits before an announcement',
+    () async {
+      var logKills = 0;
+      final (
+        IosDriveSession _,
+        List<List<String>> _,
+        Object? uri,
+        String? err,
+      ) = await _launch(
+        <String>['crashed early'],
+        <String>[],
+        consoleExits: true,
+        onLogKill: () => logKills++,
+      );
+      expect(uri, isNull);
+      expect(err, contains('simctl launch exited (7) before announcing'));
+      expect(err, contains('crashed early'));
+      // Stopped by the launch's own cleanup and again by dispose().
+      expect(logKills, greaterThanOrEqualTo(1));
+    },
+  );
+
+  test('iOS drive timeout error carries both tails', () async {
+    final (
+      IosDriveSession _,
+      List<List<String>> _,
+      Object? uri,
+      String? err,
+    ) = await _launch(
+      <String>[for (var i = 0; i < 50; i++) 'console $i'],
+      <String>[for (var i = 0; i < 50; i++) 'oslog $i'],
+      timeout: const Duration(milliseconds: 300),
+    );
+    expect(uri, isNull);
+    expect(
+      err,
+      contains('timed out after 0s during step "wait for VM service"'),
+    );
+    expect(err, contains('console 49'));
+    expect(err, contains('console 10'));
+    expect(err, isNot(contains('console 9\n')));
+    expect(err, contains('oslog 49'));
+    expect(err, contains('last 40 unified-log lines'));
+  });
 }
 
 const String _pkg = 'com.example.app';
