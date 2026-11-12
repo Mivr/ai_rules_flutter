@@ -367,7 +367,8 @@ flutter_library(
 # =============================================================================
 
 # One `BuildBundle` action from rules_android's `android_application`, whose
-# output is `<name>_unsigned.aab`, with the pinned bundletool as input.
+# output is `<name>_unsigned.aab`; an input is the pinned `rules_android`
+# bundletool deploy jar.
 aab_build_bundle_test(
     name = "app_aab_build_bundle_test",
     size = "small",
