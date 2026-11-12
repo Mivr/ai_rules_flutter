@@ -26,6 +26,7 @@ dart_binary(
     deps = [
         ":lib",
         "@dev_tool_deps//:args",
+        "@dev_tool_deps//:path",
     ],
 )
 
