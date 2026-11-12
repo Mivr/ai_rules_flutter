@@ -124,5 +124,7 @@ e2e/aar_host:verify_aar_host_test	Dart emulator test; needs emulator + Android S
 @rules_flutter//tools/doc_check:rules_test	pure-Dart rule test over fixture protos; no CLI spawn and no HOME writes
 e2e/integration_ios:flavor_dev_test	macOS-only iOS simulator test; run by e2e/integration_ios
 e2e/integration_ios:flavor_prod_test	macOS-only iOS simulator test; run by e2e/integration_ios
+e2e/drive_ios:ios_dart_side_build_test	build_test over the portable Dart side of e2e/drive_ios; analysis-only, no CLI spawn
+e2e/drive_ios:ios_dart_analysis_test	dart_analysis_test over e2e/drive_ios Dart sources; run by e2e/drive_ios, no CLI spawn
 e2e/drive_ios:drive_pass_test	flutter_drive_test on the iOS simulator; needs macOS, Xcode and a simulator runtime, run by e2e/drive_ios
 e2e/drive_ios:drive_fail_test	red-twin flutter_drive_test whose driver exits 1; needs macOS, Xcode and a simulator runtime, run by e2e/drive_ios

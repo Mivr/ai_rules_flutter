@@ -1,5 +1,6 @@
-load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options")
-load("@rules_flutter//flutter:defs.bzl", "flutter_application")
+load("@bazel_skylib//rules:build_test.bzl", "build_test")
+load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test")
+load("@rules_flutter//flutter:defs.bzl", "flutter_application", "flutter_library")
 load(
     "@rules_flutter//flutter:ios.bzl",
     "IOS_MINIMUM_OS_VERSION",
@@ -35,7 +36,7 @@ ios_sim_debug_app(
     tags = ["manual"],
 )
 
-# The driver exits 0 once the launched app's VM service URI reaches it, so
+# The driver connects to the launched app's VM service URI and exits 0, so
 # this test passes only when the simulator ran the app and the rule forwarded
 # the URI. `manual`, `exclusive` and macOS-only come from the iOS `app`.
 flutter_drive_test(
@@ -50,6 +51,35 @@ flutter_drive_test(
     name = "drive_fail_test",
     app = ":app_sim",
     driver = "test_driver/fail_driver.dart",
+)
+
+# Portable proof that the workspace loads and its Dart side compiles on every OS.
+build_test(
+    name = "ios_dart_side_build_test",
+    size = "small",
+    targets = [":app_flutter"],
+)
+
+# Host-side lint twin covering the app entrypoint and both macOS-only drivers,
+# so `ios_dart_analysis_test` lints every `.dart` file on every OS.
+flutter_library(
+    name = "drive_lint",
+    package_name = "drive_ios",
+    srcs = [
+        "lib/main.dart",
+        "test_driver/fail_driver.dart",
+        "test_driver/pass_driver.dart",
+    ],
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+dart_analysis_test(
+    name = "ios_dart_analysis_test",
+    size = "small",
+    targets = [":drive_lint"],
 )
 
 # Lint ruleset resolution for `analysis_options.yaml`; see `e2e/ios_example`.

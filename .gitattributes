@@ -41,13 +41,13 @@
 /e2e/codegen/ export-ignore
 /e2e/cross_compile_example/ export-ignore
 /e2e/digest_mismatch/ export-ignore
+/e2e/drive_ios/ export-ignore
 /e2e/dual_hub/ export-ignore
 /e2e/ffi_example/ export-ignore
 /e2e/ffi_plugin_example/ export-ignore
 /e2e/hello_world/ export-ignore
 /e2e/integration_android/ export-ignore
 /e2e/integration_ios/ export-ignore
-/e2e/drive_ios/ export-ignore
 /e2e/integration_linux/ export-ignore
 /e2e/integration_web/ export-ignore
 /e2e/ios_example/ export-ignore
