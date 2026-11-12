@@ -27,6 +27,7 @@ builds the chain (pure data); ``floor_run.py`` executes it and
 
 import dataclasses
 import os
+import sys
 
 APP_SCHEME = "org-dartlang-app"
 FLOOR_CONFIGS = ("sim_debug", "device_release", "android_debug",
@@ -104,20 +105,35 @@ def _walk_files(root):
                 yield entry.path
 
 
+def _is_real_tool(path):
+    """False for a test fixture: under a ``fake_sdk`` directory or empty."""
+    if "fake_sdk" in path.split(os.sep):
+        return False
+    return os.path.getsize(path) > 0
+
+
+def _host_dir():
+    """The engine's per-host directory of the build machine."""
+    return "darwin-x64" if sys.platform == "darwin" else "linux-x64"
+
+
 def find_tool(name, roots, hint=None):
     """Path of the tool whose path ends with ``name`` under the roots.
 
     ``name`` may be a path suffix (``flutter_patched_sdk/platform_strong.dill``).
     Symlinked directories are searched too. A ``hint`` substring prefers
-    matching paths. Raises MissingToolError naming the tool and the roots
+    matching paths (a tuple of hints: the first that matches). Files under
+    ``fake_sdk`` and empty files never match. Raises MissingToolError naming the tool and the roots
     searched.
     """
     suffix = os.sep + name
     found = [path for root in roots for path in _walk_files(root)
-             if path.endswith(suffix)]
-    if hint:
-        preferred = [path for path in found if hint in path]
-        found = preferred or found
+             if path.endswith(suffix) and _is_real_tool(path)]
+    for one in ((hint,) if isinstance(hint, str) else hint or ()):
+        preferred = [path for path in found if one in path]
+        if preferred:
+            found = preferred
+            break
     if not found:
         raise MissingToolError("floor tool %r not found under %s"
                                % (name, ", ".join(roots) or "(no roots)"))
@@ -149,7 +165,10 @@ def _tool_names(spec):
              "platform": (sdk + "/platform_strong.dill", None)}
     if spec.mode == "release":
         arch = "ios" if spec.platform == "ios" else "android-arm64"
-        names["gen_snapshot"] = ("gen_snapshot", arch + "-release")
+        release = arch + "-release"
+        hint = ((release + os.sep + _host_dir(), release)
+                if spec.platform == "android" else release)
+        names["gen_snapshot"] = ("gen_snapshot", hint)
     if spec.platform == "ios":
         names["codesign"] = ("codesign", None)
     else:

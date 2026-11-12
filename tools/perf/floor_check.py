@@ -10,6 +10,7 @@ injected runner ``runner(argv) -> (returncode, stderr)``.
 
 import os
 import plistlib
+import re
 
 from floor_apk import entry_names
 
@@ -31,13 +32,30 @@ def _ios_problems(spec, tools, runner):
     return problems
 
 
+def _zipalign_argv(zipalign, package, runner):
+    """The 4-byte alignment check; ``-P 16`` only where zipalign knows it.
+
+    ``-P`` exists from build-tools 35. The version in the path decides;
+    without one, a probe with ``-P`` that zipalign rejects as an invalid
+    option falls back to the plain check.
+    """
+    plain = [zipalign, "-c", "4", package]
+    match = re.search(r"build-tools/(\d+)[./]", zipalign)
+    if match:
+        return plain[:2] + ["-P", "16"] + plain[2:] if int(
+            match.group(1)) >= 35 else plain
+    probe = plain[:2] + ["-P", "16"] + plain[2:]
+    code, err = runner(probe)
+    return plain if code != 0 and "invalid option" in err else probe
+
+
 def _android_problems(spec, tools, runner):
     problems = []
     code, err = runner([tools["apksigner"], "verify", spec.package])
     if code != 0:
         problems.append("apksigner verify failed: %s" % err.strip()[:200])
-    code, err = runner([tools["zipalign"], "-c", "-P", "16", "4",
-                        spec.package])
+    code, err = runner(_zipalign_argv(tools["zipalign"], spec.package,
+                                      runner))
     if code != 0:
         problems.append("zipalign check failed: %s" % err.strip()[:200])
     names = entry_names(spec.package)

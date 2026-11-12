@@ -26,7 +26,7 @@ import sol
 import sol_summary
 
 
-def touch(path, data=b""):
+def touch(path, data=b"x"):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as fh:
         fh.write(data)
@@ -237,6 +237,83 @@ class CheckTest(unittest.TestCase):
         for text in ("apksigner", "zipalign", "AndroidManifest.xml",
                      "payload"):
             self.assertIn(text, reason)
+
+
+class FindToolTest(unittest.TestCase):
+    def test_fake_sdk_and_empty_files_never_win(self):
+        root = tempfile.mkdtemp()
+        touch(os.path.join(root, "a+/e2e/smoke/fake_sdk/gen_snapshot"))
+        touch(os.path.join(root, "a+/empty/gen_snapshot"), b"")
+        real = os.path.join(root, "z+/engine/gen_snapshot")
+        touch(real)
+        self.assertEqual(real, floor.find_tool("gen_snapshot", [root]))
+
+    def test_only_fake_matches_raise(self):
+        root = tempfile.mkdtemp()
+        touch(os.path.join(root, "a/fake_sdk/gen_snapshot"))
+        touch(os.path.join(root, "b/gen_snapshot"), b"")
+        with self.assertRaises(floor.MissingToolError):
+            floor.find_tool("gen_snapshot", [root])
+
+    def test_android_gen_snapshot_prefers_host_dir(self):
+        root = tempfile.mkdtemp()
+        base = os.path.join(root, "android-arm64-release")
+        for host in ("darwin-x64", "linux-x64"):
+            touch(os.path.join(base, host, "gen_snapshot"))
+        spec = make_spec("android", "release", root)
+        for platform, host in (("linux", "linux-x64"),
+                               ("darwin", "darwin-x64")):
+            saved, sys.platform = sys.platform, platform
+            try:
+                hint = floor._tool_names(spec)["gen_snapshot"][1]
+                self.assertEqual(
+                    os.path.join(base, host, "gen_snapshot"),
+                    floor.find_tool("gen_snapshot", [root], hint))
+            finally:
+                sys.platform = saved
+
+
+class ZipalignTest(unittest.TestCase):
+    def check(self, zipalign, runner):
+        apk = os.path.join(tempfile.mkdtemp(), "a.apk")
+        make_apk(apk)
+        spec = make_spec("android", "debug", os.path.dirname(apk), apk)
+        tools = dict(TOOLS, zipalign=zipalign)
+        return floor_check.check_package(spec, tools, runner)
+
+    def runner(self, accepts_p, aligned=True, seen=None):
+        def run(argv):
+            if seen is not None:
+                seen.append(argv)
+            if "zipalign" in argv[0] and "-P" in argv and not accepts_p:
+                return (1, "zipalign: invalid option -- 'P'")
+            if "zipalign" in argv[0] and not aligned:
+                return (1, "Verification FAILED")
+            return (0, "")
+        return run
+
+    def test_rejecting_runner_gets_plain_check(self):
+        seen = []
+        self.assertEqual((True, "ok"), self.check(
+            "/bt/build-tools/34.0.0/zipalign", self.runner(False, seen=seen)))
+        self.assertIn(["/bt/build-tools/34.0.0/zipalign", "-c", "4",
+                       seen[-1][-1]], seen)
+        self.assertEqual((True, "ok"), self.check(
+            "zipalign", self.runner(False)))
+
+    def test_accepting_runner_gets_page_size(self):
+        seen = []
+        self.assertEqual((True, "ok"), self.check(
+            "/bt/build-tools/35.0.0/zipalign", self.runner(True, seen=seen)))
+        self.assertTrue(any("-P" in argv for argv in seen))
+        self.assertEqual((True, "ok"), self.check(
+            "zipalign", self.runner(True)))
+
+    def test_misaligned_still_fails(self):
+        for path in ("zipalign", "/bt/build-tools/34.0.0/zipalign"):
+            ok, reason = self.check(path, self.runner(False, aligned=False))
+            self.assertFalse(ok)
+            self.assertIn("zipalign check failed", reason)
 
 
 class ApkTest(unittest.TestCase):
