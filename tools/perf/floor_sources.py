@@ -10,6 +10,10 @@ later build sees a difference).
 
 import os
 import pathlib
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from floor import APP_SCHEME  # noqa: E402
 
 
 class SourceSwap:
@@ -56,6 +60,23 @@ class SourceSwap:
             with open(path, "wb") as fh:
                 fh.write(data)
 
-    def invalidated(self):
-        """file:// URIs of the edited files."""
-        return [pathlib.Path(p).resolve().as_uri() for p in self.after]
+    def invalidated(self, roots=()):
+        """URIs the compiler knows the edited files by.
+
+        A file under one of the filesystem roots (first match wins) is
+        ``org-dartlang-app:///<path relative to that root>``, the spelling
+        the entry uses; any other file is its ``file://`` URI.
+        """
+        uris = []
+        for path in self.after:
+            resolved = pathlib.Path(path).resolve()
+            for root in roots:
+                try:
+                    rel = resolved.relative_to(pathlib.Path(root).resolve())
+                except ValueError:
+                    continue
+                uris.append("%s:///%s" % (APP_SCHEME, rel.as_posix()))
+                break
+            else:
+                uris.append(resolved.as_uri())
+        return uris

@@ -132,8 +132,15 @@ class FrontendServer:
         Lines before ``result <key>`` are kept in order, at most the first
         MAX_PRELUDE. Diagnostics are the lines between ``result <key>``
         and the closing line, in order, at most the first MAX_DIAGNOSTICS.
+
+        The server prints ``--print-incremental-dependencies`` by default:
+        after the diagnostics a bare ``<key>`` line, the ``+``/``-`` source
+        lines, then ``<key> <file> <error count>``. The bare line and the
+        dependency lines are skipped; the fields come from the last line. A
+        reply that ends after the bare line has no fields.
         """
         key = None
+        bare = False
         pre_result = []
         diagnostics = []
         for line in self.proc.stdout:
@@ -143,10 +150,16 @@ class FrontendServer:
             elif key is None:
                 if len(pre_result) < MAX_PRELUDE:
                     pre_result.append(line)
-            elif line.startswith(key):
+            elif line.startswith(key + " "):
                 return line[len(key):].split(), pre_result, diagnostics
+            elif line == key:
+                bare = True
+            elif bare and line.startswith(("+", "-")):
+                continue
             elif len(diagnostics) < MAX_DIAGNOSTICS:
                 diagnostics.append(line)
+        if bare:
+            return [], pre_result, diagnostics
         tail = self.stderr_tail()
         head = "frontend_server ended without a result"
         parts = []
@@ -234,7 +247,7 @@ def _step(spec, step, ctx):
         swap.to_new()
         return 0.0
     if step.detail[0] == "recompile":
-        state["server"].recompile(step.detail[1], swap.invalidated())
+        state["server"].recompile(step.detail[1], swap.invalidated(spec.roots))
         cpu = state["server"].quit()
     else:
         start = time.process_time()
