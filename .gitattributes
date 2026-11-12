@@ -43,6 +43,7 @@
 /e2e/digest_mismatch/ export-ignore
 /e2e/drive_ios/ export-ignore
 /e2e/dual_hub/ export-ignore
+/e2e/federated_plugins/ export-ignore
 /e2e/ffi_example/ export-ignore
 /e2e/ffi_plugin_example/ export-ignore
 /e2e/hello_world/ export-ignore

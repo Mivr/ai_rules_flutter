@@ -47,7 +47,7 @@
 #   e2e-linux-examples:  linux_example, cross_compile_example
 #   e2e-linux-pub-scc:   pub_scc (2-cycle Android APK + 3-cycle Dart test)
 #   e2e-linux-integration: integration_web, integration_linux,
-#     integration_android (with KVM for the emulator), min_versions (Dart app,
+#     federated_plugins, integration_android (with KVM for the emulator), min_versions (Dart app,
 #     kernel and dart_test targets plus the Android leg against every declared
 #     dependency floor; the Apple legs skip themselves via
 #     target_compatible_with), android_no_go_sdk (Android leg with no go_sdk
@@ -815,6 +815,8 @@ jobs:
         uses: ./.github/actions/disk-report
         with:
           label: after e2e/integration_linux
+      - name: Run e2e/federated_plugins
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/federated_plugins --bazel=bazel
       - name: Run e2e/integration_android
         run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_android --bazel=bazel
       - name: Disk report (after e2e/integration_android)
