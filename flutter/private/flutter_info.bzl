@@ -17,6 +17,8 @@ its own, so it needs a second constructor for the degenerate case, while every
 ordinary call with no arguments, not a special one.
 """
 
+load("@rules_dart//dart:providers.bzl", "DartInfo")
+load("@rules_dart//dart:utils.bzl", "owned_package_records")
 load("//flutter:providers.bzl", "FlutterInfo")
 
 visibility(["//flutter/..."])
@@ -231,13 +233,49 @@ def _copy_plugin_with_depth(p, depth):
         _depth = depth,
     )
 
-def _is_direct_plugin(is_plugin_target, p):
-    """Determines whether a plugin struct should be marked direct."""
+def _is_pub_package(dep):
+    """Whether `dep` is a third-party pub package rather than app-owned code.
+
+    The generated pub spokes state the version pub resolved on every package
+    record they build; a hand-written target states none. A merged
+    multi-package target is a pub package when any package it owns is.
+
+    Args:
+        dep: A dependency target.
+
+    Returns:
+        True when `dep` owns a package record that states a version.
+    """
+    if DartInfo not in dep:
+        return False
+    for record in owned_package_records(dep[DartInfo]):
+        if getattr(record, "version", ""):
+            return True
+    return False
+
+def _is_direct_plugin(is_plugin_target, is_pub_package, p):
+    """Determines whether a plugin struct should be marked direct.
+
+    Flutter counts only the dependencies of the application's own pubspec. A
+    plugin is direct when the dependency is that plugin itself, or when it is a
+    library the application owns that depends on the plugin. The plugin
+    dependencies of a third-party pub package never make a plugin direct.
+
+    Args:
+        is_plugin_target: Whether the dependency is itself a plugin.
+        is_pub_package: Whether the dependency is a third-party pub package.
+        p: The plugin struct, with its depth relative to the dependency.
+
+    Returns:
+        True when the plugin is direct.
+    """
     if getattr(p, "direct", False):
         return True
     depth = getattr(p, "_depth", 0)
     if is_plugin_target:
         return depth == 0
+    if is_pub_package:
+        return False
     return depth == 1
 
 def dedup_plugins(all_plugins):
@@ -245,7 +283,8 @@ def dedup_plugins(all_plugins):
 
     A plugin reached through two paths in the dependency graph — the common
     case for a federated pub plugin — must be registered once. Deduplication
-    never loses the direct mark.
+    never loses the direct mark and keeps the shallowest depth over all paths,
+    so the result does not depend on the order the paths are listed in.
 
     Args:
         all_plugins: List of plugin structs.
@@ -259,11 +298,14 @@ def dedup_plugins(all_plugins):
         if p.name not in seen:
             seen[p.name] = len(unique)
             unique.append(p)
-        elif getattr(p, "direct", False):
-            idx = seen[p.name]
-            existing = unique[idx]
-            if not getattr(existing, "direct", False):
-                unique[idx] = _copy_plugin_with_direct(existing, True)
+            continue
+        idx = seen[p.name]
+        merged = unique[idx]
+        if getattr(p, "_depth", 0) < getattr(merged, "_depth", 0):
+            merged = _copy_plugin_with_depth(merged, getattr(p, "_depth", 0))
+        if getattr(p, "direct", False) and not getattr(merged, "direct", False):
+            merged = _copy_plugin_with_direct(merged, True)
+        unique[idx] = merged
     return unique
 
 def collect_flutter_plugin_deps(deps):
@@ -291,8 +333,9 @@ def collect_flutter_plugin_deps(deps):
             continue
         info = dep[FlutterInfo]
         is_plugin_target = any([getattr(p, "_depth", 0) == 0 for p in info.plugins])
+        is_pub_package = _is_pub_package(dep)
         for p in info.plugins:
-            direct = _is_direct_plugin(is_plugin_target, p)
+            direct = _is_direct_plugin(is_plugin_target, is_pub_package, p)
             if direct != getattr(p, "direct", False):
                 all_dep_plugins.append(_copy_plugin_with_direct(p, direct))
             else:

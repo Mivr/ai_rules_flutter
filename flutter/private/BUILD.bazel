@@ -577,6 +577,8 @@ bzl_library(
     visibility = ["//visibility:public"],
     deps = [
         "//flutter:providers",
+        "@rules_dart//dart:providers",
+        "@rules_dart//dart:utils",
     ],
 )
 
