@@ -9,6 +9,7 @@ load(":android_aab_signing_test.bzl", "android_aab_signing_test_suite")
 load(":android_aar_test.bzl", "android_aar_test_suite")
 load(":android_debug_signing_test.bzl", "android_debug_signing_test_suite")
 load(":android_plugin_closure_test.bzl", "android_plugin_closure_test_suite")
+load(":android_plugin_scale_test.bzl", "android_plugin_scale_test_suite")
 load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
 load(":android_shared_engine_test.bzl", "android_shared_engine_test_suite")
@@ -499,6 +500,8 @@ android_shared_engine_test_suite(name = "android_shared_engine_test")
 android_aab_signing_test_suite(name = "android_aab_signing_test")
 
 android_plugin_closure_test_suite(name = "android_plugin_closure_test")
+
+android_plugin_scale_test_suite(name = "android_plugin_scale_test")
 
 android_release_signing_test_suite(name = "android_release_signing_test")
 
