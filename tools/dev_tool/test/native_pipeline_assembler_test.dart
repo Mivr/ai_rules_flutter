@@ -13,11 +13,15 @@
 /// proof it was not.
 library;
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_bazel_dev_tool/android_splits.dart';
 import 'package:flutter_bazel_dev_tool/bazel.dart';
 import 'package:flutter_bazel_dev_tool/build_info.dart';
 import 'package:flutter_bazel_dev_tool/device.dart';
+import 'package:flutter_bazel_dev_tool/device_android.dart';
 import 'package:flutter_bazel_dev_tool/logging.dart';
 import 'package:flutter_bazel_dev_tool/native_pipeline_assembler.dart';
 import 'package:flutter_bazel_dev_tool/reload_pipeline.dart';
@@ -65,6 +69,26 @@ typedef StartedAssembly = ({
   Future<void> assembly,
 });
 
+/// What a test swaps in for the defaults of [main]'s `startAssembly`: the
+/// workspace and toolchain the assembler runs against, the device whose build
+/// args apply, the user's `--build-arg`s, and the process each bazel spawn
+/// starts.
+class AssemblySetup {
+  const new({
+    required this.workspace,
+    required this.toolchain,
+    required this.configDevice,
+    required this.userBuildArgs,
+    required this.spawn,
+  });
+
+  final String workspace;
+  final ToolchainPaths toolchain;
+  final Device configDevice;
+  final List<String> userBuildArgs;
+  final Future<Process> Function(List<String> args) spawn;
+}
+
 void main() {
   /// Start assembling against one session, and return with the assembly
   /// running: its `assembly` field settles when it is done.
@@ -79,6 +103,7 @@ void main() {
     bool extensionRegistered = true,
     Duration readyTimeout = const Duration(seconds: 90),
     Duration spawnDelay = Duration.zero,
+    AssemblySetup? setup,
   }) async {
     final logger = Logger('test.native_pipeline_assembler');
     final host = SessionHost(
@@ -92,11 +117,13 @@ void main() {
             Future<void>.delayed(
               spawnDelay,
             ).then(
-              (_) => Process.start(
-                'bazel',
-                args,
-                workingDirectory: workingDirectory,
-              ),
+              (_) => setup != null
+                  ? setup.spawn(args)
+                  : Process.start(
+                      'bazel',
+                      args,
+                      workingDirectory: workingDirectory,
+                    ),
             ),
         because: 'this test starts it straight from PATH',
       ),
@@ -137,10 +164,11 @@ void main() {
     final pipeline = ReloadPipeline(host: host, readyTimeout: readyTimeout);
     host.registerReloadCommands(pipeline);
     final Future<void> assembly = NativePipelineAssembler(
-      workspace: _noWorkspace,
-      toolchain: _toolchain,
+      workspace: setup?.workspace ?? _noWorkspace,
+      toolchain: setup?.toolchain ?? _toolchain,
       target: '//:app',
-      configDevice: _StubDevice(),
+      configDevice: setup?.configDevice ?? _StubDevice(),
+      userBuildArgs: setup?.userBuildArgs ?? const [],
       host: host,
       pipeline: pipeline,
       logger: logger,
@@ -364,6 +392,63 @@ void main() {
     });
 
     test(
+      'a split Android run keeps the dev build on its default outputs and '
+      'the launch queries on the split output groups',
+      () async {
+        final Directory tmp = Directory.systemTemp.createTempSync('split_dev_');
+        addTearDown(() => tmp.deleteSync(recursive: true));
+        final calls = <List<String>>[];
+        final AssemblySetup setup = _splitSetup(tmp, calls);
+
+        final StartedAssembly started = await startAssembly(
+          buildInfo: {
+            ...buildInfoJson(),
+            'assetsDir': 'bazel-out/k8-dbg/bin/app_flutter_flutter_assets',
+            'targetPlatform': 'android',
+          },
+          setup: setup,
+        );
+        await started.assembly;
+
+        final String? reason = started.pipeline.ready.unavailableReason;
+        expect(
+          reason,
+          isNull,
+          reason: 'the dev config must be found and the pipeline assembled',
+        );
+        // The first call is the dev build's own label query; the later ones the
+        // dev build and its output cquery name the application, while the launch
+        // queries name the platform target they go through.
+        final List<List<String>> dev = [
+          calls.first,
+          for (final List<String> c in calls.skip(1))
+            if (c.any((String a) => a.contains('app_flutter'))) c,
+        ];
+        final List<List<String>> launch = [
+          for (final List<String> c in calls.skip(1))
+            if (c.any((String a) => a.contains('deps(//:app)'))) c,
+        ];
+        expect(dev, isNotEmpty);
+        expect(launch, isNotEmpty);
+        for (final c in dev) {
+          expect(c, isNot(contains(splitOutputGroupsFlag)), reason: '$c');
+          expect(c, contains('--user-arg'), reason: '$c');
+          expect(c, contains('--output_groups=other'), reason: '$c');
+        }
+        // The platform flag, the define and the user's flags keep their order.
+        expect(
+          dev.first.indexOf(
+            '--platforms=@rules_flutter//flutter/platforms:android_arm64',
+          ),
+          lessThan(dev.first.indexOf('--user-arg')),
+        );
+        for (final c in launch) {
+          expect(c, contains(splitOutputGroupsFlag), reason: '$c');
+        }
+      },
+    );
+
+    test(
       'leaves the gate to the caller when no session has a VM service',
       () async {
         // No VM service is no app to apply a reload to, so there is nothing here
@@ -407,6 +492,97 @@ void main() {
       },
     );
   });
+}
+
+/// A frontend_server that answers every `compile` with an empty success, run
+/// by the Dart executable running this test.
+const _fakeFrontendServer = '''
+import 'dart:convert';
+import 'dart:io';
+
+void main() {
+  stdin.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+    if (line.startsWith('compile ')) {
+      stdout.writeln('result boundary_0');
+      stdout.writeln('boundary_0 /tmp/app.dill 0');
+    } else if (line == 'quit') {
+      exit(0);
+    }
+  });
+}
+''';
+
+/// The setup for a split Android run over a scripted bazel.
+///
+/// The bazel it spawns answers like the real one: a `cquery --output=files`
+/// of the `flutter_application` lists only its default outputs, and lists
+/// nothing when the split output groups were asked for, because the
+/// application has neither group. Every spawn is recorded in [calls].
+AssemblySetup _splitSetup(Directory tmp, List<List<String>> calls) {
+  final String ws = tmp.path;
+  const binDir = 'bazel-out/k8-dbg/bin';
+  Directory('$ws/$binDir').createSync(recursive: true);
+  File('$ws/$binDir/app.dev_package_config.json').writeAsStringSync(
+    '{"configVersion":2,"packages":[]}',
+  );
+  File('$ws/$binDir/app_flutter_dev_config.json').writeAsStringSync(
+    jsonEncode({
+      'engineRevision': 'e',
+      'flutterVersion': 'v',
+      'dartSdkRoot': '/nonexistent/sdk',
+      'dartaotruntime': Platform.resolvedExecutable,
+      'frontendServer': '$ws/frontend_server.dart',
+      'patchedSdkRoot': '/nonexistent/flutter_patched_sdk',
+      'appEntrypoint': '$ws/main.dart',
+      'devPackageConfig': '$binDir/app.dev_package_config.json',
+      'dartPluginRegistrants': {'android': ''},
+    }),
+  );
+  File('$ws/frontend_server.dart').writeAsStringSync(_fakeFrontendServer);
+  File('$ws/main.dart').writeAsStringSync('void main() {}\n');
+
+  Future<Process> spawn(List<String> args) async {
+    calls.add(args);
+    final process = FakeProcess();
+    final bool split = args.contains(splitOutputGroupsFlag);
+    final String out = switch (args) {
+      _ when args.contains('--output=label') => '//:app_flutter (abc)',
+      _
+          when args.contains('--output=files') &&
+              args.any((a) => a.startsWith('kind(')) =>
+        '$binDir/app_flutter_flutter_assets',
+      _ when args.contains('--output=files') =>
+        split
+            ? '$binDir/app_base.apk\n$binDir/app_payload.apk'
+            : '$binDir/app_flutter_dev_config.json',
+      _ => '',
+    };
+    unawaited(
+      process.outputAttached.then((_) {
+        if (out.isNotEmpty) process.emitStdout(out);
+        process.complete(0);
+      }),
+    );
+    return process;
+  }
+
+  return AssemblySetup(
+    workspace: ws,
+    toolchain: ToolchainPaths(
+      dart: Platform.resolvedExecutable,
+      dartaotruntime: Platform.resolvedExecutable,
+      frontendServer: '$ws/frontend_server.dart',
+      platformDill: '/nonexistent/platform_strong.dill',
+      patchedSdkRoot: '/nonexistent/flutter_patched_sdk',
+    ),
+    configDevice: AndroidDevice()..splitInstall = true,
+    userBuildArgs: const [
+      splitOutputGroupsFlag,
+      '--output_groups=other',
+      '--user-arg',
+    ],
+    spawn: spawn,
+  );
 }
 
 /// The text `_handleBuildInfo` refuses with, abbreviated.
