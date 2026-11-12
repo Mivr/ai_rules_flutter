@@ -117,6 +117,7 @@ e2e/hello_world:macos-windows-ios-apps	bundle rules, not executable; built by e2
 e2e/integration_android:android-integration	needs emulator + Android SDK; run by e2e/integration_android
 e2e/android_sharedprefs:android_registrant_build_test	build_test over flutter_android_registrant; analysis-only, no CLI spawn
 e2e/android_sharedprefs:registrants_test	Dart test over generated registrant files; run by e2e/android_sharedprefs, no CLI spawn
+e2e/federated_plugins:registrants_test	Dart test over generated registrant files; run by e2e/federated_plugins, no CLI spawn
 e2e/aar_host:host_app	android_binary APK; needs emulator + Android SDK, built by e2e/aar_host
 e2e/aar_host:verify_aar_host_test	Dart emulator test; needs emulator + Android SDK, run by e2e/aar_host
 @rules_flutter//tools/doc_check:doc_check	pure-Dart doc checker; reads extract protos only, no CLI spawn and no HOME writes
