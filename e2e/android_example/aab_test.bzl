@@ -35,7 +35,7 @@ def _aab_build_bundle_impl(ctx):
         [
             p
             for p in input_paths
-            if "/external/rules_android+/" in p and p.endswith("/tools/android/bundletool_deploy.jar")
+            if "/rules_android+/" in p and p.endswith("/tools/android/bundletool_deploy.jar")
         ],
         "no pinned bundletool jar among the BuildBundle inputs: %s" % input_paths,
     )
