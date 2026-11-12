@@ -86,6 +86,7 @@ load(":podspec_xcconfig_defines_test.bzl", "podspec_xcconfig_defines_test_suite"
 load(":profile_mode_test.bzl", "profile_mode_test_suite")
 load(":pub_lock_sdks_test.bzl", "pub_lock_sdks_test_suite")
 load(":pubspec_errors_test.bzl", "pubspec_errors_test_suite")
+load(":kernel_target_modular_test.bzl", "kernel_target_modular_test_suite")
 load(":registrant_twin_test.bzl", "registrant_twin_test_suite")
 load(":repo_metadata_test.bzl", "repo_metadata_test_suite")
 load(":rules_dart_floor_test.bzl", "rules_dart_floor_test_suite")
@@ -608,6 +609,8 @@ path_android_maven_test_suite(name = "path_android_maven_test")
 path_package_test_suite(name = "path_package_test")
 
 registrant_twin_test_suite(name = "registrant_twin_test")
+
+kernel_target_modular_test_suite(name = "kernel_target_modular_test")
 
 # The twin and the plain module both link: the swapped dill holds the constant
 # registrant URI where the SDK constant is read, the plain one does not.

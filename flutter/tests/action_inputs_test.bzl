@@ -20,6 +20,7 @@ load("//flutter/private:flutter_asset_bundle.bzl", "flutter_asset_bundle")
 load("//flutter/private:flutter_info.bzl", "flutter_info", "flutter_pub_channels")
 load("//flutter/private:flutter_kernel_target.bzl", "flutter_kernel_target")
 load("//flutter/private:flutter_web_application.bzl", "flutter_web_bundle")
+load(":kernel_target_modular_test.bzl", "kernel_target_dbg_test_impl")
 
 visibility(["//flutter/tests/..."])
 
@@ -321,38 +322,6 @@ def _kernel_target_release_aot_test_impl(ctx):
     )
     modular_links = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"]
     asserts.equals(env, [], modular_links, "AOT flutter_kernel_target must not run DartKernelLink")
-    return analysistest.end(env)
-
-def _kernel_target_dbg_test_impl(ctx):
-    """In `-c dbg`, non-AOT `flutter_kernel_target` stages agent extensions and compiles via `FlutterKernelCompile`."""
-    env = analysistest.begin(ctx)
-    compile_action = _find_action(env, ["FlutterKernelCompile"])
-    asserts.true(env, "--aot" not in compile_action.argv, "debug non-AOT flutter_kernel_target must not pass --aot")
-    asserts.true(env, "--tfa" not in compile_action.argv, "debug non-AOT flutter_kernel_target must not pass --tfa")
-    asserts.true(
-        env,
-        "-Ddart.vm.product=true" not in compile_action.argv,
-        "debug non-AOT flutter_kernel_target must not pass -Ddart.vm.product=true",
-    )
-    _assert_some_path_contains(
-        env,
-        _input_paths(compile_action),
-        [
-            "_flutter_debug_agent/agent_extensions.dart",
-            "_flutter_debug_agent/native_agent_extensions.dart",
-            "_flutter_debug_agent/plugin_registrant.dart",
-            "flutter_patched_sdk/platform_strong.dill",
-        ],
-        "debug non-AOT flutter_kernel_target",
-    )
-    _assert_no_path_contains(
-        env,
-        _input_paths(compile_action),
-        ["flutter_patched_sdk_product/"],
-        "debug non-AOT flutter_kernel_target",
-    )
-    modular_links = [a for a in analysistest.target_actions(env) if a.mnemonic == "DartKernelLink"]
-    asserts.equals(env, [], modular_links, "debug non-AOT flutter_kernel_target with staged agent extensions must not run DartKernelLink")
     return analysistest.end(env)
 
 def _kernel_target_aot_test_impl(ctx):
@@ -983,7 +952,7 @@ _aot_target_inputs_test = analysistest.make(_aot_target_inputs_test_impl, config
 _aot_target_dbg_inputs_test = analysistest.make(_aot_target_dbg_inputs_test_impl, config_settings = _DBG)
 _kernel_target_opt_test = analysistest.make(_kernel_target_release_aot_test_impl, config_settings = _OPT)
 _kernel_target_fastbuild_test = analysistest.make(_kernel_target_release_aot_test_impl, config_settings = _FASTBUILD)
-_kernel_target_dbg_test = analysistest.make(_kernel_target_dbg_test_impl, config_settings = _DBG)
+_kernel_target_dbg_test = analysistest.make(kernel_target_dbg_test_impl, config_settings = _DBG)
 _kernel_target_aot_test = analysistest.make(_kernel_target_aot_test_impl)
 _kernel_target_aot_dbg_test = analysistest.make(_kernel_target_aot_dbg_test_impl, config_settings = _DBG)
 _web_inputs_test = analysistest.make(_web_inputs_test_impl, config_settings = _OPT)
@@ -1316,7 +1285,7 @@ def action_inputs_test_suite(name):
     )
     _kernel_target_dbg_test(
         name = name + "_kernel_target_dbg",
-        target_under_test = ":_inputs_kernel_target",
+        target_under_test = ":kernel_target_modular_twin",
     )
     _kernel_target_aot_test(
         name = name + "_kernel_target_aot",
