@@ -17,6 +17,7 @@ _LIB_DEPS = [
     "@dev_tool_deps//:shelf",
     "@dev_tool_deps//:vm_service",
     "@dev_tool_deps//:watcher",
+    "@dev_tool_deps//:webkit_inspection_protocol",
     "@rules_dart//dart/runfiles",
 ]
 
@@ -109,10 +110,40 @@ _TEST_DEPS = [
 
 _FAKES_DEPS = [
     "@dev_tool_deps//:multicast_dns",
+    "@dev_tool_deps//:path",
     "@dev_tool_deps//:vm_service",
 ]
 
 _PATH_DEP = ["@dev_tool_deps//:path"]
+
+# Packages a test's own sources (or the fakes) import directly, which the
+# 0.28.0 import check requires it to depend on beyond _TEST_DEPS.
+_IMPORTED_PKGS = {
+    "attach_command_test": ["@dev_tool_deps//:args"],
+    "build_command_test": ["@dev_tool_deps//:args"],
+    "cdp_console_test": ["@dev_tool_deps//:logging"],
+    "cli_args_test": ["@dev_tool_deps//:args"],
+    "device_ios_install_time_test": ["@dev_tool_deps//:logging"],
+    "device_ios_sim_discovery_test": ["@dev_tool_deps//:logging"],
+    "device_launcher_test": ["@dev_tool_deps//:logging"],
+    "device_test": ["@dev_tool_deps//:logging"],
+    "http_control_channel_test": ["@dev_tool_deps//:logging"],
+    "native_libs_relauncher_test": ["@dev_tool_deps//:logging"],
+    "reload_pipeline_test": ["@dev_tool_deps//:logging"],
+    "reload_strategy_test": ["@dev_tool_deps//:logging"],
+    "run_command_test": ["@dev_tool_deps//:args"],
+    "session_host_test": ["@dev_tool_deps//:logging"],
+    "session_test": [
+        "@dev_tool_deps//:dds",
+        "@dev_tool_deps//:watcher",
+    ],
+    "vm_service_client_test": ["@dev_tool_deps//:logging"],
+    "vm_service_discovery_test": ["@dev_tool_deps//:logging"],
+    "web_module_server_test": [
+        "@dev_tool_deps//:logging",
+        "@dev_tool_deps//:shelf",
+    ],
+}
 
 _UNIT_TESTS = {
     "agent_command_test": {"fakes": True},
@@ -292,9 +323,14 @@ _MEDIUM_TESTS = [
            ] if cfg.get("harness") else []),
     data = cfg.get("data", []),
     main = "test/%s.dart" % name,
-    deps = _TEST_DEPS +
-           (_FAKES_DEPS if cfg.get("fakes") else []) +
-           cfg.get("deps", []),
+    # A dict keeps each label once: a test may list a dep that the fakes carry.
+    deps = list({
+        dep: None
+        for dep in _TEST_DEPS +
+                   (_FAKES_DEPS if cfg.get("fakes") else []) +
+                   cfg.get("deps", []) +
+                   _IMPORTED_PKGS.get(name, [])
+    }),
 ) for name, cfg in _UNIT_TESTS.items()]
 
 # Outside `_UNIT_TESTS` because its `srcs` come from `tool/`, which the
