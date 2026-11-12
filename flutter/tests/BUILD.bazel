@@ -163,6 +163,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -182,6 +183,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -201,6 +203,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -219,6 +222,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -238,6 +242,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -255,6 +260,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -289,6 +295,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -309,6 +316,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -326,6 +334,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -345,6 +354,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -364,6 +374,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -390,6 +401,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -428,6 +440,7 @@ dart_test(
     tags = [
         "external",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -793,6 +806,7 @@ dart_test(
         "external",
         "local",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
@@ -812,6 +826,7 @@ dart_test(
         "external",
         "local",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",

@@ -11,6 +11,7 @@ dart_test(
         "external",
         "local",
         "no-sandbox",
+        "tree-reader",
     ],
     deps = [
         "@dev_tool_deps//:test",
