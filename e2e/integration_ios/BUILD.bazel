@@ -3,6 +3,7 @@ load("@rules_apple//apple:ios.bzl", "ios_application")
 load("@rules_dart//dart:defs.bzl", "dart_analysis_config", "dart_analysis_options", "dart_analysis_test", "dart_test")
 load(
     "@rules_flutter//flutter:defs.bzl",
+    "flutter_application",
     "flutter_gen_l10n",
     "flutter_integration_test",
     "flutter_library",
@@ -82,6 +83,76 @@ flutter_integration_test(
         "@deps//:flutter_test",
         "@deps//:integration_test",
         "@deps//:intl",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# The `dev` application of the shared `lib/` entrypoint.
+flutter_application(
+    name = "app_dev",
+    package_name = "integration_ios",
+    srcs = ["lib/main.dart"],
+    flavor = "dev",
+    main = "lib/main.dart",
+    deps = [
+        "//flavor_assets",
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+    ],
+)
+
+# Simulator proof for the `dev` flavor: `appFlavor` is `dev`, only the `dev`
+# pub asset loads. Macos-only like `:app_test` (the macro owns the constraint).
+flutter_integration_test(
+    name = "flavor_dev_test",
+    package_name = "integration_ios",
+    size = "large",
+    srcs = ["integration_test/flavor_dev_test.dart"],
+    app_srcs = ["lib/main.dart"],
+    assets = ["assets/logo.png"],
+    flavor = "dev",
+    platform = "ios",
+    deps = [
+        "//flavor_assets",
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+# The `prod` application of the shared `lib/` entrypoint.
+flutter_application(
+    name = "app_prod",
+    package_name = "integration_ios",
+    srcs = ["lib/main.dart"],
+    flavor = "prod",
+    main = "lib/main.dart",
+    deps = [
+        "//flavor_assets",
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+    ],
+)
+
+# Simulator proof for the `prod` flavor: `appFlavor` is `prod`, only the `prod`
+# pub asset loads. Macos-only like `:app_test` (the macro owns the constraint).
+flutter_integration_test(
+    name = "flavor_prod_test",
+    package_name = "integration_ios",
+    size = "large",
+    srcs = ["integration_test/flavor_prod_test.dart"],
+    app_srcs = ["lib/main.dart"],
+    assets = ["assets/logo.png"],
+    flavor = "prod",
+    platform = "ios",
+    deps = [
+        "//flavor_assets",
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
         "@rules_flutter//flutter:material_icons",
     ],
 )
@@ -295,6 +366,12 @@ build_test(
     targets = [
         ":__app_test_app",
         ":__app_test_bootstrap",
+        ":__flavor_dev_test_app",
+        ":__flavor_dev_test_bootstrap",
+        ":__flavor_prod_test_app",
+        ":__flavor_prod_test_bootstrap",
+        ":app_dev",
+        ":app_prod",
         ":__plugin_pod_test_app",
         ":__plugin_pod_test_bootstrap",
         ":__plugin_pod_wrong_test_app",
@@ -446,12 +523,33 @@ flutter_library(
     ],
 )
 
+# Host-side lint twin of the two flavor tests, so the analysis test below
+# lints their Dart on every OS.
+flutter_library(
+    name = "flavor_lint",
+    package_name = "integration_ios",
+    srcs = [
+        "integration_test/flavor_dev_test.dart",
+        "integration_test/flavor_prod_test.dart",
+        "lib/main.dart",
+    ],
+    deps = [
+        "//flavor_assets",
+        "//ios_greeting_plugin",
+        "@deps//:flutter",
+        "@deps//:flutter_test",
+        "@deps//:integration_test",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
 dart_analysis_test(
     name = "ios_dart_analysis_test",
     size = "small",
     targets = [
         ":app_test_lint",
         ":app_test_red_lint",
+        ":flavor_lint",
         ":plugin_pod_lint",
         ":plugin_registrant_filter_test",
         ":plugin_spm_graph_test_lint",
