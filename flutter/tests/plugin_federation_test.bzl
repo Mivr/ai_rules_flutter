@@ -327,6 +327,45 @@ _scenario_s4_test = analysistest.make(
     expect_failure = True,
 )
 
+def _absent_default_target_impl(_ctx):
+    """Two transitive alternatives while the endorsed default is not a candidate."""
+    umbrella = struct(
+        name = "sp",
+        platforms = {"android": {"default_package": "sp_android"}},
+        implements = "",
+        direct = True,
+    )
+    alt_a = struct(
+        name = "alt_a",
+        platforms = {"android": {"pluginClass": "AltA"}},
+        implements = "sp",
+        direct = False,
+    )
+    alt_b = struct(
+        name = "alt_b",
+        platforms = {"android": {"pluginClass": "AltB"}},
+        implements = "sp",
+        direct = False,
+    )
+    resolve_federated_plugins([umbrella, alt_a, alt_b], "android")
+    return [DefaultInfo()]
+
+_absent_default_target = rule(
+    implementation = _absent_default_target_impl,
+    doc = "Fixture rule that resolves an umbrella whose endorsed default is not a candidate.",
+)
+
+def _absent_default_refused_test_impl(ctx):
+    """An endorsed default outside the candidates is not invented: resolution fails."""
+    env = analysistest.begin(ctx)
+    asserts.expect_failure(env, '"sp" has more than one implementation for android (alt_a, alt_b)')
+    return analysistest.end(env)
+
+_absent_default_refused_test = analysistest.make(
+    _absent_default_refused_test_impl,
+    expect_failure = True,
+)
+
 # Graph-level direct marking tests
 _DirectPluginsInfo = provider(
     doc = "Captures collected plugins for analysis assertions.",
@@ -445,6 +484,15 @@ def plugin_federation_test_suite(name):
         target_under_test = ":" + name + "_scenario_s4_fixture",
     )
 
+    _absent_default_target(
+        name = name + "_absent_default_fixture",
+        tags = ["manual"],
+    )
+    _absent_default_refused_test(
+        name = name + "_absent_default_refused",
+        target_under_test = ":" + name + "_absent_default_fixture",
+    )
+
     # Fixture targets for graph direct tests
     _mock_plugin_node(
         name = name + "_plugin_child",
@@ -507,6 +555,7 @@ def plugin_federation_test_suite(name):
             ":" + name + "_unit",
             ":" + name + "_two_implementations_refused",
             ":" + name + "_scenario_s4",
+            ":" + name + "_absent_default_refused",
             ":" + name + "_deps_graph_direct",
         ],
     )

@@ -232,13 +232,13 @@ Permissions a plugin declares in its own manifest, such as `record_android`'s `R
 
 ### Federated plugins
 
-Federated plugin resolution follows Flutter's `resolvePlatformImplementation` rules per target platform. A plugin is **direct** when its `flutter_plugin` or pub-package target is in the `deps` of the `flutter_application` itself, or in the `deps` of one of that application's first-level pub libraries. A plugin reached only through deeper dependencies is not direct. A plugin reached both ways is direct; deduplication by name never loses the direct mark.
+Federated plugin resolution follows Flutter's `resolvePlatformImplementation` rules per target platform. A plugin is **direct** when the application's own code depends on it: its `flutter_plugin` or pub-package target is in the `deps` of the `flutter_application` itself, or in the `deps` of a first-level library the application owns. The plugin dependencies of a third-party pub package never make a plugin direct, because Flutter counts only the dependencies of the application's own pubspec. A plugin reached only through deeper dependencies is not direct. A plugin reached both ways is direct, whatever order `deps` lists them in: the direct mark is the shallowest depth over all paths, and deduplication by name never loses it.
 
 For one umbrella and platform, resolution follows Flutter's order and nothing else:
 
 1. **Single candidate**: Exactly one candidate implementation is registered.
 2. **Direct candidate**: Else the one candidate that is direct is registered, and the other candidates and the default are not. An umbrella that implements itself inline counts as a candidate, and yields to a direct alternative.
-3. **Endorsed default**: Else the endorsed `default_package` is registered.
+3. **Endorsed default**: Else the endorsed `default_package` is registered, when it is one of the candidates. A default that is not among the candidates is never invented.
 4. **Error**: Else a build-time error names the umbrella, the platform, and every candidate.
 
 Two or more candidates that are direct (conflicting direct implementations), and several candidates without a default and none direct, fail closed with an error naming the umbrella, the platform, and every candidate. A plugin set with no federated plugin resolves to the same list in the same order as before.

@@ -179,12 +179,12 @@ def _resolve_one_umbrella(umbrella_name, plugins, target_platform):
     if umbrella_plugin and getattr(umbrella_plugin, "direct", False) and umbrella_plugin in candidates:
         return struct(chosen = umbrella_plugin, default_pkg = default_pkg, candidates = candidates)
 
-    # 3. Else the endorsed default_package: it is registered.
+    # 3. Else the endorsed default_package: it is registered when it is one of
+    # the candidates. A default that is not among them is never invented.
     if default_pkg:
         chosen = _find_plugin(candidates, default_pkg)
-        if not chosen:
-            chosen = struct(name = default_pkg)
-        return struct(chosen = chosen, default_pkg = default_pkg, candidates = candidates)
+        if chosen:
+            return struct(chosen = chosen, default_pkg = default_pkg, candidates = candidates)
 
     # 4. Else a build-time error that names the umbrella, the platform and every candidate.
     candidate_names = sorted([c.name for c in candidates if c.name != umbrella_name])

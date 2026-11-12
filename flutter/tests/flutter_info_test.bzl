@@ -18,9 +18,9 @@ to skip those rather than fail on them.
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
 load("@rules_dart//dart:defs.bzl", "dart_library")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
-load("@rules_dart//dart:utils.bzl", "dart_info_no_package")
+load("@rules_dart//dart:utils.bzl", "dart_info", "dart_info_no_package", "dart_package_identity")
 load("//flutter:providers.bzl", "FlutterInfo")
-load("//flutter/private:flutter_info.bzl", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
+load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps", "flutter_asset_channels", "flutter_info", "flutter_pub_channels")
 
 visibility(["//flutter/tests/..."])
 
@@ -156,6 +156,101 @@ def _single_channel_test_impl(ctx):
 
 single_channel_test = analysistest.make(_single_channel_test_impl)
 
+_CollectedPluginsInfo = provider(
+    doc = "The plugin list an application collects from its deps.",
+    fields = {"plugins": "List of plugin structs, as `collect_flutter_plugin_deps` returns them."},
+)
+
+def _graph_node_impl(ctx):
+    return [
+        DefaultInfo(),
+        dart_info(
+            label = ctx.label,
+            package = dart_package_identity(
+                package_name = ctx.label.name,
+                lib_root = "",
+                language_version = "",
+                version = ctx.attr.version,
+            ),
+            deps = ctx.attr.deps,
+        ),
+        flutter_info(
+            deps = ctx.attr.deps,
+            plugins = [struct(name = ctx.attr.plugin, platforms = {}, implements = "")] if ctx.attr.plugin else [],
+        ),
+    ]
+
+graph_node = rule(
+    implementation = _graph_node_impl,
+    attrs = {
+        "deps": attr.label_list(providers = [DartInfo]),
+        "plugin": attr.string(doc = "Name of the plugin this node is, or empty for a library."),
+        "version": attr.string(doc = "A pub-resolved version for a third-party pub package, or empty for app-owned code."),
+    },
+    doc = "A node of a `FlutterInfo` graph: a plugin or a library, app-owned or from pub.",
+)
+
+def _application_collector_impl(ctx):
+    return [
+        DefaultInfo(),
+        _CollectedPluginsInfo(plugins = collect_flutter_plugin_deps(ctx.attr.deps).all_plugins),
+    ]
+
+application_collector = rule(
+    implementation = _application_collector_impl,
+    attrs = {"deps": attr.label_list(providers = [DartInfo])},
+    doc = "Collects plugins from `deps` the way `flutter_application` does.",
+)
+
+def _direct_marks_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    plugins = analysistest.target_under_test(env)[_CollectedPluginsInfo].plugins
+    direct = sorted([p.name for p in plugins if getattr(p, "direct", False)])
+    asserts.equals(env, sorted(ctx.attr.direct), direct)
+    asserts.equals(env, sorted(ctx.attr.plugins), sorted([p.name for p in plugins]))
+    return analysistest.end(env)
+
+direct_marks_test = analysistest.make(
+    _direct_marks_test_impl,
+    attrs = {
+        "direct": attr.string_list(doc = "The plugins expected to be direct."),
+        "plugins": attr.string_list(doc = "Every plugin expected to be collected."),
+    },
+)
+
+def _graph_tests(name):
+    """Defines the direct-mark tests over small plugin graphs."""
+    t = ["manual"]
+    n = lambda x: ":" + name + "_" + x
+    graph_node(name = name + "_sp", plugin = "sp", tags = t)
+    graph_node(name = name + "_alt", plugin = "alt", tags = t)
+
+    # An app-owned wrapper and a pub-package wrapper, each depending on `alt`.
+    graph_node(name = name + "_a_wrapper", deps = [n("alt")], tags = t)
+    graph_node(name = name + "_pub_wrapper", deps = [n("alt")], version = "1.0.0", tags = t)
+
+    # Every order of the same three deps, behind one app-owned library.
+    graph_node(name = name + "_lib_wrapper_first", deps = [n("a_wrapper"), n("alt"), n("sp")], tags = t)
+    graph_node(name = name + "_lib_alt_first", deps = [n("alt"), n("a_wrapper"), n("sp")], tags = t)
+    application_collector(name = name + "_app_pub_wrapper", deps = [n("sp"), n("pub_wrapper")], tags = t)
+    application_collector(name = name + "_app_owned_wrapper", deps = [n("sp"), n("a_wrapper")], tags = t)
+    application_collector(name = name + "_app_lib_wrapper_first", deps = [n("lib_wrapper_first")], tags = t)
+    application_collector(name = name + "_app_lib_alt_first", deps = [n("lib_alt_first")], tags = t)
+    both = ["alt", "sp"]
+    for case, direct in {
+        "pub_wrapper": ["sp"],
+        "owned_wrapper": both,
+        "lib_wrapper_first": both,
+        "lib_alt_first": both,
+    }.items():
+        direct_marks_test(
+            name = name + "_direct_" + case,
+            target_under_test = n("app_" + case),
+            direct = direct,
+            plugins = both,
+        )
+    return [n("direct_" + case) for case in ["pub_wrapper", "owned_wrapper", "lib_wrapper_first", "lib_alt_first"]]
+
 def flutter_info_test_suite(name):
     """Defines the `flutter_info()` constructor tests.
 
@@ -237,5 +332,5 @@ def flutter_info_test_suite(name):
             ":" + name + "_single_channel",
             ":" + name + "_forwards_unknown_channel",
             ":" + name + "_skips_deps_without_flutter_info",
-        ],
+        ] + _graph_tests(name),
     )
