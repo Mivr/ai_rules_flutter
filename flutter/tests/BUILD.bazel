@@ -8,6 +8,7 @@ load(":analyze_size_test.bzl", "analyze_size_test_suite")
 load(":android_aab_signing_test.bzl", "android_aab_signing_test_suite")
 load(":android_aar_test.bzl", "android_aar_test_suite")
 load(":android_debug_signing_test.bzl", "android_debug_signing_test_suite")
+load(":android_plugin_closure_test.bzl", "android_plugin_closure_test_suite")
 load(":android_pure_go_test.bzl", "android_pure_go_test_suite")
 load(":android_release_signing_test.bzl", "android_release_signing_test_suite")
 load(":android_shared_engine_test.bzl", "android_shared_engine_test_suite")
@@ -41,6 +42,7 @@ load(":flutter_integration_test_test.bzl", "flutter_integration_test_test_suite"
 load(":flutter_library_test.bzl", "flutter_library_test_suite")
 load(":flutter_plugin_test.bzl", "flutter_plugin_test_suite")
 load(":flutter_prebuilt_test.bzl", "flutter_prebuilt_test_suite")
+load(":flutter_pub_android_edge_test.bzl", "flutter_pub_android_edge_test_suite")
 load(":flutter_pub_apple_deps_test.bzl", "flutter_pub_apple_deps_test_suite")
 load(":flutter_pub_apple_pods_test.bzl", "flutter_pub_apple_pods_test_suite")
 load(":flutter_pub_apple_test.bzl", "flutter_pub_apple_test_suite")
@@ -495,6 +497,8 @@ android_shared_engine_test_suite(name = "android_shared_engine_test")
 
 android_aab_signing_test_suite(name = "android_aab_signing_test")
 
+android_plugin_closure_test_suite(name = "android_plugin_closure_test")
+
 android_release_signing_test_suite(name = "android_release_signing_test")
 
 android_debug_signing_test_suite(name = "android_debug_signing_test")
@@ -574,6 +578,8 @@ flutter_pub_apple_pods_test_suite(name = "flutter_pub_apple_pods_test")
 flutter_pub_apple_deps_test_suite(name = "flutter_pub_apple_deps_test")
 
 flutter_pub_package_test_suite(name = "flutter_pub_package_test")
+
+flutter_pub_android_edge_test_suite(name = "flutter_pub_android_edge_test")
 
 flutter_pub_plugin_defines_test_suite(name = "flutter_pub_plugin_defines_test")
 
