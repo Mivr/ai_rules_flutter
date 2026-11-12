@@ -88,6 +88,11 @@ jobs:
           - workspace: integration_ios
             shard: none
             cache-save: false
+          # The iOS simulator `flutter_drive_test` lane: a passing and a
+          # failing host driver over one simulator app, run by name below.
+          - workspace: drive_ios
+            shard: none
+            cache-save: false
           - workspace: ffi_example
             shard: none
             cache-save: false
@@ -224,6 +229,11 @@ jobs:
       - name: Run e2e/integration_ios
         if: matrix.workspace == 'integration_ios'
         run: bazel run //tools/e2e_runner -- --workspace=e2e/integration_ios --bazel=bazel
+      # The drive_ios spec: the passing driver's test passes, the failing
+      # driver's test fails with the driver's DRIVE_RED_MUST_FAIL line.
+      - name: Run e2e/drive_ios
+        if: matrix.workspace == 'drive_ios'
+        run: bazel run //tools/e2e_runner -- --workspace=e2e/drive_ios --bazel=bazel
       - name: Report cache sizes
         if: always()
         run: du -sh ~/.cache/bazel-disk ~/.cache/bazel-repo 2>/dev/null || true
