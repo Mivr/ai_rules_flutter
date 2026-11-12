@@ -320,6 +320,10 @@ jobs:
           PY
       - name: bazel test //... (root unit tests)
         run: bazel test //... --test_output=errors
+      # Tree readers walk the checkout through runfiles, which Bazel cannot
+      # see, so the cached run above can replay a stale PASS. Rerun them uncached.
+      - name: bazel test //... tree readers (uncached)
+        run: bazel test //... --test_tag_filters=tree-reader --nocache_test_results --test_output=errors
       - name: bazel test //... 5x flake sweep (root unit tests, pull requests)
         if: github.event_name == 'pull_request'
         timeout-minutes: 75
