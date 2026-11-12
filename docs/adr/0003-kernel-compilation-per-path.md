@@ -20,10 +20,15 @@ duplicate source and the same SDK
 An application compiles its kernel through `flutter_compile_kernel`
 (`flutter/private/common.bzl:979`). The standalone `flutter_kernel_target` and
 `flutter_aot_target` call the same function. The modular path is taken only for
-a non-AOT, non-profile compile with no registrant, agent, native-assets
-manifest, recorded uses, extra frontend flags or defines
-(`flutter/private/common.bzl:892-900`). Every other compile is whole-program
-(`flutter/private/flutter_compile.bzl:602`).
+a non-AOT, non-profile compile with no native-assets manifest, recorded uses,
+extra frontend flags, defines or define files (`_use_modular_kernel` in
+`flutter/private/common.bzl`). A registrant or staged agent is allowed only
+for a debug `flutter_kernel_target` (no asset bundle) whose closure holds the
+registrant twin of the SDK `flutter` module: the entry module then compiles the
+agent, the native agent and the registrant under their constant URIs, and the
+link swaps the twin in for the plain module (`swap_flutter_registrant_twin`).
+Every other compile is whole-program, among them any define (attribute or
+global), AOT, profile, web, a closure with no twin, and `flutter_application`.
 
 A custom kernel built from `flutter_modular_test_kernel` or
 `flutter_modular_app_kernel` has no fallback and fails instead

@@ -9,7 +9,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs", "derive_lib_root", "generate_dev_package_config", _COPY_TO_DIRECTORY_TOOLCHAINS = "COPY_TO_DIRECTORY_TOOLCHAINS")
 load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
-load("//flutter/private:app_entrypoint.bzl", "APP_SCHEME", "agent_layout_path", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "stage_agent_extensions", "synthesize_app_package", "with_root")
+load("//flutter/private:app_entrypoint.bzl", "AGENT_DIR", "APP_SCHEME", "agent_layout_path", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "stage_agent_extensions", "synthesize_app_package", "with_root")
 load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "fail_asset_key_conflict", "is_within_package", "relative_key")
 load("//flutter/private:asset_uri.bzl", "encode_asset_key")
 load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action", "make_bundle_content", "make_tree_shake")
@@ -33,6 +33,7 @@ load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
 load(
     "//flutter/private:flutter_kernel_module.bzl",
     "compile_flutter_modular_app_kernel",
+    "flutter_closure_twins",
     "flutter_modular_test_tools",
 )
 load("//flutter/private:flutter_library.bzl", "aggregate_pub_contributions", "build_pub_contributions", "dedupe_shader_jobs", "pub_shader_matches_target", "resolve_font_subset_tools")
@@ -498,11 +499,26 @@ def make_kernel_inputs(
         recorded_uses = recorded_uses,
     )
 
-def _use_modular_kernel(plan, agent, reg, flags):
+_CONSTANT_REGISTRANT_URI = "%s:///%s/plugin_registrant.dart" % (APP_SCHEME, AGENT_DIR)
+
+def _debug_registrant_modular(agent, reg, twins):
+    """Whether the staged agent, native agent and registrant can ride the modular entry module."""
+    if not (reg.registrant or agent.agent):
+        return True
+    return bool(
+        twins and agent.constant and agent.agent and agent.native_agent and reg.registrant and
+        reg.location and reg.location.uri == _CONSTANT_REGISTRANT_URI,
+    )
+
+def _use_modular_kernel(plan, agent, reg, flags, twins):
+    # Whole-program (FlutterKernelCompile) is kept for: any define (attribute or global), define
+    # file, recorded use, frontend flag or native-assets manifest (the per-package modules are
+    # built without them), AOT, profile, web, and a closure with no registrant twin of the SDK
+    # `flutter` module (the SDK constant would not resolve to the registrant).
     return (
         not plan.aot and plan.mode != "profile" and
         plan.frontend_server_target == "flutter" and
-        not reg.registrant and not agent.agent and
+        _debug_registrant_modular(agent, reg, twins) and
         not plan.native_assets_manifest and not plan.recorded_uses and
         not flags.extra_frontend and not flags.all_defines and
         not flags.define_flagfiles
@@ -511,23 +527,7 @@ def _use_modular_kernel(plan, agent, reg, flags):
 def _modular_tools_or_none(ctx, flutter_sdk_info, packages):
     """The modular kernel tools, or None when the target needs a whole-program compile."""
     own_files = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
-    return flutter_modular_test_tools(
-        ctx,
-        flutter_sdk_info,
-        own_files,
-        packages,
-        [],
-    )
-
-def _compile_modular_kernel(ctx, app_lib_root, packages, kernel_dill, platform_dill, modular_tools):
-    compile_flutter_modular_app_kernel(
-        ctx,
-        modular_tools,
-        app_lib_root,
-        packages,
-        kernel_dill,
-        platform_dill,
-    )
+    return flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, [])
 
 def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
     pc = compile_kernel_package_config(
@@ -578,16 +578,21 @@ def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
     return config_file
 
 def _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
-    if _use_modular_kernel(plan, agent, reg, flags):
+    # Only a target with no asset bundle (`flutter_kernel_target`) links the twin;
+    # applications keep the whole-program compile.
+    twins = flutter_closure_twins(ctx) if plan.assets_dir == None else []
+    if _use_modular_kernel(plan, agent, reg, flags, twins):
         modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages)
         if modular_tools != None:
-            _compile_modular_kernel(
+            files = [f for f in [agent.agent, agent.native_agent, reg.registrant] if f]
+            compile_flutter_modular_app_kernel(
                 ctx,
+                modular_tools,
                 st.app_lib_root,
                 st.packages,
                 plan.kernel_dill,
                 plan.platform_dill,
-                modular_tools,
+                struct(files = files, twins = twins) if files else None,
             )
             return None
     return _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan)
@@ -654,6 +659,7 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, target, inputs):
             frontend_server_target = target.frontend_server_target,
             native_assets_manifest = inputs.native_assets_manifest,
             recorded_uses = inputs.recorded_uses,
+            assets_dir = inputs.assets_dir,
             kernel_dill = kernel_dill,
             platform_dill = platform_dill,
         ),

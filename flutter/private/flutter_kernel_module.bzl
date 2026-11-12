@@ -1138,13 +1138,19 @@ def compile_flutter_modular_test_kernel(
     )
     return _link_flutter_test_entry_module(ctx, dep_kernels, entry, output)
 
+def flutter_closure_twins(ctx):
+    """The registrant twins of `ctx.attr.deps`' closure, as a list (empty when it holds no twin)."""
+    infos = [d[FlutterKernelModuleInfo] for d in ctx.attr.deps if FlutterKernelModuleInfo in d]
+    return depset(transitive = [getattr(i, "registrant_twins", None) or depset() for i in infos]).to_list()
+
 def compile_flutter_modular_app_kernel(
         ctx,
         tools,
         lib_root,
         packages,
         output,
-        platform_dill):
+        platform_dill,
+        debug = None):
     """Compiles a Flutter kernel target's entry module and links it with dependency modules and `platform_dill`.
 
     Args:
@@ -1154,20 +1160,14 @@ def compile_flutter_modular_app_kernel(
       packages: The synthesized `DartPackageInfo` list for the app.
       output: The linked `.dill` File to produce (with `platform_dill` prepended).
       platform_dill: The platform `.dill` File to compile and link against.
+      debug: None, or `struct(files, twins)`: the staged agent, native agent and registrant
+        Files compiled into the entry module under their constant URIs, and the closure's
+        registrant twins, which the link uses in place of the plain SDK `flutter` module.
     """
-    sources = [
-        struct(
-            uri = app_main_location(ctx.attr.package_name, lib_root, ctx.file.main).uri,
-            file = ctx.file.main,
-        ),
-    ]
-    for f in ctx.files.srcs:
-        if f == ctx.file.main:
-            continue
-        sources.append(struct(
-            uri = app_main_location(ctx.attr.package_name, lib_root, f).uri,
-            file = f,
-        ))
+    own = [ctx.file.main] + [f for f in ctx.files.srcs if f != ctx.file.main]
+    sources = [struct(uri = app_main_location(ctx.attr.package_name, lib_root, f).uri, file = f) for f in own]
+    sources += [struct(uri = app_scheme_location(f).uri, file = f) for f in (debug.files if debug else [])]
+    twins = depset(debug.twins) if debug else None
 
     dep_kernels = [
         dep[FlutterKernelModuleInfo].kernel_info
@@ -1183,9 +1183,9 @@ def compile_flutter_modular_app_kernel(
         ctx.label.name + ".flutter_entry.kmod",
         platform_dill,
     )
-    dep_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_kernels],
+    dep_closure = swap_flutter_registrant_twin(
+        depset(order = "postorder", transitive = [k.transitive_kmods for k in dep_kernels]),
+        twins,
     )
     kernel_link_action(
         ctx,
