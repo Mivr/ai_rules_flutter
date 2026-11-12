@@ -14,4 +14,3 @@ flutter:
     platforms:
       linux:
         pluginClass: FedAltLinuxPlugin
-

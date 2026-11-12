@@ -7,4 +7,3 @@ environment:
 dependencies:
   fed_alt_linux:
     path: ../fed_alt_linux
-
