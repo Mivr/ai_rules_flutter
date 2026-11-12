@@ -10,6 +10,8 @@ load(
     "swap_flutter_registrant_twin",
 )
 
+visibility(["//flutter/tests/..."])
+
 _DEFINE = "flutter.dart_plugin_registrant="
 _URI = "org-dartlang-app:///_flutter_debug_agent/plugin_registrant.dart"
 _DBG = {
