@@ -2,7 +2,7 @@ schema: mivr-e2e-spec/1
 commands:
   - name: test all targets
     run: bazel test //... --test_output=errors
-    min_tests_executed: 18
+    min_tests_executed: 20
     expect:
       exit_code: 0
   - name: iOS simulator green test.xml
