@@ -28,7 +28,22 @@ registrant twin of the SDK `flutter` module: the entry module then compiles the
 agent, the native agent and the registrant under their constant URIs, and the
 link swaps the twin in for the plain module (`swap_flutter_registrant_twin`).
 Every other compile is whole-program, among them any define (attribute or
-global), AOT, profile, web, a closure with no twin, and `flutter_application`.
+global), AOT, profile, web, a closure with no twin, and `flutter_application`
+unless the opt-in below applies.
+
+An application takes the modular path only behind the private flag
+`//flutter/private:debug_modular_app` (default off, outside the documented
+surface; it exists for the bench that compares this path with the warm
+frontend_server worker, and the default is decided after it). With the flag
+on, a debug non-AOT `flutter_application` with no define of any kind
+(attribute, global, define file, flavor), no native asset, no recorded use and
+no widget-creation tracking links per-package modules like the debug
+`flutter_kernel_target`: the module aspect on its `deps` registers nothing
+unless the flag is on in a debug build, so every other application keeps its
+single `FlutterKernelCompile`. The native-asset condition reads the resolved
+asset list, not the always-present manifest file. The aspect lives in
+`flutter/private/flutter_kernel_module.bzl` and the selection in
+`flutter/private/common.bzl`.
 
 A custom kernel built from `flutter_modular_test_kernel` or
 `flutter_modular_app_kernel` has no fallback and fails instead

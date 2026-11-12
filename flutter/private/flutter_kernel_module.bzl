@@ -18,7 +18,6 @@ load(
     "KERNEL_MODULE_ATTRS",
     "MODULAR_KERNEL_TOOLCHAINS",
     "collect_packages",
-    "collect_transitive_srcs",
     "derive_lib_root",
     "duplicated_source",
     "first_per_package",
@@ -78,6 +77,17 @@ MODULAR_KERNEL_ATTRS = _DART_MODULAR_KERNEL_ATTRS | {
     ),
 }
 
+# The private //flutter/private:debug_modular_app flag, read by `flutter_application` and by the module aspect on its
+# `deps`. It exists for the bench A/B of the modular debug application path against the warm frontend_server
+# worker, until the default is decided.
+DEBUG_MODULAR_APP_ATTR = {
+    "_debug_modular_app": attr.label(
+        doc = "The private //flutter/private:debug_modular_app build setting.",
+        default = Label("//flutter/private:debug_modular_app"),
+        providers = [BuildSettingInfo],
+    ),
+}
+
 # Build setting read and cleared by `_modular_deps_transition`.
 _MODULAR_DEPS_DEFINES_SETTING = str(Label("//flutter:extra_dart_defines"))
 
@@ -105,12 +115,7 @@ _modular_deps_transition = transition(
 
 def _no_flutter_kernel_module():
     empty = no_kernel_module()
-    return [
-        FlutterKernelModuleInfo(
-            kernel_info = empty,
-            product_kernel_info = empty,
-        ),
-    ]
+    return [FlutterKernelModuleInfo(kernel_info = empty, product_kernel_info = empty)]
 
 def _own_package_record(info):
     """Returns the `DartPackageInfo` for the package a `DartInfo` itself owns."""
@@ -469,19 +474,10 @@ def _modular_consistency(own_record, rule_deps, dep_kernels):
 
 def _modular_dep_closures(target, dep_kernels, rule_deps, own_srcs):
     """The postorder dep closures and ownership graphs propagated by the aspect."""
-    dep_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_kernels],
-    )
-    dep_outline_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_koutlines for k in dep_kernels],
-    )
+    dep_closure = depset(order = "postorder", transitive = [k.transitive_kmods for k in dep_kernels])
+    dep_outline_closure = depset(order = "postorder", transitive = [k.transitive_koutlines for k in dep_kernels])
     upstream_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels])
-    has_cross_pkg_cycle = False
     cross_pkg_srcs = depset(transitive = [k.cross_pkg_srcs for k in dep_kernels])
-    if has_cross_pkg_cycle:
-        cross_pkg_srcs = depset(own_srcs, transitive = [collect_transitive_srcs(rule_deps)])
     owned = depset(
         [(str(target.label), f.short_path) for f in own_srcs],
         transitive = [k.owned for k in dep_kernels],
@@ -850,7 +846,10 @@ def swap_flutter_registrant_twin(closure, twins):
     return depset([swap.get(f, f) for f in closure.to_list()], order = "postorder")
 
 def _flutter_kernel_module_aspect_impl(target, ctx):
-    if DartInfo not in target:
+    # The application's aspect (it declares the flag) compiles modules only with the flag on in a debug build.
+    flag = getattr(ctx.attr, "_debug_modular_app", None)
+    off = flag != None and not (flag[BuildSettingInfo].value and ctx.var["COMPILATION_MODE"] == "dbg")
+    if DartInfo not in target or off:
         return _no_flutter_kernel_module()
 
     enabled = ctx.attr._modular_kernel[BuildSettingInfo].value
@@ -921,21 +920,34 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         ),
     )
 
-flutter_kernel_module_aspect = aspect(
-    implementation = _flutter_kernel_module_aspect_impl,
-    attr_aspects = ["deps"],
-    attrs = KERNEL_MODULE_ATTRS | {
-        "_extra_dart_defines": attr.label(
-            doc = "The //flutter:extra_dart_defines build setting, read for the aspect's module compiles.",
-            default = Label("//flutter:extra_dart_defines"),
-            providers = [BuildSettingInfo],
-        ),
-    },
-    toolchains = [
-        "@rules_flutter//flutter:toolchain_type",
-    ] + MODULAR_KERNEL_TOOLCHAINS,
-    doc = "Compiles each DartInfo library in a flutter_test closure into a modular .flutter.kmod directory.",
-)
+def _module_aspect(extra_attrs):
+    """Builds a module aspect over `deps`.
+
+    Args:
+        extra_attrs: Attrs added to the aspect's own: `DEBUG_MODULAR_APP_ATTR` makes it a
+            `flutter_application` aspect, which registers nothing unless the flag is on in a debug build.
+
+    Returns:
+        The aspect compiling each `DartInfo` library into a modular `.flutter.kmod` directory.
+    """
+    return aspect(
+        implementation = _flutter_kernel_module_aspect_impl,
+        attr_aspects = ["deps"],
+        attrs = KERNEL_MODULE_ATTRS | extra_attrs | {
+            "_extra_dart_defines": attr.label(
+                doc = "The //flutter:extra_dart_defines build setting, read for the aspect's module compiles.",
+                default = Label("//flutter:extra_dart_defines"),
+                providers = [BuildSettingInfo],
+            ),
+        },
+        toolchains = [
+            "@rules_flutter//flutter:toolchain_type",
+        ] + MODULAR_KERNEL_TOOLCHAINS,
+        doc = "Compiles each DartInfo library in a dependency closure into a modular .flutter.kmod directory.",
+    )
+
+flutter_kernel_module_aspect = _module_aspect({})
+flutter_app_kernel_module_aspect = _module_aspect(DEBUG_MODULAR_APP_ATTR)
 
 def _compile_flutter_entry_module(
         ctx,

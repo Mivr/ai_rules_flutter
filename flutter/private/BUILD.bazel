@@ -1,4 +1,5 @@
 load("@bazel_skylib//:bzl_library.bzl", "bzl_library")
+load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load(":flutter_apple_plugin_library.bzl", "apple_engine_framework_targets")
 
 # The arm64 simulator platform add-to-app xcframeworks build their simulator
@@ -426,6 +427,14 @@ bzl_library(
     ],
 )
 
+# Exists for the bench A/B of the modular debug app path against the warm frontend_server worker,
+# until the default is decided.
+bool_flag(
+    name = "debug_modular_app",
+    build_setting_default = False,
+    visibility = ["//flutter:__subpackages__"],
+)
+
 bzl_library(
     name = "flutter_application",
     srcs = ["flutter_application.bzl"],
@@ -436,11 +445,13 @@ bzl_library(
         ":flutter_defines_files",
         ":flutter_font_family",
         ":flutter_info",
+        ":flutter_kernel_module",
         ":flutter_native_assets",
         ":native_sources",
         "//flutter:providers",
         "@apple_support//lib:apple_support",
         "@bazel_skylib//lib:dicts",
+        "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
     ],
 )
