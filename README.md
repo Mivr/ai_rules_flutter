@@ -670,7 +670,7 @@ flutter_ios_app(
 
 | Attribute | Description |
 |---|---|
-| `application` | A `flutter_application` target. Required. |
+| `application` | A `flutter_application` target. Required. The app's flavor comes from this target (`flavor = "prod"`): `flutter_ios_app` has no `flavor` attribute, so declare one `flutter_application` and one `flutter_ios_app` per flavor; there is no second way to set the flavor. |
 | `bundle_id` | The iOS bundle identifier. Required. |
 | `families` | Device families. Defaults to `["iphone"]`, unlike `flutter create` (iPhone and iPad). An iPhone-only app runs in a small window on iPadOS. Adding `"ipad"` needs an icon set without the 76x76@1x iPad icon `flutter create` generates, which `actool` rejects. |
 | `app_name` | Display name. Defaults to the target name. |

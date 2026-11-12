@@ -671,6 +671,12 @@ def flutter_ios_app(
         - `ios/Runner/*.swift` (AppDelegate, SceneDelegate, etc.)
     Generate these with: `flutter create --platforms=ios .`
 
+    The app's Flutter flavor is the one its `application` was declared with:
+    `flutter_ios_app` has no `flavor` attribute, and the app's Dart compile
+    (`-DFLUTTER_APP_FLAVOR`), assets and shaders all come from `application`.
+    Declare one `flutter_application` per flavor and one `flutter_ios_app` over
+    each; there is no second way to set the flavor.
+
     Simulator builds need no code signing. Device builds require
     `provisioning_profile`: rules_apple adds a provisioning-profile step to
     every device build, so without a profile `ios_application` fails at
@@ -694,7 +700,9 @@ def flutter_ios_app(
     Args:
         name: Target name (Bazel identifier). The runner's Swift module name
             is derived from it, so it must be a bare Swift identifier.
-        application: A flutter_application target (required).
+        application: A `flutter_application` target (required). Its flavor is
+            the iOS app's flavor; declare one `flutter_application` and one
+            `flutter_ios_app` per flavor, as there is no second way to set it.
         bundle_id: CFBundleIdentifier (required — rules_apple constraint).
         families: Device families (default ["iphone"]; `flutter create` targets iPhone and iPad. An iPhone-only app runs in a small window on iPadOS. Adding "ipad" makes actool reject the 76x76@1x icon in `flutter create`'s icon set, so drop that entry first).
         app_name: User-facing display name. Defaults to name.
