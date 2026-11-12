@@ -8,5 +8,4 @@ flutter_kernel_target(
     main = "main.dart",
     tags = ["manual"],
     visibility = ["//flutter/tests:__pkg__"],
-    deps = ["//flutter/tests/registrant_twin_fixture/app"],
 )

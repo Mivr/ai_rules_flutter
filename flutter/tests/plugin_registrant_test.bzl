@@ -446,6 +446,19 @@ def _ios_objc_exclusion_test_impl(ctx):
     )
     return unittest.end(env)
 
+def _extra_imports_test_impl(ctx):
+    """`extra_imports` emits library imports when a registrant is generated and stays empty otherwise."""
+    env = unittest.begin(ctx)
+    sdk_uri = "package:flutter/src/dart_plugin_registrant.dart"
+    asserts.equals(env, "", make_registrant_content([], extra_imports = [sdk_uri]))
+    with_agent = make_registrant_content(
+        [],
+        agent_import = "agent_extensions.dart",
+        extra_imports = [sdk_uri],
+    )
+    asserts.true(env, "import '%s';" % sdk_uri in with_agent, with_agent)
+    return unittest.end(env)
+
 _t16_test = unittest.make(_ios_swift_empty_test_impl)
 _t17_test = unittest.make(_ios_swift_several_plugins_test_impl)
 _t18_test = unittest.make(_ios_swift_exclusion_test_impl)
@@ -454,8 +467,10 @@ _t20_test = unittest.make(_ios_objc_empty_impl_test_impl)
 _t21_test = unittest.make(_ios_objc_two_plugin_impl_test_impl)
 _t22_test = unittest.make(_ios_objc_exclusion_test_impl)
 _t23_test = unittest.make(_android_registrant_federated_chosen_implementation_test_impl)
+_t24_test = unittest.make(_extra_imports_test_impl)
 
 def plugin_registrant_test_suite(name):
+    """Test suite for Dart, Android, iOS and web plugin registrant rendering."""
     small_unittest_suite(
         name,
         _t0_test,
@@ -482,4 +497,5 @@ def plugin_registrant_test_suite(name):
         _t21_test,
         _t22_test,
         _t23_test,
+        _t24_test,
     )

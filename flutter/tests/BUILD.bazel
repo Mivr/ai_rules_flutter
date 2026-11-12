@@ -612,6 +612,18 @@ registrant_twin_test_suite(name = "registrant_twin_test")
 
 kernel_target_modular_test_suite(name = "kernel_target_modular_test")
 
+dart_test(
+    name = "kernel_target_modular_dill_test",
+    size = "small",
+    data = [":kernel_target_modular_dill"],
+    env = {"MODULAR_DEBUG_DILL": "$(rlocationpath :kernel_target_modular_dill)"},
+    main = "kernel_target_modular_dill_test.dart",
+    deps = [
+        "@dev_tool_deps//:test",
+        "@rules_dart//dart/runfiles",
+    ],
+)
+
 # The twin and the plain module both link: the swapped dill holds the constant
 # registrant URI where the SDK constant is read, the plain one does not.
 dart_test(

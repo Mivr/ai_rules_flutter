@@ -63,12 +63,13 @@ FlutterKernelModuleInfo = provider(
     fields = {
         "kernel_info": "DartKernelInfo compiled for the Flutter target and patched SDK.",
         "product_kernel_info": "DartKernelInfo compiled for the Flutter target and product patched SDK (`-Ddart.vm.product=true`).",
-        "registrant_twins": "Depset of `struct(plain, kmod, koutline)` registrant twins in the closure, or None.",
+        "registrant_twins": "Depset of SDK `flutter` registrant twin structs in the closure, or None.",
     },
 )
 
 # The one define the twin adds: the debug build's constant registrant URI.
 _TWIN_DEFINE = "flutter.dart_plugin_registrant=%s:///%s/plugin_registrant.dart" % (APP_SCHEME, AGENT_DIR)
+_SDK_REGISTRANT_URIS = ("package:flutter/src/dart_plugin_registrant.dart", "package:flutter/flutter.dart")
 
 MODULAR_KERNEL_ATTRS = _DART_MODULAR_KERNEL_ATTRS | {
     "_extra_dart_defines": attr.label(
@@ -749,6 +750,21 @@ def _modular_dep_state(rule_deps, own_record, flutter_sdk_info):
         twins = depset(transitive = [m.registrant_twins for m in dep_mod_infos if m.registrant_twins != None]),
     )
 
+def _compile_registrant_twin(ctx, tools, flutter_sdk_info, spec, kmod, sources):
+    """Compile the SDK `flutter` registrant twin (or None for any other package)."""
+    if spec.package_name != "flutter":
+        return None
+    twin_kmod, twin_koutline, _, _, _, twin_excluded = _compile_main_kmod(ctx, tools, flutter_sdk_info, spec, True)
+    uris = {s.uri: True for s in sources}
+    reg_uris = [u for u in _SDK_REGISTRANT_URIS if u in uris]
+    return struct(
+        plain = kmod,
+        kmod = twin_kmod,
+        koutline = twin_koutline,
+        excluded = twin_excluded,
+        registrant_uri = reg_uris[0] if reg_uris else None,
+    )
+
 def _compile_target_kernels(ctx, tools, flutter_sdk_info, target_name, package_name, job):
     """Compiles a target's own debug and product modules and returns the provider list.
 
@@ -778,10 +794,7 @@ def _compile_target_kernels(ctx, tools, flutter_sdk_info, target_name, package_n
         flutter_sdk_info = flutter_sdk_info,
         spec = spec,
     )
-    twin = None
-    if package_name == "flutter":
-        twin_kmod, twin_koutline, _, _, _, twin_excluded = _compile_main_kmod(ctx, tools, flutter_sdk_info, spec, True)
-        twin = struct(plain = kmod, kmod = twin_kmod, koutline = twin_koutline, excluded = twin_excluded)
+    twin = _compile_registrant_twin(ctx, tools, flutter_sdk_info, spec, kmod, sources)
     base_dill, base_keys, base_kmods = _link_flutter_test_base(
         ctx,
         target_name,
@@ -818,7 +831,11 @@ def _compile_target_kernels(ctx, tools, flutter_sdk_info, target_name, package_n
                 kmod = kmod,
                 koutline = koutline,
                 transitive_kmods = depset(order = "postorder", direct = [kmod], transitive = [job.dep_closure]),
-                transitive_koutlines = depset(order = "postorder", direct = [koutline], transitive = [job.dep_outline_closure]),
+                transitive_koutlines = depset(
+                    order = "postorder",
+                    direct = [koutline],
+                    transitive = [job.dep_outline_closure],
+                ),
                 modular = True,
                 closure_excluded = depset(direct = [excluded], transitive = [job.upstream_excluded]),
                 cross_pkg_srcs = job.cross_pkg_srcs,
@@ -832,7 +849,9 @@ def _compile_target_kernels(ctx, tools, flutter_sdk_info, target_name, package_n
             product_kernel_info = product_kernel_info,
             registrant_twins = depset(direct = [twin] if twin else [], transitive = [job.twins]),
         ),
-    ] + ([OutputGroupInfo(flutter_registrant_twin = depset([twin.kmod, twin.koutline, twin.excluded]))] if twin else [])
+    ] + ([
+        OutputGroupInfo(flutter_registrant_twin = depset([twin.kmod, twin.koutline, twin.excluded])),
+    ] if twin else [])
 
 def swap_flutter_registrant_twin(closure, twins):
     """Returns `closure` with the plain SDK `flutter` module replaced by its registrant twin.
@@ -952,13 +971,8 @@ def _compile_flutter_entry_module(
     sources), so a body-only edit to a library recompiles that library's module
     plus the entry/link actions — never the whole program.
     """
-    dep_outline_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_koutlines for k in dep_kernels],
-    )
-    cross_pkg_srcs = depset(
-        transitive = [k.cross_pkg_srcs for k in dep_kernels],
-    )
+    dep_outline_closure = depset(order = "postorder", transitive = [k.transitive_koutlines for k in dep_kernels])
+    cross_pkg_srcs = depset(transitive = [k.cross_pkg_srcs for k in dep_kernels])
     entry = ctx.actions.declare_directory(entry_name)
     flutter_kernel_module_action(
         ctx = ctx,
@@ -970,9 +984,7 @@ def _compile_flutter_entry_module(
             output = entry,
             koutline = None,
             extra_inputs = cross_pkg_srcs,
-            closure_excluded = depset(
-                transitive = [k.closure_excluded for k in dep_kernels],
-            ),
+            closure_excluded = depset(transitive = [k.closure_excluded for k in dep_kernels]),
         ),
         options = struct(
             defines = kernel_worker_defines(ctx),
@@ -996,10 +1008,7 @@ def _link_flutter_test_entry_module(ctx, dep_kernels, entry, output):
     Returns the base dill linked against, or `None` when no base dill applies.
     Shared by the built-in test compile below and the public custom test kernel.
     """
-    dep_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_kernels],
-    )
+    dep_closure = depset(order = "postorder", transitive = [k.transitive_kmods for k in dep_kernels])
     base_dill, base_keys, base_kmods = _find_dep_base_dill(dep_kernels)
     kernel_link_action(
         ctx,
@@ -1339,10 +1348,7 @@ def flutter_modular_test_kernel(ctx, *, test_uri, deps, output, use_base_dill = 
     )
     if use_base_dill:
         return _link_flutter_test_entry_module(ctx, dep_kernels, entry, output)
-    dep_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_kernels],
-    )
+    dep_closure = depset(order = "postorder", transitive = [k.transitive_kmods for k in dep_kernels])
     kernel_link_action(ctx, dep_closure, entry, output)
     return None
 
@@ -1379,13 +1385,7 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output, u
       provides one, or None.
     """
     lib_root = derive_lib_root(ctx.label.workspace_root, ctx.label.package)
-    packages = synthesize_app_package(
-        ctx.label,
-        collect_packages(deps),
-        package_name,
-        lib_root,
-        "",
-    )
+    packages = synthesize_app_package(ctx.label, collect_packages(deps), package_name, lib_root, "")
     sources = [
         struct(
             uri = app_main_location(package_name, lib_root, main).uri,
@@ -1418,10 +1418,7 @@ def flutter_modular_app_kernel(ctx, *, main, package_name, srcs, deps, output, u
         ctx.label.name + ".flutter_entry.kmod",
         flutter_sdk_info.platform_kernel_dill,
     )
-    dep_closure = depset(
-        order = "postorder",
-        transitive = [k.transitive_kmods for k in dep_kernels],
-    )
+    dep_closure = depset(order = "postorder", transitive = [k.transitive_kmods for k in dep_kernels])
     base_dill, base_keys, base_kmods = _find_dep_base_dill(dep_kernels) if use_base_dill else (None, None, depset())
     dep_closure = _without_base_kmods(dep_closure, base_dill, base_keys, base_kmods)
     kernel_link_action(

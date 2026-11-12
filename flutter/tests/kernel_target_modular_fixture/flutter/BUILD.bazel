@@ -1,0 +1,15 @@
+load("//flutter:defs.bzl", "flutter_library")
+
+# Mirrors the real SDK `flutter` package: `lib/src/dart_plugin_registrant.dart`
+# owns `dartPluginRegistrantLibrary` via `String.fromEnvironment`, and nothing
+# in `lib/flutter.dart` imports or exports it.
+flutter_library(
+    name = "flutter",
+    package_name = "flutter",
+    srcs = [
+        "lib/flutter.dart",
+        "lib/src/dart_plugin_registrant.dart",
+    ],
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__subpackages__"],
+)

@@ -17,25 +17,31 @@ _OPT = {
 _DEFINE = "-Dflutter.dart_plugin_registrant="
 
 def _compile_argv(env):
+    """Returns the single `FlutterKernelCompile` action's argv."""
     kernels = [a for a in analysistest.target_actions(env) if a.mnemonic == "FlutterKernelCompile"]
     asserts.equals(env, 1, len(kernels), "expected one FlutterKernelCompile")
     return kernels[0].argv if kernels else []
 
 def _actions(env, mnemonic):
+    """Returns target actions with `mnemonic`."""
     return [a for a in analysistest.target_actions(env) if a.mnemonic == mnemonic]
 
 def _out(action):
+    """Returns the `.kmod` basename produced by `action`."""
     return [f.basename for f in action.outputs.to_list() if f.basename.endswith(".kmod")][0]
 
 def _paths(action):
+    """Returns the input paths of `action`."""
     return [f.path for f in action.inputs.to_list()]
 
 def _entry(env):
+    """Returns the single `.flutter_entry.kmod` `DartKernel` action."""
     entries = [a for a in _actions(env, "DartKernel") if _out(a).endswith("flutter_entry.kmod")]
     asserts.equals(env, 1, len(entries), "expected one entry module")
     return entries[0] if entries else None
 
 def _constant_uris_impl(ctx):
+    """The entry module compiles the agent, native agent and registrant under constant URIs."""
     env = analysistest.begin(ctx)
     asserts.equals(env, [], _actions(env, "FlutterKernelCompile"), "no whole-program compile")
     asserts.equals(env, 1, len(_actions(env, "DartKernelLink")), "one DartKernelLink")
@@ -82,6 +88,7 @@ def _whole_program_impl(ctx):
     return analysistest.end(env)
 
 def _no_constant_layout_impl(ctx):
+    """Release and AOT builds do not stage the constant debug-agent layout."""
     env = analysistest.begin(ctx)
     argv = _compile_argv(env)
     asserts.equals(env, [], [a for a in argv if a.startswith(_DEFINE)], "no constant registrant outside debug")
@@ -101,6 +108,7 @@ _release_test = analysistest.make(_no_constant_layout_impl, config_settings = _O
 _aot_dbg_test = analysistest.make(_no_constant_layout_impl, config_settings = _DBG)
 
 def _rel_path_impl(ctx):
+    """`app_scheme_rel_path` collapses paths under `_flutter_debug_agent/` across labels."""
     env = unittest.begin(ctx)
     gen = struct(short_path = "pkg/app.debug_agent/_flutter_debug_agent/plugin_registrant.dart")
     other = struct(short_path = "a/b/other.debug_agent/_flutter_debug_agent/plugin_registrant.dart")
@@ -153,6 +161,8 @@ def agent_uris_test_suite(name):
     _one_module_test(name = name + "_one_module", target_under_test = ":_agent_uris_kernel_deps")
     _whole_program_test(name = name + "_own_defines", target_under_test = ":_agent_uris_kernel_defines")
     _global_define_test(name = name + "_global_define", target_under_test = ":_agent_uris_kernel")
+    _global_define_test(name = name + "_global_define_deps", target_under_test = ":_agent_uris_kernel_deps")
+    _constant_uris_test(name = name + "_bare_package", target_under_test = ":_agent_uris_kernel")
     _constant_uris_test(name = name + "_own_package", target_under_test = ":_agent_uris_kernel_deps")
     _constant_uris_test(
         name = name + "_other_package",
@@ -164,12 +174,14 @@ def agent_uris_test_suite(name):
     native.test_suite(
         name = name,
         tests = [
+            ":" + name + "_bare_package",
             ":" + name + "_own_package",
             ":" + name + "_other_package",
             ":" + name + "_twin_link",
             ":" + name + "_one_module",
             ":" + name + "_own_defines",
             ":" + name + "_global_define",
+            ":" + name + "_global_define_deps",
             ":" + name + "_release",
             ":" + name + "_aot_dbg",
             ":" + name + "_rel_path",

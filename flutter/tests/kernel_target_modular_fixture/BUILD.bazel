@@ -1,0 +1,8 @@
+exports_files(
+    [
+        "flagfile.txt",
+        "main.dart",
+        "stub_agent.dart",
+    ],
+    visibility = ["//flutter/tests:__subpackages__"],
+)

@@ -9,7 +9,19 @@ load("@bazel_skylib//rules:common_settings.bzl", "BuildSettingInfo")
 load("@rules_dart//dart:providers.bzl", "DartInfo")
 load("@rules_dart//dart:utils.bzl", "collect_packages", "collect_transitive_srcs", "derive_lib_root", "generate_dev_package_config", _COPY_TO_DIRECTORY_TOOLCHAINS = "COPY_TO_DIRECTORY_TOOLCHAINS")
 load("//flutter:providers.bzl", "FlutterCompiledShadersInfo", "FlutterInfo", "FlutterNativeLibraryInfo", _resolve_exec_dart = "resolve_exec_dart", _resolve_exec_dart_vm = "resolve_exec_dart_vm", _resolve_flutter_sdk_info = "resolve_flutter_sdk_info")
-load("//flutter/private:app_entrypoint.bzl", "AGENT_DIR", "APP_SCHEME", "agent_layout_path", "app_main_location", "app_scheme_location", "app_scheme_sources", "compile_kernel_package_config", "resolve_kernel_entrypoint", "stage_agent_extensions", "synthesize_app_package", "with_root")
+load(
+    "//flutter/private:app_entrypoint.bzl",
+    "APP_SCHEME",
+    "agent_layout_path",
+    "app_main_location",
+    "app_scheme_location",
+    "app_scheme_sources",
+    "compile_kernel_package_config",
+    "resolve_kernel_entrypoint",
+    "stage_agent_extensions",
+    "synthesize_app_package",
+    "with_root",
+)
 load("//flutter/private:asset_keys.bzl", "bundle_asset_entries", "fail_asset_key_conflict", "is_within_package", "relative_key")
 load("//flutter/private:asset_uri.bzl", "encode_asset_key")
 load("//flutter/private:flutter_asset_bundle_action.bzl", "flutter_asset_bundle_action", "make_bundle_content", "make_tree_shake")
@@ -375,7 +387,7 @@ def _build_info_json(ctx, plan, inputs, target_platform):
         "targetPlatform": target_platform,
     })
 
-def _kernel_registrant(ctx, target_platform, agent, emit_dev_config, build_info):
+def _kernel_registrant(ctx, target_platform, agent, emit_dev_config, build_info, extra_imports = ()):
     """Collect plugins and generate the registrant plus dev-loop registrants."""
 
     # Collect plugins from deps and generate the registrant. The registrant is
@@ -390,6 +402,7 @@ def _kernel_registrant(ctx, target_platform, agent, emit_dev_config, build_info)
         native_agent_import = agent.native_agent.basename if agent.native_agent else None,
         build_info_json = build_info if agent.agent else None,
         declared_path = agent_layout_path(ctx, "plugin_registrant.dart") if agent.constant else None,
+        extra_imports = extra_imports,
     )
     registrant_location = app_scheme_location(registrant) if registrant else None
 
@@ -499,29 +512,16 @@ def make_kernel_inputs(
         recorded_uses = recorded_uses,
     )
 
-_CONSTANT_REGISTRANT_URI = "%s:///%s/plugin_registrant.dart" % (APP_SCHEME, AGENT_DIR)
+def _use_modular_kernel(plan, flags):
+    """Whether `plan` and `flags` can compile from per-package kernel modules."""
 
-def _debug_registrant_modular(agent, reg, twins):
-    """Whether the staged agent, native agent and registrant can ride the modular entry module."""
-    if not (reg.registrant or agent.agent):
-        return True
-    return bool(
-        twins and agent.constant and agent.agent and agent.native_agent and reg.registrant and
-        reg.location and reg.location.uri == _CONSTANT_REGISTRANT_URI,
-    )
-
-def _use_modular_kernel(plan, agent, reg, flags, twins):
     # Whole-program (FlutterKernelCompile) is kept for: any define (attribute or global), define
     # file, recorded use, frontend flag or native-assets manifest (the per-package modules are
-    # built without them), AOT, profile, web, and a closure with no registrant twin of the SDK
-    # `flutter` module (the SDK constant would not resolve to the registrant).
+    # built without them), and AOT, profile, release or web.
     return (
-        not plan.aot and plan.mode != "profile" and
-        plan.frontend_server_target == "flutter" and
-        _debug_registrant_modular(agent, reg, twins) and
+        not plan.aot and plan.mode == "debug" and plan.frontend_server_target == "flutter" and
         not plan.native_assets_manifest and not plan.recorded_uses and
-        not flags.extra_frontend and not flags.all_defines and
-        not flags.define_flagfiles
+        not flags.extra_frontend and not flags.all_defines and not flags.define_flagfiles
     )
 
 def _modular_tools_or_none(ctx, flutter_sdk_info, packages):
@@ -530,6 +530,7 @@ def _modular_tools_or_none(ctx, flutter_sdk_info, packages):
     return flutter_modular_test_tools(ctx, flutter_sdk_info, own_files, packages, [])
 
 def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
+    """Compile the whole-program kernel via `frontend_server` (`FlutterKernelCompile`)."""
     pc = compile_kernel_package_config(
         ctx,
         st.packages,
@@ -562,10 +563,7 @@ def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
             native_assets_manifest = plan.native_assets_manifest,
             dart_plugin_registrant_uri = reg.location.uri if reg.location else None,
         ),
-        flutter_kernel_outputs(
-            output = plan.kernel_dill,
-            recorded_uses = plan.recorded_uses,
-        ),
+        flutter_kernel_outputs(output = plan.kernel_dill, recorded_uses = plan.recorded_uses),
         flutter_kernel_options(
             aot = plan.aot,
             defines = flags.all_defines,
@@ -578,10 +576,8 @@ def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
     return config_file
 
 def _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
-    # Only a target with no asset bundle (`flutter_kernel_target`) links the twin;
-    # applications keep the whole-program compile.
-    twins = flutter_closure_twins(ctx) if plan.assets_dir == None else []
-    if _use_modular_kernel(plan, agent, reg, flags, twins):
+    """Compile the target's kernel modularly when eligible, else whole-program."""
+    if _use_modular_kernel(plan, flags):
         modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages)
         if modular_tools != None:
             files = [f for f in [agent.agent, agent.native_agent, reg.registrant] if f]
@@ -592,7 +588,7 @@ def _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
                 st.packages,
                 plan.kernel_dill,
                 plan.platform_dill,
-                struct(files = files, twins = twins) if files else None,
+                struct(files = files, twins = plan.twins) if files else None,
             )
             return None
     return _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan)
@@ -633,37 +629,31 @@ def flutter_compile_kernel(ctx, flutter_sdk_info, target, inputs):
     mode = flutter_build_mode(ctx)
     dev = _kernel_dev_config(ctx, st, mode)
 
-    aot = target.aot
-    if aot == None:
-        aot = mode != "debug"
+    aot = target.aot if target.aot != None else (mode != "debug")
     platform_dill = _resolve_kernel_platform_dill(target.platform_dill, aot, mode, flutter_sdk_info)
     agent = stage_agent_extensions(ctx, aot, mode)
+    twins = flutter_closure_twins(ctx) if agent.constant else []
+    sdk_reg = [t.registrant_uri for t in twins if getattr(t, "registrant_uri", None)]
     build_info = _build_info_json(ctx, struct(mode = mode, aot = aot), inputs, target.target_platform)
-    reg = _kernel_registrant(ctx, target.target_platform, agent, dev.emit, build_info)
+    reg = _kernel_registrant(ctx, target.target_platform, agent, dev.emit, build_info, sdk_reg)
     flags = _kernel_compile_flags(ctx, inputs.track_widget_creation, mode, aot)
 
     kernel_dill = ctx.actions.declare_file(ctx.label.name + ".dill")
-    config_file = _run_kernel_compile(
-        ctx,
-        flutter_sdk_info,
-        st,
-        agent,
-        reg,
-        flags,
-        # The resolved compile plan: how to compile plus the declared
-        # output and the resolved platform dill, built once here and read
-        # by the modular check and both compile paths.
-        struct(
-            mode = mode,
-            aot = aot,
-            frontend_server_target = target.frontend_server_target,
-            native_assets_manifest = inputs.native_assets_manifest,
-            recorded_uses = inputs.recorded_uses,
-            assets_dir = inputs.assets_dir,
-            kernel_dill = kernel_dill,
-            platform_dill = platform_dill,
-        ),
+
+    # The resolved compile plan: how to compile plus the declared
+    # output and the resolved platform dill, built once here and read
+    # by the modular check and both compile paths.
+    plan = struct(
+        mode = mode,
+        aot = aot,
+        frontend_server_target = target.frontend_server_target,
+        native_assets_manifest = inputs.native_assets_manifest,
+        recorded_uses = inputs.recorded_uses,
+        twins = twins,
+        kernel_dill = kernel_dill,
+        platform_dill = platform_dill,
     )
+    config_file = _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan)
     return struct(
         kernel_dill = kernel_dill,
         package_config = config_file,

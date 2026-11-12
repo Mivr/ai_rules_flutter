@@ -19,11 +19,12 @@ def _dart_string(text):
     escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("$", "\\$")
     return "'" + escaped.replace("\n", "\\n").replace("\r", "\\r") + "'"
 
-def _render_plugin_registrant(dart_plugins, agent_import, native_agent_import, build_info_json):
+def _render_plugin_registrant(dart_plugins, agent_import, native_agent_import, build_info_json, extra_imports):
     """Renders the `_PluginRegistrant` Dart source for collected entries."""
     lines = ["// GENERATED — do not edit.", "// ignore_for_file: depend_on_referenced_packages"]
     lines += ["import '%s' as agent;" % agent_import] if agent_import else []
     lines += ["import '%s' as native_agent;" % native_agent_import] if native_agent_import else []
+    lines += ["import '%s';" % uri for uri in extra_imports]
     lines += ["import 'package:%s/%s';" % (p.package, p.dart_file_name) for p in dart_plugins]
     lines += ["", "@pragma('vm:entry-point')", "class _PluginRegistrant {"]
     lines += ["  @pragma('vm:entry-point')", "  static void register() {"]
@@ -43,7 +44,8 @@ def make_registrant_content(
         target_platform = None,
         agent_import = None,
         native_agent_import = None,
-        build_info_json = None):
+        build_info_json = None,
+        extra_imports = ()):
     """Generate Dart source content for plugin registration.
 
     Two output shapes depending on `target_platform`:
@@ -82,6 +84,7 @@ def make_registrant_content(
             also calls `registerRulesFlutterNativeAgentExtensions()`.
         build_info_json: Optional JSON build record; with `agent_import`, `register()`
             hands it to the agent via `setRulesFlutterBuildInfo` first of all.
+        extra_imports: Optional sequence of extra library URIs imported by the registrant.
 
     Returns:
         String of Dart source code, or empty string if there are no Dart
@@ -99,7 +102,7 @@ def make_registrant_content(
     if not dart_plugins and not agent_import and not native_agent_import:
         return ""
 
-    return _render_plugin_registrant(dart_plugins, agent_import, native_agent_import, build_info_json)
+    return _render_plugin_registrant(dart_plugins, agent_import, native_agent_import, build_info_json, extra_imports)
 
 def _make_web_registrant_content(plugins):
     """Generate the Dart registrant source for Flutter web.
@@ -739,18 +742,11 @@ def generate_dev_plugin_registrants(ctx, plugins, agent_import = None, native_ag
     """
     registrants = {}
     for platform in DEV_REGISTRANT_PLATFORMS:
-        content = make_registrant_content(
-            plugins,
-            target_platform = platform,
-            agent_import = agent_import,
-            native_agent_import = native_agent_import,
-        )
+        content = make_registrant_content(plugins, platform, agent_import, native_agent_import)
         if not content:
             registrants[platform] = None
             continue
-        out = ctx.actions.declare_file(
-            "%s.dev_plugin_registrant.%s.dart" % (ctx.label.name, platform),
-        )
+        out = ctx.actions.declare_file("%s.dev_plugin_registrant.%s.dart" % (ctx.label.name, platform))
         ctx.actions.write(out, content)
         registrants[platform] = out
     return registrants
@@ -762,7 +758,8 @@ def generate_dart_plugin_registrant(
         agent_import = None,
         native_agent_import = None,
         build_info_json = None,
-        declared_path = None):
+        declared_path = None,
+        extra_imports = ()):
     """Generate a Dart plugin registrant source file via ctx.actions.write.
 
     Args:
@@ -773,16 +770,18 @@ def generate_dart_plugin_registrant(
         native_agent_import: The same, for the native-only agent extensions.
         build_info_json: Optional JSON build record handed to the agent from `register()`.
         declared_path: Optional package-relative path to declare it at.
+        extra_imports: Optional sequence of extra library URIs for the registrant to import.
 
     Returns:
         File: The registrant, or None with no Dart plugins and no agent.
     """
     content = make_registrant_content(
         plugins,
-        target_platform = target_platform,
-        agent_import = agent_import,
-        native_agent_import = native_agent_import,
-        build_info_json = build_info_json,
+        target_platform,
+        agent_import,
+        native_agent_import,
+        build_info_json,
+        extra_imports,
     )
     if not content:
         return None

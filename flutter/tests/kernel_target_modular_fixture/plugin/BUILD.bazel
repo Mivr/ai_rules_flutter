@@ -1,0 +1,12 @@
+load("//flutter:defs.bzl", "flutter_plugin")
+
+flutter_plugin(
+    name = "plugin",
+    package_name = "modular_fixture_plugin",
+    srcs = ["lib/modular_fixture_plugin.dart"],
+    dart_plugin_class = "ModularFixturePlugin",
+    platforms = ["linux"],
+    tags = ["manual"],
+    visibility = ["//flutter/tests:__subpackages__"],
+    deps = ["//flutter/tests/kernel_target_modular_fixture/flutter"],
+)
