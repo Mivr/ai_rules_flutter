@@ -12,3 +12,7 @@ test --aspects=@rules_dart//dart:analyze.bzl%dart_analyze
 test --output_groups=+dart_analyze
 test --output_groups=+dart_format
 common --@rules_dart//dart:analysis_config=//:analysis_config
+
+# Each Android flutter_integration_test boots its own emulator. A free CI runner
+# cannot boot 4 of them within the 120 s wait, so run at most 2 tests at once.
+test --local_test_jobs=2
