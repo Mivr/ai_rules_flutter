@@ -11,11 +11,11 @@ aggregator is a `kt_android_library` whose deps are every spoke's
 `make_android_subpackage_build_content`). A plugin pub spoke reads the
 checksum table lazily, only after finding its own `Package.swift`.
 
-`flutter_android_app` depends on `@<hub>//android:all_android_plugin_libs`
-to compile every transitively-needed plugin's Kotlin/Java sources into
-the final `android_binary`. Spokes without Android sources contribute
-an empty `:lib` (a no-op at link time) so the aggregator's deps list
-is mechanical.
+`flutter_android_app` does not use the aggregator: an app compiles the Android
+library of each plugin in its own transitive Dart dependencies, which each
+plugin's Dart target names. The aggregator stays for a caller that names it.
+Spokes without Android sources contribute an empty `:lib` (a no-op at link
+time) so the aggregator's deps list is mechanical.
 
 Loaded lazily — Bazel only parses `android/BUILD.bazel` when something
 queries the aggregator. Non-Android workspaces (mac-only, web-only)
@@ -29,6 +29,163 @@ this one. `pub.pub()` (in non-Flutter modules) keeps using
 
 visibility(["//flutter/..."])
 
+_ANDROID_EDGE_ATTR = (
+    '    android_libs = select({"@platforms//os:android": ["//android:lib"], ' +
+    '"//conditions:default": []}),\n'
+)
+
+def android_plugin_libs_arg(plugin_platforms_json):
+    """The `android_libs` attribute line for an Android native or FFI plugin, or `""`.
+
+    Federated umbrellas (`default_package` only) and pure-Dart Android
+    implementations (`dartPluginClass` only, or `pluginClass: "none"`) ship no
+    Android library and are not named in `GeneratedPluginRegistrant.java`, so
+    they carry no edge; native (`pluginClass`) and FFI (`ffiPlugin`) plugins do.
+
+    Args:
+        plugin_platforms_json: JSON-encoded `flutter.plugin.platforms` dict.
+
+    Returns:
+        The indented `android_libs = select(...)` line, or `""`.
+    """
+    android = json.decode(plugin_platforms_json or "{}").get("android") or {}
+    plugin_class = android.get("pluginClass", "")
+    if (plugin_class and plugin_class != "none") or android.get("ffiPlugin") == True:
+        return _ANDROID_EDGE_ATTR
+    return ""
+
+def overlay_with_android_edge(content, package_name):
+    """Gives an overlay's `flutter_plugin` the same Android edge a generated one has.
+
+    An overlay that already sets `android_libs`, or whose plugin call is not
+    shaped `flutter_plugin(name = "<package>", ...)`, is returned untouched.
+
+    Args:
+        content: Rendered `BUILD.bazel` text of the overlay spoke.
+        package_name: The pub package name whose `flutter_plugin` gains the edge.
+
+    Returns:
+        `content` with the `android_libs` `select()` inserted, or `content` unchanged.
+    """
+    head = 'flutter_plugin(\n    name = "%s",\n' % package_name
+    if head not in content or "android_libs" in content:
+        return content
+    return content.replace(head, head + _ANDROID_EDGE_ATTR, 1)
+
+def hub_scc_dep_targets(hub_name, scc_targets):
+    """Maps each SCC member package to its `@<hub>//:<pkg>` hub target.
+
+    Singleton pub spokes route dependencies on cycle members through the hub so
+    an Android build traverses the hub's `@platforms//os:android` plugin edge.
+
+    Args:
+        hub_name: Apparent name of the hub repository.
+        scc_targets: Mapping `package -> "@<scc_repo>//:<package>"` for cycle members.
+
+    Returns:
+        Mapping `package -> "@<hub>//:<package>"`, or `{}` when `scc_targets` is empty.
+    """
+    return {
+        pkg: "@{hub}//:{pkg}".format(hub = hub_name, pkg = pkg)
+        for pkg in scc_targets
+    }
+
+def make_hub_scc_android_edge_bzl_content():
+    """Renders `scc_android_edge.bzl` for a hub with merged SCC targets.
+
+    Emitted only when `scc_targets` is non-empty. Loads only `@rules_dart` and
+    `@rules_flutter` providers so non-Android workspaces never load
+    `@rules_android` or `@rules_kotlin`.
+
+    Returns:
+        The Starlark source string for `scc_android_edge.bzl`.
+    """
+    return """\
+\"\"\"Hub forwarding rule attaching Android plugin libraries to merged SCC targets.\"\"\"
+
+load("@rules_dart//dart:providers.bzl", "DartAnalyzableInfo", "DartCodeAssetInfo", "DartInfo", "DartKernelInfo")
+load("@rules_flutter//flutter:providers.bzl", "FlutterInfo")
+
+def _flutter_pub_scc_android_edge_impl(ctx):
+    \"\"\"Forwards Dart and Flutter providers from the merged SCC member target.\"\"\"
+    dep = ctx.attr.deps[0]
+    providers = [
+        DefaultInfo(
+            files = dep[DefaultInfo].files,
+            runfiles = dep[DefaultInfo].default_runfiles,
+        ),
+        dep[DartInfo],
+    ]
+    for p in (DartAnalyzableInfo, DartCodeAssetInfo, DartKernelInfo, FlutterInfo):
+        if p in dep:
+            providers.append(dep[p])
+    return providers
+
+flutter_pub_scc_android_edge = rule(
+    implementation = _flutter_pub_scc_android_edge_impl,
+    attrs = {
+        "deps": attr.label_list(
+            mandatory = True,
+            providers = [DartInfo],
+            doc = "Single-element list naming the merged SCC member target.",
+        ),
+        "android_libs": attr.label_list(
+            default = [],
+            doc = "Android plugin libraries across the SCC's members.",
+        ),
+        "srcs_dir": attr.string(
+            default = ".",
+            doc = "Marks multi-package SCC targets opaque to modular kernel compilation.",
+        ),
+    },
+    doc = "Attaches an SCC's Android plugin libraries under Android while forwarding Dart/Flutter providers.",
+)
+"""
+
+def _scc_members_by_repo(scc_targets):
+    """Groups non-`test` SCC member package names by their merged `@<scc_repo>` prefix."""
+    by_repo = {}
+    for member in sorted(scc_targets):
+        if member == "test":
+            continue
+        repo = scc_targets[member].partition("//:")[0]
+        by_repo.setdefault(repo, []).append(member)
+    return by_repo
+
+def _render_scc_hub_entry(pkg, actual, repo_members):
+    """Renders the Android edge target and `select()` alias for one SCC member `pkg`."""
+    scc_repo = actual.partition("//:")[0]
+    lib_lines = [
+        '            "{repo}//{m}/android:lib",'.format(repo = scc_repo, m = m)
+        for m in repo_members
+    ]
+    libs_block = "\n".join(lib_lines)
+    return """\
+flutter_pub_scc_android_edge(
+    name = "_scc_android_{pkg}",
+    android_libs = select({{
+        "@platforms//os:android": [
+{libs}
+        ],
+        "//conditions:default": [],
+    }}),
+    tags = ["manual"],
+    deps = ["{actual}"],
+)
+
+alias(
+    name = "{pkg}",
+    actual = select({{
+        "@platforms//os:android": ":_scc_android_{pkg}",
+        "//conditions:default": "{actual}",
+    }}),
+    visibility = ["//visibility:public"],
+)""".format(
+        pkg = pkg,
+        actual = actual,
+        libs = libs_block,
+    )
+
 def make_flutter_pub_hub_build_content(packages, spoke_prefix, scc_targets = {}):
     """Renders the root `BUILD.bazel` aliases for a `flutter_pub_lock_hub` repo.
 
@@ -41,13 +198,23 @@ def make_flutter_pub_hub_build_content(packages, spoke_prefix, scc_targets = {})
     Returns:
         The generated `BUILD.bazel` text.
     """
-    aliases = []
+    by_repo = _scc_members_by_repo(scc_targets)
+    has_scc_edges = False
+    entries = []
     for pkg in packages:
+        if pkg in scc_targets and pkg != "test":
+            actual = scc_targets[pkg]
+            scc_repo = actual.partition("//:")[0]
+            repo_members = by_repo.get(scc_repo, [])
+            if repo_members:
+                has_scc_edges = True
+                entries.append(_render_scc_hub_entry(pkg, actual, repo_members))
+                continue
         actual = scc_targets[pkg] if pkg in scc_targets else "@{spoke}__{pkg}//:{pkg}".format(
             spoke = spoke_prefix,
             pkg = pkg,
         )
-        aliases.append("""\
+        entries.append("""\
 alias(
     name = "{pkg}",
     actual = "{actual}",
@@ -56,7 +223,8 @@ alias(
             pkg = pkg,
             actual = actual,
         ))
-    return "\n\n".join(aliases) + "\n"
+    header = 'load(":scc_android_edge.bzl", "flutter_pub_scc_android_edge")\n\n' if has_scc_edges else ""
+    return header + "\n\n".join(entries) + "\n"
 
 def make_flutter_pub_hub_android_build_content(packages, spoke_prefix, scc_targets = {}):
     """Renders `android/BUILD.bazel` for a `flutter_pub_lock_hub` repo.
@@ -92,9 +260,9 @@ load("@rules_kotlin//kotlin:android.bzl", "kt_android_library")
 
 # Aggregator — re-exports every spoke's `android:lib`. Spokes without
 # Android sources contribute empty libraries (a no-op at link time).
-# The `flutter_android_app` Tier-1 macro adds this label to its
-# `android_binary.deps`, ensuring every Flutter plugin's Kotlin/Java
-# is on the runtime classpath without per-plugin manual wiring.
+# `flutter_android_app` does not add it: an app takes only the Android
+# libraries of the plugins its Dart graph reaches. A caller may name it
+# in `deps` to package every plugin in the lock.
 #
 # `exports = [...]` (rather than `deps = [...]`) is required by
 # rules_android: a `kt_android_library` without `srcs` or
@@ -148,6 +316,8 @@ def _flutter_pub_lock_hub_impl(ctx):
         }),
     )
 
+    if scc_targets:
+        ctx.file("scc_android_edge.bzl", make_hub_scc_android_edge_bzl_content())
     ctx.file(
         "BUILD.bazel",
         make_flutter_pub_hub_build_content(ctx.attr.packages, spoke_prefix, scc_targets),
@@ -206,7 +376,7 @@ flutter_pub_lock_hub = repository_rule(
         ),
     },
     doc = "Creates a Flutter pub hub repo with both the standard top-level package aliases " +
-          "and an `android/all_android_plugin_libs` aggregator that the `flutter_android_app` " +
-          "Tier-1 macro depends on. The aggregator pulls in every spoke's `android:lib`, " +
-          "compiling all plugins' Kotlin/Java automatically.",
+          "and an `android/all_android_plugin_libs` aggregator that a caller may name. The " +
+          "aggregator pulls in every spoke's `android:lib`; `flutter_android_app` selects " +
+          "its plugins from the app's Dart dependencies instead.",
 )

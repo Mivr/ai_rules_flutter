@@ -224,7 +224,7 @@ flutter_application(
 )
 ```
 
-Plugins need no special treatment. A pub package that is a Flutter plugin arrives as a plugin target, and the platform macros register it and build its native code. On Android the hub also exposes `@deps//android:all_android_plugin_libs`, the Kotlin and Java of every plugin, and `flutter_android_app` adds it to the APK for you.
+Plugins need no special treatment. A pub package that is a Flutter plugin arrives as a plugin target, and the platform macros register it and build its native code. On Android `flutter_android_app` packages the Kotlin and Java of the plugins your app's Dart dependencies reach, and no others, so an unrelated plugin in the lock never changes the app. The hub also exposes `@deps//android:all_android_plugin_libs`, the Android library of every plugin in the lock, for a target that names it.
 
 A plugin's Gradle build is not read while the hub's spokes are fetched. Each Android plugin has its own repository, and its `android/build.gradle` (`build.gradle.kts`) is read only when an Android target analyses the spoke's `android:lib` alias. An iOS-, macOS-, web- or Dart-only build therefore resolves the hub without reading any Gradle model, so an untranslatable Android dependency cannot fail it. A wildcard query over the hub (`bazel query @deps//...`) reaches the Android targets and therefore fetches those plugin repositories.
 

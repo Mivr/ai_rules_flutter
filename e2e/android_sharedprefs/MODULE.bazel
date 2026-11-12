@@ -72,6 +72,14 @@ flutter = use_extension("@rules_flutter//flutter:extensions.bzl", "flutter")
 flutter.toolchain(flutter_version = "3.47.7")
 flutter.pub(
     name = "deps",
+    # Registrant-only workspace: `shared_preferences_android`'s Kotlin library
+    # is analyzed through its Android `select()` edge but never compiled here,
+    # so its DataStore/Preference coordinates need no `maven.install` target.
+    android_maven_ignore = [
+        "androidx.datastore:datastore",
+        "androidx.datastore:datastore-preferences",
+        "androidx.preference:preference",
+    ],
     lock = "//:pubspec.lock",
 )
 use_repo(flutter, "deps", "flutter_android_engine_arm64", "flutter_toolchains", "flutter_web_sdk")

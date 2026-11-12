@@ -94,12 +94,37 @@ def _hub_build_content_with_sccs_test_impl(ctx):
     root_content = make_flutter_pub_hub_build_content(packages, "deps", scc_targets = scc_targets)
     asserts.true(
         env,
-        'actual = "@deps__scc__cycle_a__cycle_b//:cycle_a"' in root_content,
+        'load(":scc_android_edge.bzl", "flutter_pub_scc_android_edge")' in root_content,
         root_content,
     )
     asserts.true(
         env,
-        'actual = "@deps__scc__cycle_a__cycle_b//:cycle_b"' in root_content,
+        '"//conditions:default": "@deps__scc__cycle_a__cycle_b//:cycle_a"' in root_content,
+        root_content,
+    )
+    asserts.true(
+        env,
+        '"@platforms//os:android": ":_scc_android_cycle_a"' in root_content,
+        root_content,
+    )
+    asserts.true(
+        env,
+        'deps = ["@deps__scc__cycle_a__cycle_b//:cycle_a"]' in root_content,
+        root_content,
+    )
+    asserts.true(
+        env,
+        '"//conditions:default": "@deps__scc__cycle_a__cycle_b//:cycle_b"' in root_content,
+        root_content,
+    )
+    asserts.true(
+        env,
+        '"@platforms//os:android": ":_scc_android_cycle_b"' in root_content,
+        root_content,
+    )
+    asserts.true(
+        env,
+        '"@deps__scc__cycle_a__cycle_b//cycle_a/android:lib"' in root_content,
         root_content,
     )
     asserts.true(

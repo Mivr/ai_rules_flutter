@@ -61,6 +61,7 @@ load(
     "pub_shader_condition_entries",
 )
 load(":flutter_pub_cover.bzl", "covering_entry", "covering_entry_lookup")
+load(":flutter_pub_lock_hub.bzl", "android_plugin_libs_arg", "hub_scc_dep_targets", "overlay_with_android_edge")
 load(":flutter_pub_maven.bzl", _maven_deps_attr = "maven_deps_attr", _maven_ignore_attr = "maven_ignore_attr")
 load(
     ":flutter_pub_mirror.bzl",
@@ -535,19 +536,12 @@ def make_flutter_plugin_build_content(
 
     # Branch labels compose the classified package name with fixed
     # suffixes; nothing walked or declared reaches them unquoted.
-    linux_libs_arg = ""
-    if linux_src_dir:
-        linux_libs_arg = '    linux_libs = [":{name}_linux"],\n'.format(name = name)
+    linux_libs_arg = '    linux_libs = [":%s_linux"],\n' % name if linux_src_dir else ""
+    windows_libs_arg = '    windows_libs = [":%s_windows"],\n' % name if windows_src_dir else ""
 
-    windows_libs_arg = ""
-    if windows_src_dir:
-        windows_libs_arg = '    windows_libs = [":{name}_windows"],\n'.format(name = name)
-
-    # Android sources travel through a sibling `android/` sub-package, which
-    # the hub's `all_android_plugin_libs` deps on and the application macro
-    # adds to `binary_deps`. See `make_android_subpackage_build_content`.
-    # Nothing rides a provider: the wiring happens at macro-load time, where
-    # providers cannot be read.
+    # Android sources travel through a sibling `android/` sub-package. The plugin
+    # reaches it through `android_libs`, selected only under the Android platform,
+    # so an app's plugin closure finds the library on the Dart graph.
 
     # Apple PrivacyInfo.xcprivacy files: thread through `apple_privacy_files`
     # on the flutter_plugin so they propagate via FlutterInfo to the platform
@@ -568,7 +562,8 @@ flutter_plugin(
 {resources}{deps}    package_name = "{name}",
     plugin_platforms_json = {plugin_platforms_json_literal},
     language_version = "{language_version}",
-{version}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
+{version}{apple_libs_arg}{linux_libs_arg}{windows_libs_arg}\
+{android_libs_arg}{apple_privacy_files_arg}{asset_attrs}{pub_attrs}    visibility = ["//visibility:public"],
 )
 {extra_targets}
 """.format(
@@ -584,6 +579,7 @@ flutter_plugin(
         apple_libs_arg = apple_libs_arg,
         linux_libs_arg = linux_libs_arg,
         windows_libs_arg = windows_libs_arg,
+        android_libs_arg = android_plugin_libs_arg(plugin_platforms_json),
         apple_privacy_files_arg = apple_privacy_files_arg,
         pub_attrs = pub_attrs,
     )
@@ -1196,25 +1192,16 @@ def _spoke_asset_inputs(ctx, package_name, asset_block):
 def _write_overlay_spoke(ctx, overlay_content, overlay_android_content):
     """Emits an overlay's BUILD content, replacing auto-generation entirely.
 
-    When the overlay ships an `android/BUILD.bazel.tpl`, it is used
-    verbatim. Otherwise an empty stub is emitted so the hub's
-    `android/all_android_plugin_libs` aggregator can depend on
-    `@<spoke>//android:lib` uniformly across overlay-and-no-Android
+    When the overlay ships an `android/BUILD.bazel.tpl`, it is used verbatim and
+    its plugin gains the Android edge. Otherwise an empty stub is emitted so
+    `@<spoke>//android:lib` exists uniformly across overlay-and-no-Android
     plugins (audio_session declares Android sources and ships the full
     sub-package; objective_c is pure Apple and gets the stub).
     """
-    ctx.file("BUILD.bazel", overlay_content)
     if overlay_android_content:
-        ctx.file("android/BUILD.bazel", overlay_android_content)
-    else:
-        ctx.file(
-            "android/BUILD.bazel",
-            make_android_subpackage_build_content(
-                android_src_dir = "",
-                java_package = "",
-                extra_maven_labels = [],
-            ),
-        )
+        overlay_content = overlay_with_android_edge(overlay_content, ctx.attr.package_name)
+    ctx.file("BUILD.bazel", overlay_content)
+    ctx.file("android/BUILD.bazel", overlay_android_content or _android_make_subpackage_build_content("", "", []))
 
 def _detect_desktop_plugin_sources(ctx, package_name, plugin_block):
     """Detects Linux/Windows sources when pluginClass is set on that platform.
@@ -1499,8 +1486,13 @@ def _generate_spoke(ctx):
     pubspec = _read_spoke_pubspec(ctx)
     bazel_deps = _verify_spoke_deps(ctx, pubspec)
 
-    # Build full label strings for sibling spoke repos.
-    dep_labels = spoke_dep_labels(ctx, bazel_deps, pubspec.asset_block)
+    # Build full label strings for sibling spoke repos, routing cycle members through the hub.
+    dep_labels = spoke_dep_labels(
+        ctx,
+        bazel_deps,
+        pubspec.asset_block,
+        scc_targets = hub_scc_dep_targets(ctx.attr.hub_name, ctx.attr.scc_targets),
+    )
 
     # Pre-compute the pub-asset attr inputs once. Used by either branch
     # below (plugin vs library).
@@ -1540,17 +1532,10 @@ def _generate_spoke(ctx):
     # Android directory or its Gradle build; Bazel fetches and analyses that
     # repository only when an Android target analyses the alias. Every other
     # package keeps the empty stub the hub aggregator depends on.
-    if spoke.android_plugin:
-        android_build_content = android_spoke_alias_content(
-            android_package_repo_name(ctx.attr.hub_name, ctx.attr.package_name),
-        )
-    else:
-        android_build_content = make_android_subpackage_build_content(
-            android_src_dir = "",
-            java_package = "",
-            extra_maven_labels = [],
-        )
-    ctx.file("android/BUILD.bazel", android_build_content)
+    repo = android_package_repo_name(ctx.attr.hub_name, ctx.attr.package_name)
+    stub = _android_make_subpackage_build_content("", "", [])
+    alias = android_spoke_alias_content(repo) if spoke.android_plugin else stub
+    ctx.file("android/BUILD.bazel", alias)
 
 spoke_asset_inputs = _spoke_asset_inputs
 detect_desktop_plugin_sources = _detect_desktop_plugin_sources

@@ -11391,8 +11391,8 @@
     },
     "@@ai_rules_flutter+//flutter:extensions.bzl%flutter": {
       "general": {
-        "bzlTransitiveDigest": "5KXhttGSkmHiFOAKrH81DCuXsFJwRZDdLxy+69uBOBk=",
-        "usagesDigest": "nJjyRzLip+9zkyyyvMKAyg/zTDrqtimj/hT6Fp0uSl0=",
+        "bzlTransitiveDigest": "pA5fEsIQhF5+k2mb/DcEsgavvgBlJ3ovlVxY7v2ULi8=",
+        "usagesDigest": "4eryfPPvb999+6UV3IyTuJJ6bErm4RAGWHepuYTzf5s=",
         "recordedInputs": [
           "REPO_MAPPING:ai_rules_dart+,dart_pub_scanner ai_rules_dart++dart+dart_pub_scanner",
           "REPO_MAPPING:ai_rules_flutter+,rules_cc rules_cc+",
@@ -12626,7 +12626,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -12640,7 +12644,11 @@
               "sha256": "d0481093c50b1da8910eb0bb301626d4d8eb7284aa739614d2b394ee09e3ea04",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__characters": {
@@ -12704,7 +12712,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -12718,7 +12730,11 @@
               "sha256": "faf38497bda5ead2a8c7615f4f7939df04333478bf32e4173fcb06d428b5716b",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__code_assets": {
@@ -12786,7 +12802,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -12800,7 +12820,11 @@
               "sha256": "1ef22a0be3af9370bd9481ac76db114db92bfe75d5ca2b2d7bc911764478a4d9",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__collection": {
@@ -12864,7 +12888,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -12878,7 +12906,11 @@
               "sha256": "2f5709ae4d3d59dd8f7cd309b4e023046b57d8a6c82130785d2b0e5868084e76",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__crypto": {
@@ -12942,7 +12974,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -12956,7 +12992,11 @@
               "sha256": "e3626ae6270383c9e3a549f34c9e4cd26c09ae6a9adaab2bf4737a00340efdc4",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__ffi": {
@@ -13020,7 +13060,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13034,7 +13078,11 @@
               "sha256": "6d7fd89431262d8f3125e81b50d3847a091d846eafcd4fdb88dd06f36d705a45",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__file": {
@@ -13101,7 +13149,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13115,7 +13167,11 @@
               "sha256": "a3b4f84adafef897088c160faf7dfffb7696046cb13ae90b508c2cbc95d3b8d4",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__hooks": {
@@ -13186,7 +13242,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13200,7 +13260,11 @@
               "sha256": "eaac480a35ec0814146c2c48d96aaa829e0e44a7662c88ae84c9edf4bc35651f",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__jni": {
@@ -13273,7 +13337,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13341,7 +13409,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13355,7 +13427,11 @@
               "sha256": "1ba86da04a5f2bf18fde2edb235587e70c5b0fc5bd4ba955f46b00942c3fc35f",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__logging": {
@@ -13419,7 +13495,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13433,7 +13513,11 @@
               "sha256": "c8245ada5f1717ed44271ed1c26b8ce85ca3228fd2ffdb75468ab01979309d61",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__material_color_utilities": {
@@ -13499,7 +13583,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13513,7 +13601,11 @@
               "sha256": "9c337007e82b1889149c82ed242ed1cb24a66044e30979c44912381e9be4c48b",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__meta": {
@@ -13577,7 +13669,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13591,7 +13687,11 @@
               "sha256": "307249ce4ff29d58a18e97f6345f539382eb9c9c29ecda628900f31de0443dd9",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__objective_c": {
@@ -13663,7 +13763,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13731,7 +13835,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13745,7 +13853,11 @@
               "sha256": "ffcf4cf3d6c0b74ac43708d9f56625506e8a68aa935abe9d267a7330f320eb5d",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__path": {
@@ -13809,7 +13921,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13823,7 +13939,11 @@
               "sha256": "75cca69d1490965be98c73ceaea117e8a04dd21217b37b292c9ddbec0d955bc5",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__path_provider_linux": {
@@ -13893,7 +14013,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13907,7 +14031,11 @@
               "sha256": "58c2005f147315b11e9b4a7bc889cd5203e250cba8e3f012dae259b4972b5c16",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__path_provider_platform_interface": {
@@ -13975,7 +14103,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -13989,7 +14121,11 @@
               "sha256": "484838772624c3a4b94f1e44a3e19897fee738f2d5c4ce448443b0417f7c9dda",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__path_provider_windows": {
@@ -14058,7 +14194,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14072,7 +14212,11 @@
               "sha256": "bd6f00dbd873bfb70d0761682da2b3a2c2fccc2b9e84c495821639601d81afe7",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__platform": {
@@ -14138,7 +14282,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14152,7 +14300,11 @@
               "sha256": "a36d119c13416516a7b5913fbe8af8531e11633d784c550b2125f76c758524ec",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__plugin_platform_interface": {
@@ -14218,7 +14370,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14232,7 +14388,11 @@
               "sha256": "4820fbfdb9478b1ebae27888254d445073732dae3d6ea81f0b7e06d5dedc3f02",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__pub_semver": {
@@ -14298,7 +14458,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14312,7 +14476,11 @@
               "sha256": "261236774e8b1d69cfc6b9eabbc96c40f25e7a2d6b171f3385d4f65d5734fb24",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__record_use": {
@@ -14380,7 +14548,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14394,7 +14566,11 @@
               "sha256": "1cb8564af8d43b464294411db9217f5ec04891c6f22ee2c32d73ae05e88a6bd2",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__shared_preferences": {
@@ -14466,7 +14642,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14480,7 +14660,11 @@
               "sha256": "1e85e0dccf5b4a016077fea7dfbb4a7cb39c759ac1596fcf60c06deadb7da91f",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__shared_preferences_android": {
@@ -14549,7 +14733,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14563,7 +14751,11 @@
               "sha256": "33b38b07d9ac7d16aff0426c61418752fd3e7a8c7dc8be786c875d6ce673b002",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__shared_preferences_foundation": {
@@ -14633,7 +14825,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14647,7 +14843,11 @@
               "sha256": "4e396ac6f8751ab7d2d6e27f22f32c8350b07006028d534f5221503382f1fa69",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__shared_preferences_linux": {
@@ -14718,7 +14918,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14732,7 +14936,11 @@
               "sha256": "580abfd40f415611503cae30adf626e6656dfb2f0cee8f465ece7b6defb40f2f",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__shared_preferences_platform_interface": {
@@ -14799,7 +15007,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14813,7 +15025,11 @@
               "sha256": "649dc798a33931919ea356c4305c2d1f81619ea6e92244070b520187b5140ef9",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__shared_preferences_web": {
@@ -14882,7 +15098,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14896,7 +15116,11 @@
               "sha256": "c49bd060261c9a3f0ff445892695d6212ff603ef3115edbb448509d407600019",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__shared_preferences_windows": {
@@ -14967,7 +15191,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -14981,7 +15209,11 @@
               "sha256": "94ef0f72b2d71bc3e700e025db3710911bd51a71cefb65cc609dd0d9a982e3c1",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__source_span": {
@@ -15049,7 +15281,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -15063,7 +15299,11 @@
               "sha256": "56a02f1f4cd1a2d96303c0144c93bd6d909eea6bee6bf5a0e0b685edbd4c47ab",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__string_scanner": {
@@ -15129,7 +15369,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -15143,7 +15387,11 @@
               "sha256": "921cd31725b72fe181906c6a94d987c78e3b98c2e205b397ea399d4054872b43",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__term_glyph": {
@@ -15207,7 +15455,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -15221,7 +15473,11 @@
               "sha256": "7f554798625ea768a7518313e58f83891c7f5024f88e46e7182a4558850a4b8e",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__vector_math": {
@@ -15285,7 +15541,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -15299,7 +15559,11 @@
               "sha256": "fa49e1674cb84acb900141714e6c6e1f9ae099827c24d141430ff6819db4e1bc",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__very_good_analysis": {
@@ -15363,7 +15627,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -15377,7 +15645,11 @@
               "sha256": "481af67ab5877af20325251dc215a4ebac7666a1c8cf09198ffd457bc612b33d",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__web": {
@@ -15441,7 +15713,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -15455,7 +15731,11 @@
               "sha256": "e119e82ac4795c7925103b7cf3768191f33941b99e7ccffbd6c645201d9f606b",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__xdg_directories": {
@@ -15522,7 +15802,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -15536,7 +15820,11 @@
               "sha256": "7a3f37b05d989967cdddcbb571f1ea834867ae2faa29725fd085180e0883aa15",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__yaml": {
@@ -15604,7 +15892,11 @@
               "code_assets": [],
               "ignore_hook": false,
               "android_maven_deps": {},
-              "android_maven_ignore": [],
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ],
               "ios_native_deps": "@@ai_rules_flutter++flutter+deps//:ios_native_deps.json",
               "pubspec_lock": "@@//:pubspec.lock"
             }
@@ -15618,7 +15910,11 @@
               "sha256": "f67cdd8e07d3c6329146aaef1ba043542b3134c12489f553ca9a7435d1068aea",
               "base_url": "https://pub.dev",
               "android_maven_deps": {},
-              "android_maven_ignore": []
+              "android_maven_ignore": [
+                "androidx.datastore:datastore",
+                "androidx.datastore:datastore-preferences",
+                "androidx.preference:preference"
+              ]
             }
           },
           "deps__flutter": {
