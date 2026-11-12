@@ -4,6 +4,7 @@
 import argparse
 import io
 import os
+import pathlib
 import plistlib
 import struct
 import sys
@@ -361,7 +362,8 @@ class FrontendTest(unittest.TestCase):
         class Proc:
             pid = 1
             stdin = io.StringIO()
-            stdout = iter(["result K1\n", "K1 out.dill 0\n"])
+            stdout = iter(["result K1\n", "K1\n", "+file:///a.dart\n",
+                           "-file:///b.dart\n", "K1 out.dill 0\n"])
         written = []
         Proc.stdin.write = written.append
         Proc.stdin.flush = lambda: None
@@ -377,6 +379,78 @@ class FrontendTest(unittest.TestCase):
         self.assertEqual("compile file:///m.dart\n", written[0])
         self.assertEqual("accept\n", written[1])
         self.assertEqual(1.0, server.baseline)
+
+
+class ReplyTest(unittest.TestCase):
+    def read(self, lines):
+        class Proc:
+            pid = 1
+            stdout = iter(lines)
+        server = floor_run.FrontendServer(
+            ["fe"], popen=lambda *a, **k: Proc())
+        try:
+            return server._read_result()
+        finally:
+            server.errlog.close()
+
+    def test_reply_with_dependency_lines(self):
+        fields, _, diags = self.read(
+            ["result K\n", "warn\n", "K\n", "+file:///a.dart\n",
+             "-file:///b.dart\n", "K out.dill 0\n"])
+        self.assertEqual(["out.dill", "0"], fields)
+        self.assertEqual(["warn"], diags)
+
+    def test_reply_without_dependency_lines(self):
+        fields, _, _ = self.read(["result K\n", "K out.dill 0\n"])
+        self.assertEqual(["out.dill", "0"], fields)
+
+    def test_failing_reply_with_dependency_lines(self):
+        fields, _, diags = self.read(
+            ["result K\n", "bad\n", "K\n", "+file:///a.dart\n",
+             "K out.dill 3\n"])
+        self.assertEqual(["out.dill", "3"], fields)
+        self.assertEqual(["bad"], diags)
+
+    def test_failing_reply_is_checked(self):
+        class Proc:
+            pid = 1
+            stdout = iter(["result K\n", "bad\n", "K\n", "+x\n",
+                           "K out.dill 3\n"])
+        server = floor_run.FrontendServer(
+            ["fe"], popen=lambda *a, **k: Proc())
+        try:
+            with self.assertRaises(floor.FloorError) as ctx:
+                server._checked()
+        finally:
+            server.errlog.close()
+        self.assertIn("bad", str(ctx.exception))
+        self.assertIn("out.dill 3", str(ctx.exception))
+
+
+class InvalidatedTest(unittest.TestCase):
+    def test_root_and_unrooted_uris(self):
+        tmp = os.path.realpath(tempfile.mkdtemp())
+        root = os.path.join(tmp, "work")
+        other = os.path.join(tmp, "elsewhere")
+        inside = os.path.join(root, "app", "lib", "main.dart")
+        outside = os.path.join(other, "x.dart")
+        touch(inside, b"old")
+        touch(outside, b"old")
+        swap = floor_sources.SourceSwap.snapshot(tmp)
+        touch(inside, b"new")
+        touch(outside, b"new")
+        swap.to_old()
+        self.assertEqual(
+            ["org-dartlang-app:///app/lib/main.dart"],
+            [u for u in swap.invalidated((root,)) if "org-dartlang" in u])
+        self.assertEqual(
+            sorted(["org-dartlang-app:///app/lib/main.dart",
+                    pathlib.Path(outside).as_uri()]),
+            sorted(swap.invalidated((root,))))
+        self.assertEqual(
+            sorted([pathlib.Path(inside).as_uri(),
+                    pathlib.Path(outside).as_uri()]),
+            sorted(swap.invalidated(())))
 
 
 class FrontendDiagTest(unittest.TestCase):
