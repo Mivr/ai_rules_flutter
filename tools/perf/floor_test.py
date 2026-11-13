@@ -381,6 +381,8 @@ class RunTest(unittest.TestCase):
     def runner(self, argv):
         if "gen_snapshot" in argv[0]:
             touch(os.path.join(self.tmp, "libapp.so"), b"snap")
+        elif "--aot" in argv:
+            touch(os.path.join(self.tmp, "app.dill"), b"kernel")
         return (0, 0.25, "")
 
     def apk_spec(self, mode):
@@ -530,6 +532,65 @@ class InvalidatedTest(unittest.TestCase):
             sorted(swap.invalidated(())))
 
 
+class EngineToolTest(unittest.TestCase):
+    """The Dart SDK repository never beats the Flutter engine's tools."""
+
+    DART = "ai_rules_dart++dart+dart_linux-x64/bin/dartaotruntime"
+    ENGINE = "rules_flutter++flutter+engine_linux/bin/dartaotruntime"
+
+    def test_engine_tool_beats_dart_sdk_repository(self):
+        root = tempfile.mkdtemp()
+        touch(os.path.join(root, self.DART))
+        touch(os.path.join(root, self.ENGINE))
+        self.assertEqual(os.path.join(root, self.ENGINE),
+                         floor.find_tool("dartaotruntime", [root]))
+
+    def test_snapshot_prefers_engine(self):
+        root = tempfile.mkdtemp()
+        name = "frontend_server_aot.dart.snapshot"
+        touch(os.path.join(root, "ai_rules_dart++dart+dart_linux-x64/bin/"
+                           "snapshots", name))
+        real = os.path.join(root, "rules_flutter++flutter+engine/" + name)
+        touch(real)
+        self.assertEqual(real, floor.find_tool(name, [root]))
+
+    def test_dart_sdk_alone_is_still_returned(self):
+        root = tempfile.mkdtemp()
+        only = os.path.join(root, self.DART)
+        touch(only)
+        self.assertEqual(only, floor.find_tool("dartaotruntime", [root]))
+
+    def test_dart_sdk_dir_outside_engine_loses(self):
+        root = tempfile.mkdtemp()
+        touch(os.path.join(root, "a+dartsdk/dart-sdk/bin/dartaotruntime"))
+        real = os.path.join(root, "z+flutter_linux/dart-sdk/bin/dartaotruntime")
+        touch(real)
+        self.assertEqual(real, floor.find_tool("dartaotruntime", [root]))
+
+
+class AotKernelOutputTest(RunTest):
+    def test_exit_zero_without_kernel_is_named(self):
+        spec = self.apk_spec("release")
+
+        def runner(argv):
+            return (0, 0.1, "one\nno kernel written\n")
+        result = floor_run.run_floor(spec, self.roots, self.swap, runner,
+                                     FakeServer)
+        self.assertFalse(result.identical)
+        self.assertTrue(result.reason.startswith("floor: "))
+        self.assertIn("aot-kernel", result.reason)
+        self.assertIn(os.path.join(self.tmp, "app.dill"), result.reason)
+        self.assertIn("no kernel written", result.reason)
+        self.assertNotIn("gen_snapshot failed", result.reason)
+
+    def test_empty_kernel_is_named(self):
+        spec = self.apk_spec("release")
+        touch(os.path.join(self.tmp, "app.dill"), b"")
+        result = floor_run.run_floor(spec, self.roots, self.swap,
+                                     lambda argv: (0, 0.1, "e"), FakeServer)
+        self.assertIn("aot-kernel", result.reason)
+
+
 class FrontendDiagTest(unittest.TestCase):
     def server(self, lines, stderr=""):
         class Proc:
@@ -605,6 +666,19 @@ class FrontendDiagTest(unittest.TestCase):
         msg = self.failure(["noise\n"], "boom\nlast\n")
         self.assertIn("without a result", msg)
         self.assertIn("last", msg)
+
+    def test_ended_without_result_names_status_and_tools(self):
+        server = self.server([], "")
+        server.proc.returncode = 3
+        server.argv = ("/x/dartaotruntime", "/x/fe.snapshot", "--aot")
+        try:
+            with self.assertRaises(floor.FloorError) as ctx:
+                server._checked()
+        finally:
+            server.errlog.close()
+        msg = str(ctx.exception)
+        for want in ("3", "/x/dartaotruntime", "/x/fe.snapshot"):
+            self.assertIn(want, msg)
 
     def test_ended_without_result_keeps_pre_result(self):
         msg = self.failure(["orphan prelude\n"])

@@ -101,6 +101,7 @@ class FrontendServer:
     """Resident ``frontend_server`` speaking its incremental protocol."""
 
     def __init__(self, argv, popen=subprocess.Popen):
+        self.argv = tuple(argv)
         self.errlog = tempfile.TemporaryFile("w+")
         self.proc = popen(list(argv), stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, text=True,
@@ -125,6 +126,22 @@ class FrontendServer:
         if not text and pipe is not None and hasattr(pipe, "read"):
             text = pipe.read() or ""
         return "\n".join(text.splitlines()[-STDERR_TAIL:])
+
+    def _ended_head(self):
+        """Closing line of a server that died: exit status and tool paths."""
+        status = getattr(self.proc, "returncode", None)
+        if status is None and hasattr(self.proc, "poll"):
+            status = self.proc.poll()
+        if status is None and hasattr(self.proc, "wait"):
+            try:
+                status = self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                status = "still running"
+        argv = list(self.argv)
+        return ("frontend_server ended without a result (exit status %s; "
+                "dartaotruntime %s; snapshot %s)" % (
+                    status, argv[0] if argv else "?",
+                    argv[1] if len(argv) > 1 else "?"))
 
     def _read_result(self):
         """Waits for ``result <key>``; returns (fields, pre_result, diagnostics).
@@ -161,7 +178,7 @@ class FrontendServer:
         if bare:
             return [], pre_result, diagnostics
         tail = self.stderr_tail()
-        head = "frontend_server ended without a result"
+        head = self._ended_head()
         parts = []
         if pre_result:
             parts.append("before result:\n" + "\n".join(pre_result))
@@ -226,12 +243,24 @@ def replace_payload(spec, source):
         shutil.copyfile(source, target)
 
 
+def _check_kernel_output(step, err):
+    """Raises when aot-kernel exited 0 but left no kernel file."""
+    out = step.argv[step.argv.index("--output-dill") + 1]
+    if os.path.isfile(out) and os.path.getsize(out) > 0:
+        return
+    tail = "\n".join(str(err).strip().splitlines()[-STDERR_TAIL:])
+    raise FloorError("%s exited 0 but wrote no output %s (empty or missing)"
+                     "; stderr:\n%s" % (step.name, out, tail or "(none)"))
+
+
 def _run_exec(step, runner, steps):
     code, cpu, err = runner(step.argv)
     steps[step.name] = cpu if step.timed else None
     if code != 0:
         raise FloorError("%s failed (exit %s): %s"
                          % (step.name, code, str(err).strip()[-200:]))
+    if step.name == "aot-kernel":
+        _check_kernel_output(step, err)
     return cpu if step.timed else 0.0
 
 
