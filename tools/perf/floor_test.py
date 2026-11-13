@@ -568,6 +568,15 @@ class EngineToolTest(unittest.TestCase):
         self.assertEqual(real, floor.find_tool("dartaotruntime", [root]))
 
 
+    def test_root_location_does_not_classify(self):
+        base = tempfile.mkdtemp()
+        root = os.path.join(base, "flutter_engine_root")
+        touch(os.path.join(root, "a+dartsdk/dart-sdk/bin/dartaotruntime"))
+        real = os.path.join(root, "z+flutter_linux/dart-sdk/bin/dartaotruntime")
+        touch(real)
+        self.assertEqual(real, floor.find_tool("dartaotruntime", [root]))
+
+
 class AotKernelOutputTest(RunTest):
     def test_exit_zero_without_kernel_is_named(self):
         spec = self.apk_spec("release")

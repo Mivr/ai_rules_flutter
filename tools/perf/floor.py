@@ -121,14 +121,16 @@ DART_SDK_REPO = "ai_rules_dart++dart+dart_"
 _ENGINE_PAIRED = ("dartaotruntime", "frontend_server_aot.dart.snapshot")
 
 
-def _is_dart_sdk_path(path):
+def _is_dart_sdk_path(relative):
     """True for a file of the standalone Dart SDK repository.
 
-    That is a path component starting ``ai_rules_dart++dart+dart_``, or a
-    ``dart-sdk`` directory with no Flutter engine repository (a component
-    naming ``flutter`` or ``engine``) above it.
+    ``relative`` is the path below the search root it was found under, so
+    where the root lives never matters. That is a component starting
+    ``ai_rules_dart++dart+dart_``, or a ``dart-sdk`` directory with no
+    Flutter engine repository (a component naming ``flutter`` or
+    ``engine``) above it, inside the root.
     """
-    parts = path.split(os.sep)
+    parts = relative.split(os.sep)
     if any(part.startswith(DART_SDK_REPO) for part in parts):
         return True
     if "dart-sdk" not in parts:
@@ -141,12 +143,15 @@ def _is_dart_sdk_path(path):
 def _engine_first(name, found):
     """Candidates without the Dart SDK repository's, when any remain.
 
-    The compiler snapshot and ``dartaotruntime`` must match the Flutter
-    engine's ``platform_strong.dill``; the Dart SDK's own would not.
+    ``found`` holds (root, path) pairs. The compiler snapshot and
+    ``dartaotruntime`` must match the Flutter engine's
+    ``platform_strong.dill``; the Dart SDK's own would not.
     """
     if name.rsplit("/", 1)[-1] not in _ENGINE_PAIRED:
         return found
-    return [path for path in found if not _is_dart_sdk_path(path)] or found
+    kept = [pair for pair in found
+            if not _is_dart_sdk_path(os.path.relpath(pair[1], pair[0]))]
+    return kept or found
 
 
 def find_tool(name, roots, hint=None):
@@ -161,9 +166,9 @@ def find_tool(name, roots, hint=None):
     searched.
     """
     suffix = os.sep + name
-    found = [path for root in roots for path in _walk_files(root)
+    found = [(root, path) for root in roots for path in _walk_files(root)
              if path.endswith(suffix) and _is_real_tool(path)]
-    found = _engine_first(name, found)
+    found = [path for _, path in _engine_first(name, found)]
     for one in ((hint,) if isinstance(hint, str) else hint or ()):
         preferred = [path for path in found if one in path]
         if preferred:
