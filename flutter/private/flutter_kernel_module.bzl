@@ -847,6 +847,8 @@ def swap_flutter_registrant_twin(closure, twins):
 
 def _flutter_kernel_module_aspect_impl(target, ctx):
     # The application's aspect (it declares the flag) compiles modules only with the flag on in a debug build.
+    # Its outputs carry an `.app_debug` stem so they never collide with the `flutter_test` aspect's outputs for a
+    # library both reach in one configuration.
     flag = getattr(ctx.attr, "_debug_modular_app", None)
     off = flag != None and not (flag[BuildSettingInfo].value and ctx.var["COMPILATION_MODE"] == "dbg")
     if DartInfo not in target or off:
@@ -899,7 +901,7 @@ def _flutter_kernel_module_aspect_impl(target, ctx):
         ctx = ctx,
         tools = tools,
         flutter_sdk_info = flutter_sdk_info,
-        target_name = target.label.name,
+        target_name = target.label.name + (".app_debug" if flag != None else ""),
         package_name = package_name,
         job = struct(
             lib_root = lib_root,

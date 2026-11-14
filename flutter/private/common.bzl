@@ -580,7 +580,8 @@ def _compile_full_kernel(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
 
 def _run_kernel_compile(ctx, flutter_sdk_info, st, agent, reg, flags, plan):
     # The closure holds a twin only for a `flutter_kernel_target`, or for a `flutter_application`
-    # with the private debug_modular_app flag on in a debug build (its `deps` aspect registers nothing otherwise).
+    # with the private debug_modular_app flag on (the default) in a debug build; its `deps` aspect registers
+    # nothing otherwise.
     twins = flutter_closure_twins(ctx)
     if _use_modular_kernel(plan, agent, reg, flags, twins):
         modular_tools = _modular_tools_or_none(ctx, flutter_sdk_info, st.packages, plan.native_assets)

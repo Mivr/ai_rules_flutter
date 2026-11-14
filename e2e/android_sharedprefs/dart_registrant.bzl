@@ -7,7 +7,8 @@ placing the `.dart` source in `DefaultInfo`. Attaching an aspect across
 `flutter_android_registrant`'s `application` edge inspects the application in
 the same Android platform configuration `flutter_android_registrant` transitions
 to, verifies `FlutterKernelCompile` consumes `<name>_plugin_registrant.dart`
-under `-Dflutter.dart_plugin_registrant=`, and exposes the file for testing.
+under `-Dflutter.dart_plugin_registrant=` (or, for a modular debug build, that the entry module's inputs
+hold it), and exposes the file for testing.
 """
 
 visibility("private")
@@ -43,6 +44,25 @@ def _verify_kernel_wiring(label, registrant_file, kernel_action):
             registrant_file.basename,
         ))
 
+def _is_entry_module(action):
+    """Whether `action` compiles an application's `.flutter_entry.kmod`."""
+    return len([o for o in action.outputs.to_list() if o.basename.endswith(".flutter_entry.kmod")]) > 0
+
+def _verify_entry_module(label, registrant_file, entry_action):
+    """Fails unless the modular entry module's inputs include the registrant.
+
+    Args:
+        label: Label of the `flutter_application` target under inspection.
+        registrant_file: The generated `<name>_plugin_registrant.dart` `File`.
+        entry_action: The `DartKernel` action compiling the application's `.flutter_entry.kmod`.
+    """
+    inputs = entry_action.inputs.to_list()
+    if not [f for f in inputs if f == registrant_file or f.basename == registrant_file.basename]:
+        fail("%s generated %s, but the modular entry module did not declare it as an input" % (
+            label,
+            registrant_file.short_path,
+        ))
+
 def _dart_registrant_aspect_impl(target, ctx):
     """Collects `<name>_plugin_registrant.dart` from `target` or its `application` dep.
 
@@ -57,19 +77,25 @@ def _dart_registrant_aspect_impl(target, ctx):
     expected_name = target.label.name + "_plugin_registrant.dart"
     registrant_file = None
     kernel_action = None
+    entry_action = None
     for action in target.actions:
         for out in action.outputs.to_list():
             if out.basename == expected_name:
                 registrant_file = out
         if action.mnemonic == "FlutterKernelCompile":
             kernel_action = action
+        if action.mnemonic == "DartKernel" and _is_entry_module(action):
+            entry_action = action
     if registrant_file != None:
-        if kernel_action == None:
-            fail("%s generated %s without a FlutterKernelCompile action" % (
+        if kernel_action != None:
+            _verify_kernel_wiring(target.label, registrant_file, kernel_action)
+        elif entry_action != None:
+            _verify_entry_module(target.label, registrant_file, entry_action)
+        else:
+            fail("%s generated %s without a FlutterKernelCompile action or a modular entry module" % (
                 target.label,
                 registrant_file.short_path,
             ))
-        _verify_kernel_wiring(target.label, registrant_file, kernel_action)
         direct.append(registrant_file)
 
     transitive = []

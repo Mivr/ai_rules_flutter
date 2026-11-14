@@ -427,11 +427,11 @@ bzl_library(
     ],
 )
 
-# Exists for the bench A/B of the modular debug app path against the warm frontend_server worker,
-# until the default is decided.
+# A debug `flutter_application` compiles per-package kernel modules and links them. Set to false to restore the
+# whole-program compile through the warm frontend_server worker. Private on purpose.
 bool_flag(
     name = "debug_modular_app",
-    build_setting_default = False,
+    build_setting_default = True,
     visibility = ["//visibility:public"],
 )
 
