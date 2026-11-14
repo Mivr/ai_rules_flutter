@@ -137,6 +137,72 @@ filegroup(
 )
 
 # =============================================================================
+# Release APKs (what a release engineer ships)
+#
+# `:app_release` carries the three release flags; `:app_release_plain` is the
+# same program with all three off, so the symbols test cannot pass vacuously.
+# `tree_shake_icons` defaults to True, so the twin turns it off explicitly to
+# carry the full MaterialIcons font. Each application has its own
+# `package_name` so two applications in one package do not share outputs.
+# =============================================================================
+
+flutter_application(
+    name = "app_flutter_release",
+    package_name = "android_example_release",
+    srcs = ["lib/release_main.dart"],
+    main = "lib/release_main.dart",
+    obfuscate = True,
+    split_debug_info = True,
+    tree_shake_icons = True,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_application(
+    name = "app_flutter_release_plain",
+    package_name = "android_example_release_plain",
+    srcs = ["lib/release_main.dart"],
+    main = "lib/release_main.dart",
+    obfuscate = False,
+    split_debug_info = False,
+    tree_shake_icons = False,
+    deps = [
+        "@deps//:flutter",
+        "@rules_flutter//flutter:material_icons",
+    ],
+)
+
+flutter_android_app(
+    name = "app_release",
+    package_name = "com.example.flutterapp.release",
+    application = ":app_flutter_release",
+)
+
+flutter_android_app(
+    name = "app_release_plain",
+    package_name = "com.example.flutterapp.releaseplain",
+    application = ":app_flutter_release_plain",
+)
+
+# The obfuscation map and the split debug info of the Android build that ships
+# in `:app_release`, read from its bundle (compiled for the Android platform).
+filegroup(
+    name = "app_release_obfuscation_map",
+    testonly = True,
+    srcs = [":__app_release_bundle"],
+    output_group = "obfuscation_map",
+)
+
+filegroup(
+    name = "app_release_debug_info",
+    testonly = True,
+    srcs = [":__app_release_bundle"],
+    output_group = "debug_info",
+)
+
+# =============================================================================
 # Approach 2: Bazel-generated runner (flutter_android_runner_lib_gen)
 #
 # For users without `flutter create` output. Uses template manifest and
@@ -304,6 +370,22 @@ dart_test(
     size = "medium",
     data = [":app"],
     main = "test/verify_android_permissions_test.dart",
+)
+
+# Opens the release APKs: the obfuscated one has no `MyApp` in `libapp.so`,
+# keeps its symbols in a separate `.symbols` file and ships a subset icon
+# font; the twin keeps all of it.
+dart_test(
+    name = "verify_android_release_symbols_test",
+    size = "medium",
+    srcs = ["test/android_artifact_reader.dart"],
+    data = [
+        ":app_release",
+        ":app_release_debug_info",
+        ":app_release_obfuscation_map",
+        ":app_release_plain",
+    ],
+    main = "test/verify_android_release_symbols_test.dart",
 )
 
 dart_test(

@@ -273,6 +273,21 @@ def _bundle_size_depset(ctx):
         return ctx.attr.application[OutputGroupInfo].analyze_size
     return depset()
 
+def _bundle_release_groups(ctx):
+    """Forwards the application's `debug_info` and `obfuscation_map` output groups.
+
+    The bundle compiles the application for the Android platform, so these are
+    the symbols and the map of the build that ships in the APK.
+    """
+    groups = {}
+    if OutputGroupInfo not in ctx.attr.application:
+        return groups
+    app_groups = ctx.attr.application[OutputGroupInfo]
+    for name in ("debug_info", "obfuscation_map"):
+        if hasattr(app_groups, name):
+            groups[name] = getattr(app_groups, name)
+    return groups
+
 def _flutter_android_bundle_impl(ctx):
     """Bundles Flutter compilation outputs for Android packaging."""
     app_info = ctx.attr.application[FlutterApplicationInfo]
@@ -352,6 +367,7 @@ def _flutter_android_bundle_impl(ctx):
     if size_files:
         outputs.extend(size_files)
         output_groups["analyze_size"] = size_depset
+    output_groups.update(_bundle_release_groups(ctx))
 
     return [
         DefaultInfo(files = depset(outputs)),
