@@ -705,8 +705,8 @@ class PlatformSummaryTest(unittest.TestCase):
                 "--pristine-treatment", self.tmp,
                 "--work-root-control", os.path.join(self.tmp, "wc"),
                 "--work-root-treatment", os.path.join(self.tmp, "wt"),
-                "--out-base-root-control", os.path.join(self.tmp, "oc"),
-                "--out-base-root-treatment", os.path.join(self.tmp, "ot"),
+                "--out-base-root-control", os.path.join(self.tmp, "out-c"),
+                "--out-base-root-treatment", os.path.join(self.tmp, "out-t"),
                 "--results", self.tmp, "--repeats", "1"]
         for extra, expected in (
                 ([], ["device_release", "sim_debug"]),
