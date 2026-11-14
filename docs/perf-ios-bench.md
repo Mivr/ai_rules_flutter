@@ -399,6 +399,20 @@ the residual still excludes all server time, so for a warm flow the
 residual is mostly JVM launch and analysis-cache warmth the trace
 counter never sees.
 
+Every flow record also carries wall time and peak memory in its `bazel`
+object (`real_s`, `peak_rss_mb`), and each flow summary gains `wall_s` and
+`peak_rss_mb` (medians; `spread.wall_s` and `spread.peak_rss_mb` are
+`[min, max]`, and `null` for records without the value). `peak_rss_mb` is
+the largest sum, in MiB, of the resident sets of a root pid and all its
+descendants (persistent workers included), sampled by
+`tools/perf/peak_rss.py` every 0.5 s at most plus one final sample at the
+end of the command: the Bazel server tree for an edit flow, the spawned
+client and its descendants for a clean flow. A process that vanished adds
+0 and an unreadable sample fails the flow. In A/B mode each `ratio` entry
+keeps its CPU keys and gains `wall` and `peak_rss` objects with the same
+`median`, `min`, `max`, `geomean`, `n` and `unpaired` fields, paired like
+the CPU ratio; `unit` stays `cpu_seconds`.
+
 Chain selection is output-based: a host-tool build is a spawn whose
 declared outputs land in an exec configuration
 (`bazel-out/*-exec-*/`, or Bazel 9's default with no `-ST-<hash>`

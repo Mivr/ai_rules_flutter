@@ -213,6 +213,24 @@ def summarize_worker_steps(records):
     return merged
 
 
+def summarize_wall_rss(records):
+    """``wall_s`` / ``peak_rss_mb`` medians and ``[min, max]`` spreads.
+
+    A value comes from ``bazel.real_s`` / ``bazel.peak_rss_mb``; a flow
+    whose records lack it (older records, error flows) gets ``None``.
+    """
+    fields = {}
+    spread = {}
+    for name, key in (("wall_s", "real_s"), ("peak_rss_mb", "peak_rss_mb")):
+        values = [(record.get("bazel") or {}).get(key)
+                  for record in records]
+        values = [value for value in values if value is not None]
+        got = summarize_values(values)
+        fields[name] = got["median"]
+        spread[name] = [got["min"], got["max"]] if values else None
+    return fields, spread
+
+
 def summarize_flow(records, unit):
     """Median costs over repeats; no SOL number unless all repeats match."""
     del unit
@@ -247,6 +265,9 @@ def summarize_flow(records, unit):
             "spread": {"n": len(records),
                        "bazel": [bazel["min"], bazel["max"]],
                        "sol": [sol["min"], sol["max"]] if identical else None}}
+    wall_rss, wall_rss_spread = summarize_wall_rss(records)
+    flow.update(wall_rss)
+    flow["spread"].update(wall_rss_spread)
     if has_floor(records):
         floor, flow["spread"]["toolchain_floor"] = summarize_floor(
             records, bazel["median"])
@@ -378,6 +399,8 @@ def print_flow_lines(summary):
         if "error" in entry:
             print("flow=%s error=%s" % (flow, entry["error"]))
             continue
-        print("flow=%s unit=%s bazel=%s sol=%s identical=%s reason=%s" % (
-            flow, summary["unit"], entry["bazel"], entry["sol"],
-            entry["identical"], entry.get("reason")))
+        print("flow=%s unit=%s bazel=%s sol=%s wall_s=%s peak_rss_mb=%s "
+              "identical=%s reason=%s" % (
+                  flow, summary["unit"], entry["bazel"], entry["sol"],
+                  entry.get("wall_s"), entry.get("peak_rss_mb"),
+                  entry["identical"], entry.get("reason")))

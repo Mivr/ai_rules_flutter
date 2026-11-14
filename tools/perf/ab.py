@@ -232,24 +232,25 @@ def load_arm_rep_record(results_arm, config, scenario, rep):
     return data if isinstance(data, dict) else None
 
 
-def pair_ratio(control, treatment):
+def pair_ratio(control, treatment, key="cpu_s"):
     """Treatment/control bazel ratio, or None when the pair is unusable.
 
     A pair needs both records present, both identical, and both Bazel
-    numbers present with a non-zero control: anything else (a missing
-    repeat, a failed proof in either arm) has no pair for that repeat.
+    numbers (``bazel[key]``: CPU by default) present with a non-zero
+    control: anything else (a missing repeat, a failed proof in either
+    arm) has no pair for that repeat.
     """
     if control is None or treatment is None:
         return None
     if not control.get("identical") or not treatment.get("identical"):
         return None
-    control_cpu = (control.get("bazel") or {}).get("cpu_s")
-    treatment_cpu = (treatment.get("bazel") or {}).get("cpu_s")
-    if control_cpu is None or treatment_cpu is None:
+    control_value = (control.get("bazel") or {}).get(key)
+    treatment_value = (treatment.get("bazel") or {}).get(key)
+    if control_value is None or treatment_value is None:
         return None
-    if control_cpu == 0:
+    if control_value == 0:
         return None
-    return treatment_cpu / control_cpu
+    return treatment_value / control_value
 
 
 def geomean(values):
@@ -261,25 +262,39 @@ def geomean(values):
     return math.exp(sum(math.log(v) for v in values) / len(values))
 
 
+def _ratio_summary(ratios, unpaired):
+    """median / min / max / geomean / n / unpaired of paired ratios."""
+    summary = summarize_values(ratios)
+    return {"median": summary["median"], "min": summary["min"],
+            "max": summary["max"], "geomean": geomean(ratios),
+            "n": summary["n"], "unpaired": unpaired}
+
+
 def ratio_for_flow(results_control, results_treatment, config, scenario,
                    repeats):
-    """Paired per-repeat ratios for one flow (same repeat pairs only)."""
-    ratios = []
-    unpaired = []
+    """Paired per-repeat ratios for one flow (same repeat pairs only).
+
+    The top-level keys are the CPU ratios; ``wall`` (``bazel.real_s``) and
+    ``peak_rss`` (``bazel.peak_rss_mb``) are sibling objects with the same
+    shape, paired by the same rule.
+    """
+    keys = {"cpu_s": ([], []), "real_s": ([], []),
+            "peak_rss_mb": ([], [])}
     for rep in range(1, repeats + 1):
         control = load_arm_rep_record(results_control, config, scenario,
                                       rep)
         treatment = load_arm_rep_record(results_treatment, config,
                                         scenario, rep)
-        value = pair_ratio(control, treatment)
-        if value is None:
-            unpaired.append(rep)
-        else:
-            ratios.append(value)
-    summary = summarize_values(ratios)
-    return {"median": summary["median"], "min": summary["min"],
-            "max": summary["max"], "geomean": geomean(ratios),
-            "n": summary["n"], "unpaired": unpaired}
+        for key, (ratios, unpaired) in keys.items():
+            value = pair_ratio(control, treatment, key)
+            if value is None:
+                unpaired.append(rep)
+            else:
+                ratios.append(value)
+    entry = _ratio_summary(*keys["cpu_s"])
+    entry["wall"] = _ratio_summary(*keys["real_s"])
+    entry["peak_rss"] = _ratio_summary(*keys["peak_rss_mb"])
+    return entry
 
 
 def summarize_arm_flows(results_arm, platform=DEFAULT_PLATFORM):
@@ -412,6 +427,29 @@ def main_run(cmd):
     return 1 if had_errors else 0
 
 
+def arm_pair(summary, flow, key):
+    """``control,treatment`` medians of one flow value, for a line."""
+    values = []
+    for arm in (CONTROL, TREATMENT):
+        entry = summary["arms"][arm].get(flow) or {}
+        values.append(entry.get(key))
+    return "%s,%s" % tuple(values)
+
+
+def print_ratio_line(summary, flow):
+    """One stdout line per flow: CPU ratios, then wall and peak RSS as
+    ``control,treatment`` medians with their paired median ratios."""
+    entry = summary["ratio"][flow]
+    print("flow=%s n=%s median=%s geomean=%s min=%s max=%s "
+          "unpaired=%s wall_s=%s peak_rss_mb=%s wall_ratio=%s "
+          "peak_rss_ratio=%s" % (
+              flow, entry["n"], entry["median"], entry["geomean"],
+              entry["min"], entry["max"], entry["unpaired"],
+              arm_pair(summary, flow, "wall_s"),
+              arm_pair(summary, flow, "peak_rss_mb"),
+              entry["wall"]["median"], entry["peak_rss"]["median"]))
+
+
 def main_summarize(cmd):
     from bench_flags import parse_bazel_flags  # noqa: E402
     from bench_flags import validate_bazel_flags  # noqa: E402
@@ -428,11 +466,7 @@ def main_summarize(cmd):
     with open(cmd.out, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
     for flow in sorted(summary["ratio"]):
-        entry = summary["ratio"][flow]
-        print("flow=%s n=%s median=%s geomean=%s min=%s max=%s "
-              "unpaired=%s" % (
-                  flow, entry["n"], entry["median"], entry["geomean"],
-                  entry["min"], entry["max"], entry["unpaired"]))
+        print_ratio_line(summary, flow)
     return 0
 
 

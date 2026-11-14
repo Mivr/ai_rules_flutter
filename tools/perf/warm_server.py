@@ -45,9 +45,10 @@ their pre-command share cannot be subtracted.
 """
 
 import os
-import subprocess
 import sys
 import time
+
+import peak_rss
 
 METHOD = "warm-server"
 
@@ -303,7 +304,7 @@ def tree_delta(last, first):
 
 
 def summarize_deltas(server_pid, returncode, real_s, client_user_s,
-                     client_sys_s, before, after):
+                     client_sys_s, before, after, peak_rss_mb=None):
     """Result dict from two snapshots and the client's rusage delta."""
     first = before.server_times()
     last = after.server_times()
@@ -328,10 +329,12 @@ def summarize_deltas(server_pid, returncode, real_s, client_user_s,
     sys_s = sum(part["sys_s"] for part in parts.values())
     return {"user_s": user_s, "sys_s": sys_s, "real_s": real_s,
             "returncode": returncode, "method": METHOD,
-            "server_pid": server_pid, "parts": parts}
+            "server_pid": server_pid, "parts": parts,
+            "peak_rss_mb": peak_rss_mb}
 
 
-def measure(argv, cwd, server_pid, _read=None, _children=None):
+def measure(argv, cwd, server_pid, _read=None, _children=None,
+            _rss_read=None):
     """Runs argv (which must go through the server) and returns its
     whole-tree CPU.
 
@@ -345,22 +348,15 @@ def measure(argv, cwd, server_pid, _read=None, _children=None):
     before = snapshot(server_pid, _read, _children)
     start = time.monotonic()
     rusage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
-    proc = subprocess.run(
-        list(argv),
-        cwd=cwd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+    returncode, peak_rss_mb = peak_rss.run_peak(
+        argv, cwd, server_pid, _rss_read, _children)
     rusage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
     after = snapshot(server_pid, _read, _children)
     if after.server_times().start != before.server_times().start:
         raise WarmServerError(
             "warm server pid %d restarted during the command" % server_pid)
     return summarize_deltas(
-        server_pid, proc.returncode, time.monotonic() - start,
+        server_pid, returncode, time.monotonic() - start,
         rusage_after.ru_utime - rusage_before.ru_utime,
         rusage_after.ru_stime - rusage_before.ru_stime,
-        before, after)
+        before, after, peak_rss_mb)

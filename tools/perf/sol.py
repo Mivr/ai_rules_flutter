@@ -110,6 +110,7 @@ from traceprofile import parse_jvm_profile  # noqa: E402
 import warm_server  # noqa: E402
 from floor_flow import floor_fields  # noqa: E402
 from floor_summary import run_exit  # noqa: E402
+from peak_rss import run_peak  # noqa: E402
 from sol_errors import error_record  # noqa: E402,F401
 from sol_errors import write_error_records  # noqa: E402
 from sol_summary import print_flow_lines  # noqa: E402
@@ -710,7 +711,7 @@ def sweep_chain_side_effects(bazel_out, declared_outputs, before):
     return {"n": len(removed), "paths": removed[:10]}
 
 
-def measure_process_tree(argv, cwd):
+def measure_process_tree(argv, cwd, _rss_read=None, _children=None):
     """Whole-tree user+sys CPU seconds of argv (wait4 rusage deltas).
 
     The same method on macOS and Linux, with no time binary:
@@ -722,20 +723,13 @@ def measure_process_tree(argv, cwd):
     import resource
     start = time.monotonic()
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
-    proc = subprocess.run(
-        list(argv),
-        cwd=cwd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-    )
+    returncode, peak = run_peak(argv, cwd, None, _rss_read, _children)
     after = resource.getrusage(resource.RUSAGE_CHILDREN)
     return {"instructions": None, "real_s": time.monotonic() - start,
             "user_s": after.ru_utime - before.ru_utime,
             "sys_s": after.ru_stime - before.ru_stime,
-            "returncode": proc.returncode, "method": "rusage-children"}
+            "returncode": returncode, "method": "rusage-children",
+            "peak_rss_mb": peak}
 
 
 def measure_with_time(argv, cwd, time_bin=TIME_BIN):
@@ -1258,7 +1252,8 @@ def run_sol_scenario(args, config, scenario, batch,
               "scenario": scenario,
               "method": BATCH_METHOD if batch else WARM_METHOD,
               "bazel": {"cpu_s": bazel_cpu,
-                        "real_s": built.bazel_cost["real_s"]},
+                        "real_s": built.bazel_cost["real_s"],
+                        "peak_rss_mb": built.bazel_cost.get("peak_rss_mb")},
               "sol": sol,
               "identical": identical,
               "reason": flow_reason(chain, exit_code),
