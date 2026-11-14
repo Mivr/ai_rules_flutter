@@ -2695,5 +2695,8 @@ class OutputDriftTest(unittest.TestCase):
         self.assertEqual(len(drift["paths"]), 10)
 
 
+from sol_rss_test import MeasurePeakTest, SummaryWallRssTest  # noqa: E402,F401
+
+
 if __name__ == "__main__":
     unittest.main()

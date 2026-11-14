@@ -831,5 +831,8 @@ class IosScopeTest(unittest.TestCase):
                                    "//app:app_ios"})
 
 
+from sol_ab_ratio_test import WallRssRatioTest  # noqa: E402,F401
+
+
 if __name__ == "__main__":
     unittest.main()
