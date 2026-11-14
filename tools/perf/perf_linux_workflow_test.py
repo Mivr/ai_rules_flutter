@@ -17,7 +17,7 @@ _KEY = re.compile(
     r"^(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z0-9_.-]+)):(.*)$")
 _ITEM = re.compile(r"^(\s*)-(?:\s+(.*))?$")
 
-_STRING_INPUTS = ("head_ref", "target_loc", "seed", "repeats")
+_STRING_INPUTS = ("head_ref", "target_loc", "seed", "repeats", "bazel_flags")
 _EXPECTED_INPUTS = {
     "head_ref": {"type": "string", "required": "true",
                  "default": None, "options": []},
@@ -32,6 +32,10 @@ _EXPECTED_INPUTS = {
     "lockfile": {"type": "choice", "required": None,
                  "default": "committed",
                  "options": ["none", "committed"]},
+    "bazel_flags": {"type": "string", "required": None,
+                    "default": '""', "options": []},
+    "ab": {"type": "choice", "required": None,
+           "default": '"off"', "options": ["\"off\"", "flags"]},
 }
 _CONFIGS = {
     "android": ("android_release", "android_debug"),
@@ -43,6 +47,13 @@ _STEP_SCRIPT_INPUTS = {
     "Measure speed-of-light": ("repeats", "platform"),
     "Summarize speed-of-light": (
         "repeats", "target_loc", "seed", "lockfile", "platform"),
+    "Validate bazel_flags": ("bazel_flags",),
+    "Validate A/B inputs": ("ab", "bazel_flags", "lockfile"),
+    "Apply bazel_flags to the measured workspace": ("bazel_flags",),
+    "Prepare A/B workspaces": ("bazel_flags", "lockfile"),
+    "Measure A/B": ("platform", "repeats"),
+    "Summarize A/B": ("ab", "bazel_flags", "lockfile", "platform",
+                      "repeats", "seed", "target_loc"),
 }
 
 
@@ -309,20 +320,123 @@ class PerfLinuxWorkflowTest(unittest.TestCase):
             if "cache" in entry[2].lower():
                 self.fail("cache input %r must not be set" % entry[2])
 
+    def uploads(self):
+        """Every upload-artifact step by its artifact name expression."""
+        return {step["with"]["name"]: step for step in steps(self.lines)
+                if step.get("uses", "").startswith(
+                    "actions/upload-artifact")}
+
     def test_upload_is_one_small_result_even_after_failure(self):
-        uploads = [step for step in steps(self.lines)
-                   if step.get("uses", "").startswith(
-                       "actions/upload-artifact")]
-        self.assertEqual(len(uploads), 1)
-        upload = uploads[0]
+        upload = self.uploads()["${{ inputs.platform }}-sol"]
         fields = upload["with"]
-        self.assertEqual(fields.get("name"), "${{ inputs.platform }}-sol")
         self.assertEqual(fields.get("path"),
                          "${{ inputs.platform }}-sol.json")
         self.assertEqual(fields.get("retention-days"), "3")
         condition = upload.get("if", "")
         self.assertIn("!cancelled()", condition)
         self.assertNotIn("success()", condition)
+        self.assertIn("inputs.ab == 'off'", condition)
+
+    def test_uploads_are_sol_ab_and_profile_only(self):
+        uploads = self.uploads()
+        self.assertEqual(sorted(uploads), [
+            "${{ inputs.platform }}-ab", "${{ inputs.platform }}-profile",
+            "${{ inputs.platform }}-sol"])
+        ab_up = uploads["${{ inputs.platform }}-ab"]
+        self.assertEqual(ab_up["with"]["path"],
+                         "${{ inputs.platform }}-ab.json")
+        self.assertIn("inputs.ab == 'flags'", ab_up["if"])
+        profile = uploads["${{ inputs.platform }}-profile"]
+        for upload in uploads.values():
+            self.assertIn("!cancelled()", upload["if"])
+            self.assertNotIn("success()", upload["if"])
+            self.assertEqual(upload["with"]["retention-days"], "3")
+        # The step parser keeps block scalars out of `with:`, so read
+        # the profile step's path list from the text after its name.
+        paths = self.text[self.text.index("name: Upload platform profile"):]
+        for arm in ("sol-results", "ab-results/control",
+                    "ab-results/treatment"):
+            for name in ("trace.json.gz", "execlog.json.gz"):
+                self.assertIn("%s/**/%s" % (arm, name), paths)
+        self.assertNotIn("bazel-out", paths)
+
+    def step(self, name):
+        """The one step with this name."""
+        found = [s for s in steps(self.lines) if s.get("name") == name]
+        self.assertEqual(len(found), 1, name)
+        return found[0]
+
+    def test_validate_steps_run_before_anything_is_built(self):
+        names = [s.get("name") for s in steps(self.lines)]
+        for name in ("Validate bazel_flags", "Validate A/B inputs"):
+            self.assertLess(names.index(name),
+                            names.index("Generate pristine monorepo"))
+        flags = self.step("Validate bazel_flags")["run"]
+        self.assertIn("bench_flags.py", flags)
+        self.assertIn('--flags="$BAZEL_FLAGS"', flags)
+        validate = self.step("Validate A/B inputs")["run"]
+        self.assertRegex(validate, r"ab\.py\" validate")
+        for fragment in ("--mode sol", '--ab "$AB"',
+                         '--lockfile "$LOCKFILE"',
+                         '--flags="$BAZEL_FLAGS"'):
+            self.assertIn(fragment, validate)
+
+    def test_ab_flags_prepares_two_workspaces_and_flags_treatment(self):
+        step = self.step("Prepare A/B workspaces")
+        self.assertEqual(step["if"], "inputs.ab == 'flags'")
+        script = step["run"]
+        self.assertIn('cp -a "$RUNNER_TEMP/ws-head-pristine" '
+                      '"$RUNNER_TEMP/ws-control-pristine"', script)
+        self.assertIn('cp -a "$RUNNER_TEMP/ws-head-pristine" '
+                      '"$RUNNER_TEMP/ws-treatment-pristine"', script)
+        self.assertIn('[ "$LOCKFILE" = "none" ]', script)
+        self.assertIn("ws-control-pristine/MODULE.bazel.lock", script)
+        self.assertIn("ws-treatment-pristine/MODULE.bazel.lock", script)
+        flagged = re.findall(r"--workspace\s+(\S+)", script)
+        self.assertEqual(flagged, ['"$RUNNER_TEMP/ws-treatment-pristine"'])
+        names = [s.get("name") for s in steps(self.lines)]
+        self.assertGreater(names.index("Prepare A/B workspaces"),
+                           names.index("Generate committed lockfile"))
+        self.assertLess(names.index("Prepare A/B workspaces"),
+                        names.index("Measure A/B"))
+
+    def test_ab_flags_measures_through_ab_py_per_platform(self):
+        step = self.step("Measure A/B")
+        self.assertEqual(step["if"], "inputs.ab == 'flags'")
+        script = step["run"]
+        self.assertIn('ab.py" run', script)
+        self.assertIn('--platform "$PLATFORM"', script)
+        self.assertIn("ab-results", script)
+        self.assertIn('--repeats "$REPEATS"', script)
+        self.assertIn("|| failed=1", script)
+        self.assertIn('exit "$failed"', script)
+        self.assertNotIn("--config", script)
+        names = [s.get("name") for s in steps(self.lines)]
+        self.assertLess(
+            names.index("Point Bazel at the runner's Android SDK and NDK"),
+            names.index("Measure A/B"))
+
+    def test_ab_flags_summarizes_even_after_a_failed_arm(self):
+        step = self.step("Summarize A/B")
+        self.assertEqual(step["if"],
+                         "${{ !cancelled() && inputs.ab == 'flags' }}")
+        script = step["run"]
+        self.assertRegex(script, r"ab\.py\" summarize")
+        self.assertIn('--platform "$PLATFORM"', script)
+        self.assertIn('--out "$GITHUB_WORKSPACE/$PLATFORM-ab.json"', script)
+        self.assertIn('>> "$GITHUB_STEP_SUMMARY"', script)
+
+    def test_ab_off_steps_stay_the_single_run(self):
+        measure = self.step("Measure speed-of-light")
+        self.assertEqual(measure["if"], "inputs.ab == 'off'")
+        self.assertIn("sol.py", measure["run"])
+        summarize = self.step("Summarize speed-of-light")
+        self.assertEqual(summarize["if"],
+                         "${{ !cancelled() && inputs.ab == 'off' }}")
+        apply = self.step("Apply bazel_flags to the measured workspace")
+        self.assertIn("inputs.ab == 'off'", apply["if"])
+        self.assertIn("inputs.bazel_flags != ''", apply["if"])
+        self.assertIn("ws-head-pristine", apply["run"])
 
     def test_measurement_runs_both_configurations_per_platform(self):
         measure = [step.get("run", "") for step in steps(self.lines)

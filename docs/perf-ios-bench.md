@@ -721,3 +721,20 @@ with no `host_tools_wall`.
 `ok` is false (default off). Once this lands, the bench step in the
 iOS perf workflow that runs `sol.py summarize` must pass
 `--strict-attribution`; the workflow is not changed here.
+
+## Android and Web A/B
+
+`.github/workflows/perf-linux.yaml` takes the same `bazel_flags` and `ab`
+inputs as the iOS workflow (`ab` is `"off"` or `flags`). With `ab=flags` it
+validates the inputs first (`ab=flags` with empty flags fails at once),
+copies the pristine workspace (with the committed lockfile, generated once,
+when `lockfile=committed`) to a control and a treatment copy, applies the
+flags to the treatment copy only, and runs `ab.py run --platform <platform>`
+for `repeats` repeats, control first on odd repeats and treatment first on
+even ones. `ab.py summarize --platform` writes `<platform>-ab.json` in the
+shape of `ios-ab.json` (the flows are the platform's two configurations);
+the default platform stays `ios`. The artifacts are `<platform>-ab` (only
+`ab=flags`), `<platform>-sol` (only `ab=off`) and `<platform>-profile` (the
+gzipped traces and execution logs, no build outputs). With `ab=off` the run
+is the single run as before; non-empty `bazel_flags` are then applied to the
+measured workspace.

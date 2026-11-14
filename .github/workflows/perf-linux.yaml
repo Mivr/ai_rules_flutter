@@ -18,6 +18,13 @@
 # into the repository rules with --repo_env as the e2e workspaces do. The
 # Web leg needs no runner SDK.
 #
+# A/B mode (ab=flags): the same-runner paired control/treatment run of
+# tools/perf/ab.py. Control is the pristine workspace, treatment adds
+# bazel_flags (applied to that copy only); repeats alternate which arm
+# runs first. It writes and uploads <platform>-ab.json instead of
+# <platform>-sol.json. ab=off is the single run described above, with
+# bazel_flags (when set) applied to the measured workspace.
+#
 # Cost: workflow_dispatch only (never automatic), ubuntu-latest, 5 h job
 # timeout, one small artifact (retention 3 days), no caches, build outputs
 # never uploaded. Must stay that way: this workflow is the control plane's
@@ -51,6 +58,15 @@ name: Linux perf bench
         default: committed
         type: choice
         options: [none, committed]
+      bazel_flags:
+        description: "extra Bazel flags for the measured workspace (the treatment arm when ab=flags)"
+        default: ""
+        type: string
+      ab:
+        description: "off (one run) or flags (same-runner control/treatment A/B of bazel_flags)"
+        default: "off"
+        type: choice
+        options: ["off", flags]
 permissions:
   contents: read
 jobs:
@@ -73,6 +89,25 @@ jobs:
           path: rules-head
       # Installs Bazel only (no cache configuration: every build is clean).
       - uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+      - name: Validate bazel_flags
+        env:
+          BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/bench_flags.py" \
+            --flags="$BAZEL_FLAGS"
+      - name: Validate A/B inputs
+        env:
+          AB: ${{ inputs.ab }}
+          BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+          LOCKFILE: ${{ inputs.lockfile }}
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/ab.py" validate \
+            --mode sol \
+            --ab "$AB" \
+            --lockfile "$LOCKFILE" \
+            --flags="$BAZEL_FLAGS"
       # The runner's preinstalled Android SDK + NDK, forwarded into
       # repository rules with --repo_env (repository rules never see the
       # client environment otherwise). The NDK is derived at runtime: the
@@ -117,7 +152,38 @@ jobs:
           (cd "$ws" && bazel --output_base="$out" shutdown)
           rm -rf "$out"
           test -f "$ws/MODULE.bazel.lock"
+      - name: Apply bazel_flags to the measured workspace
+        if: inputs.ab == 'off' && inputs.bazel_flags != ''
+        env:
+          BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+        run: |
+          set -euo pipefail
+          python3 "$GITHUB_WORKSPACE/tools-src/tools/perf/bench_flags.py" \
+            --flags="$BAZEL_FLAGS" \
+            --workspace "$RUNNER_TEMP/ws-head-pristine"
+      - name: Prepare A/B workspaces
+        # Control and treatment start from the same pristine workspace
+        # (committed lockfile included, generated once above); only the
+        # treatment copy gets the flags.
+        if: inputs.ab == 'flags'
+        env:
+          BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+          LOCKFILE: ${{ inputs.lockfile }}
+        run: |
+          set -euo pipefail
+          tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
+          rm -rf "$RUNNER_TEMP/ws-control-pristine" "$RUNNER_TEMP/ws-treatment-pristine"
+          cp -a "$RUNNER_TEMP/ws-head-pristine" "$RUNNER_TEMP/ws-control-pristine"
+          cp -a "$RUNNER_TEMP/ws-head-pristine" "$RUNNER_TEMP/ws-treatment-pristine"
+          if [ "$LOCKFILE" = "none" ]; then
+            rm -f "$RUNNER_TEMP/ws-control-pristine/MODULE.bazel.lock" \
+              "$RUNNER_TEMP/ws-treatment-pristine/MODULE.bazel.lock"
+          fi
+          python3 "$tools/bench_flags.py" \
+            --flags="$BAZEL_FLAGS" \
+            --workspace "$RUNNER_TEMP/ws-treatment-pristine"
       - name: Measure speed-of-light
+        if: inputs.ab == 'off'
         # Both configurations of the selected platform, one repeat at a
         # time: sol.py run resets the workspace from pristine before each
         # config, builds the three scenarios, replays their execution logs
@@ -149,10 +215,35 @@ jobs:
             esac
           done
           exit "$failed"
+      - name: Measure A/B
+        # ab.py run does one repeat per loop turn, both arms: control
+        # first on odd repeats, treatment first on even ones, each arm
+        # in its own work directory and output base. A failing arm makes
+        # the step exit non-zero; summarize and upload still run.
+        if: inputs.ab == 'flags'
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          REPEATS: ${{ inputs.repeats }}
+        run: |
+          set -euo pipefail
+          tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
+          failed=0
+          python3 "$tools/ab.py" run --tools "$tools" \
+            --platform "$PLATFORM" \
+            --pristine-control "$RUNNER_TEMP/ws-control-pristine" \
+            --pristine-treatment "$RUNNER_TEMP/ws-treatment-pristine" \
+            --work-root-control "$RUNNER_TEMP/ab-run-control" \
+            --work-root-treatment "$RUNNER_TEMP/ab-run-treatment" \
+            --out-base-root-control "$RUNNER_TEMP/ab-out-control" \
+            --out-base-root-treatment "$RUNNER_TEMP/ab-out-treatment" \
+            --results "$GITHUB_WORKSPACE/ab-results" \
+            --repeats "$REPEATS" \
+            || failed=1
+          exit "$failed"
       - name: Summarize speed-of-light
         # Runs even when measuring failed, so <platform>-sol.json (with the
         # finished flows and the recorded reasons) is always written.
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && inputs.ab == 'off' }}
         env:
           LOCKFILE: ${{ inputs.lockfile }}
           PLATFORM: ${{ inputs.platform }}
@@ -176,12 +267,70 @@ jobs:
             cat "$GITHUB_WORKSPACE/$PLATFORM-sol.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Summarize A/B
+        # Runs even when an arm failed, so <platform>-ab.json (with the
+        # finished flows and the recorded reasons) is always written.
+        if: ${{ !cancelled() && inputs.ab == 'flags' }}
+        env:
+          AB: ${{ inputs.ab }}
+          BAZEL_FLAGS: ${{ inputs.bazel_flags }}
+          LOCKFILE: ${{ inputs.lockfile }}
+          PLATFORM: ${{ inputs.platform }}
+          REPEATS: ${{ inputs.repeats }}
+          SEED: ${{ inputs.seed }}
+          TARGET_LOC: ${{ inputs.target_loc }}
+        run: |
+          set -euo pipefail
+          tools="$GITHUB_WORKSPACE/tools-src/tools/perf"
+          sha="$(git -C "$GITHUB_WORKSPACE/rules-head" rev-parse HEAD)"
+          python3 "$tools/ab.py" summarize \
+            --platform "$PLATFORM" \
+            --results "$GITHUB_WORKSPACE/ab-results" \
+            --sha "$sha" \
+            --repeats "$REPEATS" \
+            --target-loc "$TARGET_LOC" \
+            --seed "$SEED" \
+            --ab "$AB" \
+            --bazel-flags="$BAZEL_FLAGS" \
+            --lockfile "$LOCKFILE" \
+            --out "$GITHUB_WORKSPACE/$PLATFORM-ab.json"
+          {
+            echo '```json'
+            cat "$GITHUB_WORKSPACE/$PLATFORM-ab.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload platform sol
         # Runs even when measuring failed: the artifact explains the run.
         # Only the small result file is uploaded, never a build output.
-        if: ${{ !cancelled() && inputs.head_ref != '' }}
+        # Single-run (ab=off) only; A/B runs upload <platform>-ab instead.
+        if: ${{ !cancelled() && inputs.head_ref != '' && inputs.ab == 'off' }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.platform }}-sol
           path: ${{ inputs.platform }}-sol.json
+          retention-days: 3
+      - name: Upload platform ab
+        # Runs even when an arm failed: the artifact explains the run.
+        if: ${{ !cancelled() && inputs.ab == 'flags' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.platform }}-ab
+          path: ${{ inputs.platform }}-ab.json
+          retention-days: 3
+      - name: Upload platform profile
+        # Small profile companion to <platform>-sol / <platform>-ab: the
+        # gzipped Bazel trace profiles and execution logs behind each
+        # flow's profile record, both arms of an A/B run kept apart. No
+        # build outputs.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.platform }}-profile
+          path: |
+            sol-results/**/trace.json.gz
+            sol-results/**/execlog.json.gz
+            ab-results/control/**/trace.json.gz
+            ab-results/control/**/execlog.json.gz
+            ab-results/treatment/**/trace.json.gz
+            ab-results/treatment/**/execlog.json.gz
           retention-days: 3

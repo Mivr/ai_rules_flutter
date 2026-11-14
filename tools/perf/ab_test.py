@@ -599,6 +599,126 @@ class AbEndToEndTest(unittest.TestCase):
             self.pristine_treatment, "arm-marker.txt")))
 
 
+class PlatformAbEndToEndTest(AbEndToEndTest):
+    """--platform web through the stand-in Bazel; default stays iOS."""
+
+    test_both_arms_identical_alternating_isolated = None
+
+    def run_argv(self):
+        argv = super().run_argv()
+        at = argv.index("--config")
+        # No --config: the platform names the configs.
+        return argv[:at] + ["--platform", "web"] + argv[at + 2:]
+
+    def test_web_run_then_summarize_uses_web_flows(self):
+        out = os.path.join(self.tmp, "web-ab.json")
+        with mock.patch.dict(os.environ, self.env):
+            self.assertEqual(ab.main(self.run_argv()), 0)
+            self.assertEqual(ab.main(
+                ["summarize", "--platform", "web",
+                 "--results", self.results, "--sha", "b" * 40,
+                 "--repeats", "2", "--target-loc", "100", "--seed", "7",
+                 "--ab", "flags", "--bazel-flags=--jobs=8",
+                 "--lockfile", "none", "--out", out]), 0)
+        with open(out, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        self.assertEqual(sorted(summary), [
+            "arms", "meta", "ratio", "rules_flutter", "runner", "unit"])
+        self.assertEqual(sorted(summary["meta"]), [
+            "ab", "bazel_flags", "lockfile", "order", "repeats", "seed",
+            "target_loc"])
+        flows = {"web-%s-%s" % (cfg, name) for cfg in ("release", "debug")
+                 for name in ("clean", "app", "body")}
+        self.assertEqual(set(summary["ratio"]), flows)
+        for arm in ("control", "treatment"):
+            self.assertEqual(set(summary["arms"][arm]), flows)
+        for flow in ("web-release-clean", "web-release-app",
+                     "web-release-body"):
+            self.assertTrue(summary["arms"]["control"][flow]["identical"])
+            self.assertEqual(summary["ratio"][flow]["n"], 2, flow)
+        self.assertEqual(self.live_server_pids(), [])
+
+
+class PlatformSummaryTest(unittest.TestCase):
+    """Platform plumbing: configs, flow ids and the default stay put."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="ab-platform-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_platform_configs_come_from_sol_summary(self):
+        self.assertEqual(ab.platform_configs("ios"), list(IOS_CONFIGS))
+        self.assertEqual(ab.platform_configs("android"),
+                         ["android_release", "android_debug"])
+        self.assertEqual(ab.platform_configs("web"),
+                         ["web_release", "web_debug"])
+        with self.assertRaises(ValueError):
+            ab.platform_configs("tvos")
+
+    def test_arm_flows_per_platform_and_default_is_ios(self):
+        self.assertEqual(set(summarize_arm_flows(self.tmp, "android")), {
+            "android-release-clean", "android-release-app",
+            "android-release-body", "android-debug-clean",
+            "android-debug-app", "android-debug-body"})
+        self.assertEqual(summarize_arm_flows(self.tmp),
+                         summarize_arm_flows(self.tmp, "ios"))
+
+    def write(self, arm, config, scenario, flow, cpu):
+        path = os.path.join(self.tmp, arm, "sol", config, scenario,
+                            "rep1", "record.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        record = SummarizeAbTest.full_record(None, flow, cpu, 5.0)
+        record["config"] = config
+        record["scenario"] = scenario
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(record, fh)
+
+    def test_android_summarize_writes_android_ab(self):
+        for arm in ("control", "treatment"):
+            self.write(arm, "android_release", "clean",
+                       "android-release-clean", 10.0)
+        out = os.path.join(self.tmp, "android-ab.json")
+        code = ab.main(["summarize", "--platform", "android",
+                        "--results", self.tmp, "--sha", "b" * 40,
+                        "--repeats", "1", "--target-loc", "100",
+                        "--seed", "7", "--ab", "flags",
+                        "--bazel-flags=--jobs=8", "--lockfile", "none",
+                        "--out", out])
+        self.assertEqual(code, 0)
+        with open(out, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        self.assertEqual(summary["meta"]["bazel_flags"], ["--jobs=8"])
+        self.assertEqual(len(summary["ratio"]), 6)
+        self.assertEqual(summary["ratio"]["android-release-clean"]["n"], 1)
+        self.assertEqual(summary["ratio"]["android-debug-clean"]["n"], 0)
+        self.assertNotIn("ios-release-clean", summary["arms"]["control"])
+
+    def test_run_defaults_to_the_platforms_configs(self):
+        seen = []
+
+        def fake_rep(_child, rep, configs):
+            seen.append((rep, list(configs)))
+            return None, False
+
+        base = ["run", "--tools", self.tmp,
+                "--pristine-control", self.tmp,
+                "--pristine-treatment", self.tmp,
+                "--work-root-control", os.path.join(self.tmp, "wc"),
+                "--work-root-treatment", os.path.join(self.tmp, "wt"),
+                "--out-base-root-control", os.path.join(self.tmp, "oc"),
+                "--out-base-root-treatment", os.path.join(self.tmp, "ot"),
+                "--results", self.tmp, "--repeats", "1"]
+        for extra, expected in (
+                ([], ["device_release", "sim_debug"]),
+                (["--platform", "android"],
+                 ["android_release", "android_debug"]),
+                (["--platform", "web"], ["web_release", "web_debug"])):
+            seen.clear()
+            with mock.patch.object(sol, "run_sol_rep", fake_rep):
+                self.assertEqual(ab.main(base + extra), 0)
+            self.assertEqual(seen, [(1, expected), (1, expected)], extra)
+
+
 class DefaultPathTest(unittest.TestCase):
     def test_sol_meta_defaults_to_lockfile_none(self):
         tmp = tempfile.mkdtemp(prefix="ab-default-")

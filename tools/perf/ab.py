@@ -51,13 +51,24 @@ from run_rep import (  # noqa: E402
 )
 from summarize import summarize_values  # noqa: E402
 import sol  # noqa: E402
+import sol_summary  # noqa: E402
 import warm_server  # noqa: E402
 
 AB_CHOICES = ("off", "flags", "lockfile")
 LOCKFILE_CHOICES = ("none", "committed")
 LOCK_REL_PATH = "MODULE.bazel.lock"
+PLATFORM_CHOICES = ("ios", "android", "web")
+DEFAULT_PLATFORM = "ios"
 CONTROL = "control"
 TREATMENT = "treatment"
+
+
+def platform_configs(platform):
+    """The platform's two bench configs, in sol_summary's table order."""
+    if platform not in PLATFORM_CHOICES:
+        raise ValueError("invalid platform %r: expected one of %s"
+                         % (platform, "/".join(PLATFORM_CHOICES)))
+    return sol_summary.configs_for_platform(platform)
 
 
 def validate_ab(mode, ab, lockfile, flags):
@@ -271,10 +282,10 @@ def ratio_for_flow(results_control, results_treatment, config, scenario,
             "n": summary["n"], "unpaired": unpaired}
 
 
-def summarize_arm_flows(results_arm):
+def summarize_arm_flows(results_arm, platform=DEFAULT_PLATFORM):
     """{flow: flow record} medians over one arm's repeats (sol schema)."""
     flows = {}
-    for config in IOS_CONFIGS:
+    for config in platform_configs(platform):
         for scenario, _ in SCENARIOS:
             flow = sol.flow_id(config, scenario)
             records = sol.load_sol_records(results_arm, config, scenario)
@@ -286,11 +297,12 @@ def summarize_arm_flows(results_arm):
 
 
 def summarize_ab(results_control, results_treatment, meta):
-    """ios-ab.json dict: per-arm medians plus paired per-repeat ratios."""
-    control_flows = summarize_arm_flows(results_control)
-    treatment_flows = summarize_arm_flows(results_treatment)
+    """<platform>-ab.json dict: per-arm medians plus paired ratios."""
+    platform = meta.get("platform", DEFAULT_PLATFORM)
+    control_flows = summarize_arm_flows(results_control, platform)
+    treatment_flows = summarize_arm_flows(results_treatment, platform)
     ratios = {}
-    for config in IOS_CONFIGS:
+    for config in platform_configs(platform):
         for scenario, _ in SCENARIOS:
             flow = sol.flow_id(config, scenario)
             ratios[flow] = ratio_for_flow(results_control,
@@ -391,7 +403,8 @@ def main_run(cmd):
         argv, cwd, cmd.time_bin)
     cmd.measure_warm = (lambda argv, cwd, server_pid:
                         warm_server.measure(argv, cwd, server_pid))
-    configs = list(cmd.config) if cmd.config else list(IOS_CONFIGS)
+    configs = (list(cmd.config) if cmd.config
+               else list(platform_configs(cmd.platform)))
     unknown = [c for c in configs if c not in CONFIGS]
     if unknown:
         raise ValueError("unknown config(s): %s" % ", ".join(unknown))
@@ -409,7 +422,7 @@ def main_summarize(cmd):
     meta = {"sha": cmd.sha, "repeats": cmd.repeats,
             "target_loc": cmd.target_loc, "seed": cmd.seed, "ab": cmd.ab,
             "bazel_flags": flags, "lockfile": cmd.lockfile,
-            "order": arm_order(cmd.repeats)}
+            "order": arm_order(cmd.repeats), "platform": cmd.platform}
     summary = summarize_ab(os.path.join(cmd.results, CONTROL),
                            os.path.join(cmd.results, TREATMENT), meta)
     with open(cmd.out, "w", encoding="utf-8", newline="\n") as fh:
@@ -425,7 +438,8 @@ def main_summarize(cmd):
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Same-runner A/B for the iOS SOL bench.")
+        description="Same-runner A/B for the SOL bench (iOS, Android, "
+                    "Web).")
     sub = parser.add_subparsers(dest="command", required=True)
     valid = sub.add_parser("validate", help="fail fast on bad A/B inputs")
     valid.add_argument("--mode", required=True)
@@ -447,11 +461,16 @@ def build_parser():
     run.add_argument("--repeats", type=int, required=True)
     run.add_argument("--config", action="append", default=[],
                      choices=sorted(CONFIGS))
+    run.add_argument("--platform", choices=PLATFORM_CHOICES,
+                     default=DEFAULT_PLATFORM)
     run.add_argument("--timeout", type=float, default=1800.0)
     run.add_argument("--min-clean-actions", type=int,
                      default=DEFAULT_MIN_CLEAN_ACTIONS)
     run.add_argument("--time-bin", default=sol.TIME_BIN)
-    summ = sub.add_parser("summarize", help="write ios-ab.json medians")
+    summ = sub.add_parser("summarize",
+                          help="write <platform>-ab.json medians")
+    summ.add_argument("--platform", choices=PLATFORM_CHOICES,
+                      default=DEFAULT_PLATFORM)
     summ.add_argument("--results", required=True)
     summ.add_argument("--sha", required=True)
     summ.add_argument("--repeats", type=int, required=True)
