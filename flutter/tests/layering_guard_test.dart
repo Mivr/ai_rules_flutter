@@ -1,6 +1,7 @@
 /// Tripwire: `flutter/private/layering_check.bzl` is the only Flutter file
 /// that loads rules_dart's `import_check.bzl`, and nothing loads a
-/// `dart/private` file of rules_dart for the check.
+/// `dart/private` file of rules_dart for the check. The iOS integration test's
+/// generated-bootstrap application is the one target built with it off.
 ///
 /// One wiring means the checked rules cannot drift apart and the later rules
 /// adopt the check by loading the helper. The test reads the live tree, found
@@ -86,5 +87,17 @@ void main() {
         )
         .toList();
     expect(loaders, isEmpty);
+  });
+
+  test('the iOS integration bootstrap application is the unchecked one', () {
+    final String source = File(
+      '$root/flutter/private/flutter_integration_test_ios.bzl',
+    ).readAsStringSync();
+    final RegExpMatch? call = RegExp(
+      r'_flutter_application\((.*?)\n    \)',
+      dotAll: true,
+    ).firstMatch(source);
+    expect(call, isNotNull, reason: 'the internal flutter_application call');
+    expect(call!.group(1), contains('features = ["-dart_layering_check"]'));
   });
 }

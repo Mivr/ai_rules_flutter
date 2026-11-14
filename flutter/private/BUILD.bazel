@@ -447,6 +447,7 @@ bzl_library(
         ":flutter_info",
         ":flutter_kernel_module",
         ":flutter_native_assets",
+        ":layering_check",
         ":native_sources",
         "//flutter:providers",
         "@apple_support//lib:apple_support",
@@ -1543,7 +1544,10 @@ bzl_library(
     name = "layering_check",
     srcs = ["layering_check.bzl"],
     visibility = ["//visibility:public"],
-    deps = ["@rules_dart//dart:import_check_bzl"],
+    deps = [
+        "@rules_dart//dart:import_check_bzl",
+        "@rules_dart//dart:utils",
+    ],
 )
 
 bzl_library(
@@ -1567,6 +1571,7 @@ bzl_library(
         ":flutter_kernel_module",
         ":flutter_library",
         ":flutter_web_compile",
+        ":layering_check",
         ":plugin_registrant",
         ":validation",
         ":web_service_worker",

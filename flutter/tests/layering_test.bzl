@@ -1,11 +1,12 @@
-"""Analysis tests for the strict-layering check on `flutter_test`.
+"""Analysis tests for the strict-layering check on the Flutter program rules.
 
 The fixture in `layering_fixture/` has `:bad_test` import `package:leaf`, which
-only its dep `mid` depends on. The tests pin what the check's action reads and
-that the `_validation` output group carries it (and carries nothing when the
-`dart_layering_check` feature is off). Building `:bad_test` with
-`--output_groups=_validation` is the failing case, and `:good_test` the passing
-one: an action's exit status is not visible from analysis.
+only its dep `mid` depends on; `layering_app_fixture/` does the same for
+`flutter_application` and `flutter_web_bundle`. The tests pin what the check's
+action reads and that the `_validation` output group carries it (and carries
+nothing when the `dart_layering_check` feature is off). Building the `bad_*`
+target with `--output_groups=_validation` is the failing case, and the `good_*`
+twin the passing one: an action's exit status is not visible from analysis.
 """
 
 load("@bazel_skylib//lib:unittest.bzl", "analysistest", "asserts")
@@ -39,7 +40,7 @@ def _on_test_impl(ctx):
         asserts.true(env, name in direct, "%s is a direct package: %s" % (name, argv))
     for name in ctx.attr.expect_absent:
         asserts.true(env, name not in direct, "%s is not a direct package: %s" % (name, argv))
-    asserts.equals(env, ["layering_fixture"], _flag_values(argv, "--own-package"))
+    asserts.equals(env, [ctx.attr.own_package], _flag_values(argv, "--own-package"))
     srcs = _flag_values(argv, "--src")
     for path in ctx.attr.expect_srcs:
         asserts.true(env, path in srcs, "%s is checked: %s" % (path, srcs))
@@ -56,6 +57,7 @@ layering_on_test = analysistest.make(
         "expect_absent": attr.string_list(doc = "Package names argv must not list as direct."),
         "expect_direct": attr.string_list(doc = "Package names argv must list as direct."),
         "expect_srcs": attr.string_list(doc = "Short paths of the sources the check must read."),
+        "own_package": attr.string(default = "layering_fixture", doc = "The package the check must treat as the target's own."),
     },
 )
 

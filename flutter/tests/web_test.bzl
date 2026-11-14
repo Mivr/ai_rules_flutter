@@ -1714,6 +1714,7 @@ def _setup_web_fixtures():
         main = "lib/web_font_fixture_main.dart",
         deps = [
             "//flutter:material_icons",
+            "//flutter/tests/icon_tree_shake_fixture:flutter_stub",
             "//flutter/tests/icon_tree_shake_fixture:cupertino_text_font",
             "//flutter/tests/icon_tree_shake_fixture:icons_suffix_family",
             "//flutter/tests/icon_tree_shake_fixture:pkg_icons_suffix_family",
@@ -1733,6 +1734,7 @@ def _setup_web_fixtures():
         main = "lib/web_cond_fixture_main.dart",
         deps = [
             "//flutter:material_icons",
+            "//flutter/tests/icon_tree_shake_fixture:flutter_stub",
             "//flutter/tests/icon_tree_shake_fixture/cond_icons",
         ],
         tags = ["manual"],

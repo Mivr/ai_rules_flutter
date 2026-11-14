@@ -91,8 +91,13 @@ not checked.
 The check is on by default and the feature `dart_layering_check` turns it off
 per package or per build, as in rules_dart. No attribute is added.
 
-Checked rules: `flutter_test`. A rule that joins the list adopts the helper and
-is added here.
+Checked rules: `flutter_test`, `flutter_application` (under the android, ios,
+linux, macos and windows macros) and `flutter_web_bundle` (under
+`flutter_web_app`). Each returns the check beside its other `_validation`
+entries (an application keeps its link-hook verdicts). The one unchecked target
+is the `flutter_application` that the iOS `flutter_integration_test` builds for
+its generated bootstrap, which imports packages by design: it is built with the
+feature off. A rule that joins the list adopts the helper and is added here.
 
 ## 2. Provider contracts
 

@@ -69,6 +69,7 @@ load(
     "web_renderer_defines",
     "web_sdk_files_for_dart2js",
 )
+load("//flutter/private:layering_check.bzl", "LAYERING_CHECK_ASPECT", "LAYERING_CHECK_ATTRS", "layering_output_groups", "layering_toolchains")
 load("//flutter/private:plugin_registrant.bzl", "generate_dart_plugin_registrant", "make_registrant_content")
 load(
     "//flutter/private:validation.bzl",
@@ -959,7 +960,7 @@ def _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets):
         progress_message = "Bundling Flutter web app %s" % ctx.label,
         toolchain = "@rules_dart//dart:exec_tools_toolchain_type",
     )
-    output_groups = OutputGroupInfo(dump_info = depset([dump_info_file] if dump_info_file else []))
+    output_groups = layering_output_groups(ctx, "dump_info", [dump_info_file] if dump_info_file else [])
     return output_dir, dump_info_file, output_groups
 
 def _web_analyzable_info(ctx, lib_root):
@@ -1325,8 +1326,7 @@ def _flutter_web_bundle_impl(ctx):
         flutter_js_file = flutter_js_file,
         renderer_files = renderer_files,
     ))
-    bundler = _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets)
-    output_dir, _dump_info_file, output_groups = bundler
+    output_dir, _, output_groups = _web_run_bundler(ctx, flutter_sdk_info, program, bundle, flutter_assets)
 
     analyzable_info = _web_analyzable_info(ctx, lib_root)
 
@@ -1373,9 +1373,9 @@ _WEB_APPLICATION_ATTRS = KERNEL_COMPILE_ATTRS | {
 _WEB_APPLICATION_ATTRS["deps"] = attr.label_list(
     doc = FLUTTER_DEPS_DOC,
     providers = [DartInfo],
-    aspects = [flutter_web_shader_aspect, flutter_kernel_module_aspect],
+    aspects = [flutter_web_shader_aspect, flutter_kernel_module_aspect, LAYERING_CHECK_ASPECT],
 )
-_WEB_APPLICATION_ATTRS.update(MODULAR_KERNEL_ATTRS)
+_WEB_APPLICATION_ATTRS.update(MODULAR_KERNEL_ATTRS | LAYERING_CHECK_ATTRS)
 
 # Reaches the analysis closure only — see `analyzable_info` in the impl. No
 # BUILD file names it and no compile action's inputs change.
@@ -1725,6 +1725,6 @@ build knows which served file is a native module.
         "@rules_flutter//flutter:toolchain_type",
         config_common.toolchain_type("@rules_flutter//flutter/private:product_tools_toolchain_type", mandatory = False),
         config_common.toolchain_type("@rules_flutter//flutter/private:font_subset_toolchain_type", mandatory = False),
-    ] + COPY_TO_DIRECTORY_TOOLCHAINS + MODULAR_KERNEL_TOOLCHAINS,
+    ] + COPY_TO_DIRECTORY_TOOLCHAINS + layering_toolchains(MODULAR_KERNEL_TOOLCHAINS) + MODULAR_KERNEL_TOOLCHAINS,
     doc = "Builds a Flutter web application (WASM or JS) with all deployment artifacts.",
 )

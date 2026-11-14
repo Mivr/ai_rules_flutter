@@ -509,6 +509,9 @@ def assemble_ios_integration_test(
         main = bootstrap,
         srcs = bootstrap_srcs + bootstrap_app_srcs,
         deps = deps,
+        # The generated bootstrap imports packages by design; the user's own
+        # sources are not checked here.
+        features = ["-dart_layering_check"],
         tags = helper_tags,
         visibility = ["//visibility:private"],
         **app_kwargs

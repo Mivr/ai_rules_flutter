@@ -25,6 +25,7 @@ load("//flutter/private:flutter_font_family.bzl", "FONTS_ATTR")
 load("//flutter/private:flutter_info.bzl", "collect_flutter_plugin_deps")
 load("//flutter/private:flutter_kernel_module.bzl", "DEBUG_MODULAR_APP_ATTR", "flutter_app_kernel_module_aspect")
 load("//flutter/private:flutter_native_assets.bzl", "collect_application_native_assets", "collect_bundled_code_asset_files", "write_native_assets_manifest")
+load("//flutter/private:layering_check.bzl", "LAYERING_CHECK_ASPECT", "LAYERING_CHECK_ATTRS", "layering_check_for", "layering_toolchains")
 load("//flutter/private:native_sources.bzl", "collect_native_source_pairs")
 
 visibility(["//flutter/..."])
@@ -437,10 +438,11 @@ def _application_providers(flutter_sdk_info, is_debug, outputs, plugins):
         output_groups["obfuscation_map"] = depset([outputs.obfuscation_map_output])
     if outputs.size_output:
         output_groups["analyze_size"] = depset([outputs.size_output])
-    if outputs.link_hook_validation:
-        # Every hook runs whenever the app builds, even one that emits no
-        # asset, so its verdict on the program is never skipped.
-        output_groups["_validation"] = depset(outputs.link_hook_validation)
+
+    # Every hook runs whenever the app builds, even one that emits no asset, so
+    # its verdict on the program is never skipped; the strict-layering check
+    # on `main`, `srcs` and the first-party libraries below rides beside it.
+    output_groups["_validation"] = outputs.validation
 
     providers = [
         DefaultInfo(files = depset(outputs.default_files)),
@@ -656,7 +658,7 @@ def _flutter_application_impl(ctx):
         debug_info_output = aot.debug_info_output,
         obfuscation_map_output = aot.obfuscation_map_output,
         size_output = aot.size_output,
-        link_hook_validation = link_hook_validation,
+        validation = depset(link_hook_validation, transitive = [layering_check_for(ctx)]),
         flutter_assets = flutter_assets,
         native_libs = native_libs,
         default_files = default_files,
@@ -680,11 +682,12 @@ flutter_application = rule(
             "deps": attr.label_list(
                 doc = FLUTTER_DEPS_DOC,
                 providers = [DartInfo],
-                aspects = [flutter_app_shader_aspect, flutter_app_kernel_module_aspect],
+                aspects = [flutter_app_shader_aspect, flutter_app_kernel_module_aspect, LAYERING_CHECK_ASPECT],
             ),
         },
         PLATFORM_CONSTRAINT_ATTRS,
         link_hook_runner_attr(),
+        LAYERING_CHECK_ATTRS,
         # Simulator-vs-device is an Apple *environment* constraint, not an OS
         # one, so it needs apple_support's own attrs on top of the OS set.
         # `launch_build_args` turns it into `--ios_multi_cpus=sim_arm64` or
@@ -698,6 +701,6 @@ flutter_application = rule(
         config_common.toolchain_type("@rules_flutter//flutter/private:aot_toolchain_type", mandatory = False),
         config_common.toolchain_type("@rules_flutter//flutter/private:font_subset_toolchain_type", mandatory = False),
         config_common.toolchain_type("@rules_dart//dart:exec_tools_toolchain_type", mandatory = False),
-    ] + COPY_TO_DIRECTORY_TOOLCHAINS + MODULAR_KERNEL_TOOLCHAINS,
+    ] + COPY_TO_DIRECTORY_TOOLCHAINS + layering_toolchains(MODULAR_KERNEL_TOOLCHAINS) + MODULAR_KERNEL_TOOLCHAINS,
     doc = "Compiles a Flutter application to AOT native code + asset bundle (release) or kernel .dill + assets (debug).",
 )
