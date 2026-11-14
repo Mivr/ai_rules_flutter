@@ -40,6 +40,14 @@ every AOT, web, `from_dill`, `import_dill` or `recorded_uses` compile runs
 the stock one-shot action, byte-identical to a build without the worker, so
 release, CI and remote-cache builds keep hitting their caches.
 
+A plain debug `flutter_application` (no define, define file, flavor, native
+asset, recorded use or widget-creation tracking) no longer compiles whole
+program: by default it compiles per-package kernel modules and links them, so
+it registers no `FlutterKernelCompile` and the worker is not involved. It takes
+the warm worker only with the private modular flag off
+(`--@rules_flutter//flutter/private:debug_modular_app=false`); every other
+application, and every `flutter_test` or web build, is unchanged.
+
 To restore the stock action in a debug build:
 
 ```sh
