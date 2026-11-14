@@ -1,6 +1,7 @@
 """Exposes the Android-configured Dart plugin registrant of a `flutter_application`.
 
-`flutter_application` writes `<name>_plugin_registrant.dart` via
+`flutter_application` writes `<name>_plugin_registrant.dart` (a debug build:
+`<name>.debug_agent/<agent dir>/plugin_registrant.dart`) via
 `generate_dart_plugin_registrant` (`flutter/private/plugin_registrant.bzl`) and
 passes its URI to `FlutterKernelCompile` (`flutter/private/common.bzl`) without
 placing the `.dart` source in `DefaultInfo`. Attaching an aspect across
@@ -44,6 +45,14 @@ def _verify_kernel_wiring(label, registrant_file, kernel_action):
             registrant_file.basename,
         ))
 
+def _is_debug_registrant(target, out):
+    """Whether `out` is the registrant a debug build declares under `<name>.debug_agent/`.
+
+    A debug build declares it at `<name>.debug_agent/<agent dir>/plugin_registrant.dart`
+    (`agent_layout_path`), so the engine's constant registrant URI resolves.
+    """
+    return out.basename == "plugin_registrant.dart" and ("/" + target.label.name + ".debug_agent/") in ("/" + out.short_path)
+
 def _is_entry_module(action):
     """Whether `action` compiles an application's `.flutter_entry.kmod`."""
     return len([o for o in action.outputs.to_list() if o.basename.endswith(".flutter_entry.kmod")]) > 0
@@ -80,7 +89,7 @@ def _dart_registrant_aspect_impl(target, ctx):
     entry_action = None
     for action in target.actions:
         for out in action.outputs.to_list():
-            if out.basename == expected_name:
+            if out.basename == expected_name or _is_debug_registrant(target, out):
                 registrant_file = out
         if action.mnemonic == "FlutterKernelCompile":
             kernel_action = action
