@@ -388,8 +388,40 @@ def _ios_build_runner(name, runner):
             ] + runner.deps,
         )
 
+_SKIP_SIM_CODESIGN = "apple.skip_codesign_simulator_bundles"
+
+def _ios_rules_apple_features(kwargs):
+    """Returns the `features` for the rules_apple bundle, with the debug default.
+
+    A `-c dbg` build enables rules_apple's `apple.skip_codesign_simulator_bundles`
+    (rules_apple applies it to simulator bundles only, so device signing is
+    untouched); other modes keep the caller's list. The caller's features follow
+    the default, so `-apple.skip_codesign_simulator_bundles` wins, and a caller
+    who lists the feature already gets it once.
+
+    Args:
+        kwargs: The macro's pass-through attributes, read for `features`.
+
+    Returns:
+        The `features` value for `ios_application`.
+    """
+    caller = kwargs.get("features", [])
+    if type(caller) == "list" and _SKIP_SIM_CODESIGN in caller:
+        return caller
+    return select({
+        Label("@rules_flutter//flutter/private:dbg"): [_SKIP_SIM_CODESIGN] + caller,
+        "//conditions:default": caller,
+    })
+
 def _ios_emit_rules_apple_bundle(name, bundle):
-    """Emits the final rules_apple ios_application bundle target."""
+    """Emits the final rules_apple ios_application bundle target.
+
+    Args:
+        name: The app target name.
+        bundle: The final bundle's settings struct.
+    """
+    kwargs = dict(bundle.kwargs)
+    kwargs["features"] = _ios_rules_apple_features(kwargs)
 
     # A debug build carries the split flutter_assets at the app root; an AOT
     # build keeps them inside App.framework and gets no root copy.
@@ -417,7 +449,7 @@ def _ios_emit_rules_apple_bundle(name, bundle):
         ] + bundle.additional_deps,
         tags = bundle.tags,
         visibility = bundle.visibility,
-        **bundle.kwargs
+        **kwargs
     )
 
 def _ios_emit_xtool_bundle(name, bundle, invalid_version_error, runner):

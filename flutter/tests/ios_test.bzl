@@ -1163,21 +1163,127 @@ def _xtool_ios_validation_tests(name):
         name + "_xtool_unsupported_kwarg_fails",
     ]
 
+_SKIP = "apple.skip_codesign_simulator_bundles"
+
 def _ios_signing_surface_test_impl(ctx):
-    env = unittest.begin(ctx)
+    env = analysistest.begin(ctx)
     asserts.equals(env, ctx.attr.expected_features, ctx.attr.actual_features)
     asserts.equals(env, ctx.attr.expected_tags, ctx.attr.actual_tags)
-    return unittest.end(env)
+    return analysistest.end(env)
 
-_ios_signing_surface_test = unittest.make(
-    _ios_signing_surface_test_impl,
-    attrs = {
-        "actual_features": attr.string_list(mandatory = True),
-        "actual_tags": attr.string_list(mandatory = True),
-        "expected_features": attr.string_list(mandatory = True),
-        "expected_tags": attr.string_list(mandatory = True),
-    },
+_SIGNING_ATTRS = {
+    "actual_features": attr.string_list(mandatory = True),
+    "actual_tags": attr.string_list(mandatory = True),
+    "expected_features": attr.string_list(mandatory = True),
+    "expected_tags": attr.string_list(mandatory = True),
+}
+_ios_signing_surface_test = analysistest.make(_ios_signing_surface_test_impl, attrs = _SIGNING_ATTRS)
+
+_FeaturesInfo = provider(doc = "The features a target enabled in its configuration.", fields = {"features": "The enabled feature names."})
+
+def _features_probe_impl(ctx):
+    """Records the features this configuration enabled, selects resolved."""
+    return [_FeaturesInfo(features = [f for f in ctx.features if f == _SKIP or f == "caller_feature"])]
+
+_features_probe = rule(
+    implementation = _features_probe_impl,
+    doc = "Copies an app's `features` select so a test reads the configured result.",
 )
+
+def _dbg_features_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    features = sorted(analysistest.target_under_test(env)[_FeaturesInfo].features)
+    asserts.equals(env, sorted(ctx.attr.expected_features), features)
+    return analysistest.end(env)
+
+_dbg_features_test = analysistest.make(
+    _dbg_features_test_impl,
+    attrs = {"expected_features": attr.string_list(mandatory = True)},
+    config_settings = {"//command_line_option:compilation_mode": "dbg"},
+)
+
+def _signing_action_test_impl(ctx):
+    env = analysistest.begin(ctx)
+    signing = [a for a in analysistest.target_actions(env) if a.mnemonic == "ProcessAndSign"]
+    asserts.equals(env, 1, len(signing), "expected one ProcessAndSign action")
+    scripts = [f for f in signing[0].inputs.to_list() if f.basename.startswith("process-and-sign")]
+    asserts.equals(env, ctx.attr.signs, len(scripts) == 1, "signing script inputs: %s" % scripts)
+    return analysistest.end(env)
+
+def _signing_config(mode, cpus):
+    return {
+        "//command_line_option:compilation_mode": mode,
+        "//command_line_option:extra_execution_platforms": [str(Label("//flutter/platforms:macos_arm64"))],
+        "//command_line_option:ios_multi_cpus": [cpus],
+        "//command_line_option:platforms": str(Label("//flutter/platforms:ios_arm64")),
+        "//command_line_option:xcode_version_config": str(Label("//flutter/tests:ios_test_fake_xcode_config")),
+        str(Label("//flutter:profile")): False,
+    }
+
+_signing_action_attrs = {"signs": attr.bool(mandatory = True)}
+_sim_dbg_signing_test = analysistest.make(_signing_action_test_impl, attrs = _signing_action_attrs, config_settings = _signing_config("dbg", "sim_arm64"))
+_sim_opt_signing_test = analysistest.make(_signing_action_test_impl, attrs = _signing_action_attrs, config_settings = _signing_config("opt", "sim_arm64"))
+_device_dbg_signing_test = analysistest.make(_signing_action_test_impl, attrs = _signing_action_attrs, config_settings = _signing_config("dbg", "arm64"))
+
+def _sim_codesign_tests(name, runtime_srcs, info_plist):
+    """Declares the simulator-codesign default apps and their signing-action tests.
+
+    Args:
+      name: Prefix for every target declared here.
+      runtime_srcs: The runner sources every app takes.
+      info_plist: The runner Info.plist.
+
+    Returns:
+      The test target names.
+    """
+    native.genrule(
+        name = name + "_fake_profile",
+        outs = [name + "_fake.mobileprovision"],
+        cmd = "echo fake > $@",
+        tags = ["manual"],
+    )
+    fake_application(name = name + "_sim_codesign_app", debug = True, macho_aot = False, tags = ["manual"])
+    variants = {
+        "default": [],
+        "optout": ["-" + _SKIP],
+        "listed": [_SKIP],
+    }
+    for variant, features in variants.items():
+        flutter_ios_app(
+            name = name + "_sim_" + variant + "_ios_app",
+            application = ":" + name + "_sim_codesign_app",
+            bundle_id = "com.example.simcodesign." + variant,
+            srcs = runtime_srcs,
+            info_plist = info_plist,
+            entitlements = False,
+            app_icons = [],
+            features = features,
+            provisioning_profile = ":" + name + "_fake_profile",
+            tags = ["manual"],
+        )
+    app = lambda v: ":" + name + "_sim_" + v + "_ios_app"
+    _sim_dbg_signing_test(name = name + "_sim_dbg_skips_signing", target_under_test = app("default"), signs = False)
+    _sim_dbg_signing_test(name = name + "_sim_dbg_listed_skips_signing", target_under_test = app("listed"), signs = False)
+    _sim_dbg_signing_test(name = name + "_sim_dbg_optout_signs", target_under_test = app("optout"), signs = True)
+    _sim_opt_signing_test(name = name + "_sim_opt_signs", target_under_test = app("default"), signs = True)
+    _device_dbg_signing_test(name = name + "_device_dbg_signs", target_under_test = app("default"), signs = True)
+    after = native.existing_rules()
+    _ios_signing_surface_test(
+        name = name + "_listed_feature_once",
+        target_under_test = ":" + name + "_sim_codesign_app",
+        actual_features = after[name + "_sim_listed_ios_app"]["features"],
+        actual_tags = after[name + "_sim_listed_ios_app"]["tags"],
+        expected_features = [_SKIP],
+        expected_tags = ["manual"],
+    )
+    return [
+        name + "_sim_dbg_skips_signing",
+        name + "_sim_dbg_listed_skips_signing",
+        name + "_sim_dbg_optout_signs",
+        name + "_sim_opt_signs",
+        name + "_device_dbg_signs",
+        name + "_listed_feature_once",
+    ]
 
 def _signing_tests(name):
     """Declare the signed and unsigned device app fixtures and their tests.
@@ -1260,8 +1366,15 @@ def _signing_tests(name):
     )
 
     after = native.existing_rules()
-    _ios_signing_surface_test(
+    _features_probe(name = name + "_signed_features", features = after[signed]["features"], tags = ["manual"])
+    _dbg_features_test(
         name = name + "_signed_signing_surface",
+        target_under_test = ":" + name + "_signed_features",
+        expected_features = [_SKIP, "caller_feature"],
+    )
+    _ios_signing_surface_test(
+        name = name + "_signed_release_signing_surface",
+        target_under_test = ":" + name + "_signing_app",
         actual_features = after[signed]["features"],
         actual_tags = after[signed]["tags"],
         expected_features = ["caller_feature"],
@@ -1269,6 +1382,7 @@ def _signing_tests(name):
     )
     _ios_signing_surface_test(
         name = name + "_xtool_unsigned_signing_surface",
+        target_under_test = ":" + name + "_signing_app",
         actual_features = after[xtool_unsigned]["features"],
         actual_tags = after[xtool_unsigned]["tags"],
         expected_features = ["caller_feature"],
@@ -1295,10 +1409,11 @@ def _signing_tests(name):
 
     return [
         name + "_signed_signing_surface",
+        name + "_signed_release_signing_surface",
         name + "_xtool_unsigned_signing_surface",
         name + "_unsigned_fails",
         name + "_xtool_unsigned_zsign_fails",
-    ]
+    ] + _sim_codesign_tests(name, runtime_srcs, info_plist)
 
 def _xtool_registrant_seam_test_impl(ctx):
     env = analysistest.begin(ctx)

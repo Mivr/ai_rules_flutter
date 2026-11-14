@@ -68,3 +68,14 @@ only on the `dartaotruntime` of the build that produced it. So
 dills, all from the one engine download, even if a user registers a different
 Dart toolchain ahead of Flutter's. Build-step scripts and tools take `dart`
 from the rules_dart toolchain.
+
+## 2026-11-15
+
+**Debug simulator bundles skip code signing (agent).** `flutter_ios_app` on the
+`rules_apple` backend adds `apple.skip_codesign_simulator_bundles` to the
+`ios_application` features in `-c dbg`, ahead of the caller's `features`.
+perf-ios.yaml run 43597846869 (500k lines) measured `ProcessAndSign` falling from
+3.3-3.6 s to 0.24-0.34 s per simulator edit. rules_apple applies the feature to
+simulator bundles only, so device and `-c opt` builds sign as before. The opt-out
+is `features = ["-apple.skip_codesign_simulator_bundles"]`. The `xtool` backend
+keeps the caller's `features`.

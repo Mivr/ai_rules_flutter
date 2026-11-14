@@ -681,7 +681,7 @@ flutter_ios_app(
 | `entitlements` | Replaces the entitlements wiring. By default the macro uses `ios/Runner/Runner.entitlements` if it exists. An app with no entitlements file is fine. |
 | `additional_entitlements` | Entitlement plist files merged into the base in every compilation mode. Works even when the app has no entitlements file. See [Release builds and permissions](#release-builds-and-permissions). |
 | `provisioning_profile` | A `.mobileprovision` file, usually a `local_provisioning_profile` target. Required for device builds, unused by simulator builds. See [Running on an iOS device](#running-on-an-ios-device). |
-| `signing` | Whether to code sign the bundle. Defaults to `True`. On `rules_apple`, a device build always needs a `provisioning_profile`, so `False` is refused at analysis; an unsigned device bundle is the `xtool` backend's output. See [Unsigned device builds](#unsigned-device-builds). |
+| `signing` | Whether to code sign the bundle. Defaults to `True`. On `rules_apple`, a device build always needs a `provisioning_profile`, so `False` is refused at analysis; an unsigned device bundle is the `xtool` backend's output. See [Unsigned device builds](#unsigned-device-builds). Separately, on `rules_apple` a `-c dbg` simulator bundle skips code signing by default (`apple.skip_codesign_simulator_bundles`); `features = ["-apple.skip_codesign_simulator_bundles"]` signs it as before, and device and `-c opt` builds are unaffected. |
 | `app_icons` | Defaults to the `AppIcon.appiconset` in `ios/Runner/Assets.xcassets`. See [App icons](#app-icons). |
 | `runner_deps` | `swift_library` targets linked into the runner. See [App Intents](#app-intents). |
 | `exclude_plugins` | Plugin module names left out of the registrant. iOS only: the Android, Linux, macOS and Windows registrants take no such attribute and always register every collected native plugin. See [iOS plugin registrant](#ios-plugin-registrant). |
@@ -816,7 +816,7 @@ attribute reference, the slice layout and the e2e proof.
 
 #### Running on an iOS device
 
-Simulator builds need no code signing. Device builds need a provisioning profile, which is per-developer and should stay out of version control. `flutter_ios_app` takes it directly:
+Simulator builds need no code signing, and a `-c dbg` simulator bundle is not code signed by default: `flutter_ios_app` enables rules_apple's `apple.skip_codesign_simulator_bundles` there, which saves about 3 s of `ProcessAndSign` per edit. Device builds and `-c opt` builds are signed as before. To sign a debug simulator bundle, pass `features = ["-apple.skip_codesign_simulator_bundles"]`. Device builds need a provisioning profile, which is per-developer and should stay out of version control. `flutter_ios_app` takes it directly:
 
 ```starlark
 # In a git-ignored //device package, so the credential stays local.
