@@ -75,6 +75,25 @@ the same target (section 2). The other Flutter provider that targets carry,
 (`flutter/private/flutter_kernel_module.bzl:51-57`). Neither restates a
 library's package identity or its sources.
 
+### Layering check
+
+rules_dart's strict-layering check refuses a source that imports a package none
+of its direct `deps` provides. rules_flutter runs it on its program rules
+through one private helper, `flutter/private/layering_check.bzl`, which is the
+only Flutter file that loads `@rules_dart//dart:import_check.bzl` (a guard test
+holds that line). The helper exposes the aspect for the rule's `deps`, the
+attribute dict, the toolchain list and `layering_check()`, which runs the check
+for a rule context and its own package record and returns the stamps for the
+`_validation` output group. Building the target runs the checks of its own
+sources and of every first-party library below it. The generated bootstrap is
+not checked.
+
+The check is on by default and the feature `dart_layering_check` turns it off
+per package or per build, as in rules_dart. No attribute is added.
+
+Checked rules: `flutter_test`. A rule that joins the list adopts the helper and
+is added here.
+
 ## 2. Provider contracts
 
 ### `FlutterSdkInfo`: the toolchain's engine and tools

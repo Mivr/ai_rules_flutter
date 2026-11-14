@@ -14,6 +14,7 @@ const Map<String, String> _rulesDartTargets = <String, String>{
   '@rules_dart//dart:analyze.bzl': '@rules_dart//dart:analyze',
   '@rules_dart//dart:defs.bzl': '@rules_dart//dart:defs',
   '@rules_dart//dart:extensions.bzl': '@rules_dart//dart:extensions',
+  '@rules_dart//dart:import_check.bzl': '@rules_dart//dart:import_check_bzl',
   '@rules_dart//dart:providers.bzl': '@rules_dart//dart:providers',
   '@rules_dart//dart:repositories.bzl': '@rules_dart//dart:repositories',
   '@rules_dart//dart:toolchain.bzl': '@rules_dart//dart:toolchain',

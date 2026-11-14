@@ -268,6 +268,24 @@ dart_test(
     ],
 )
 
+# `flutter/private/layering_check.bzl` is the only Flutter file that loads
+# rules_dart's `import_check.bzl`. Same discovery mechanism as above.
+dart_test(
+    name = "layering_guard_test",
+    size = "small",
+    data = ["layering_guard_test.dart"],
+    env = {"LAYERING_GUARD_ANCHOR": "$(rlocationpath :layering_guard_test.dart)"},
+    main = "layering_guard_test.dart",
+    tags = [
+        "external",
+        "no-sandbox",
+        "tree-reader",
+    ],
+    deps = [
+        "@dev_tool_deps//:test",
+    ],
+)
+
 # README text check for `flutter_drive_test`: a section, its `load` from
 # `flutter/android.bzl`, the attributes, the driver environment and the scope.
 # The README is a declared input, so a cached pass tracks its content.

@@ -432,7 +432,7 @@ bzl_library(
 bool_flag(
     name = "debug_modular_app",
     build_setting_default = False,
-    visibility = ["//flutter:__subpackages__"],
+    visibility = ["//visibility:public"],
 )
 
 bzl_library(
@@ -1531,11 +1531,19 @@ bzl_library(
         ":flutter_kernel_module",
         ":flutter_native_assets",
         ":flutter_test_common",
+        ":layering_check",
         ":platform_constraints",
         "//flutter:providers",
         "@rules_dart//dart:providers",
         "@rules_dart//dart:utils",
     ],
+)
+
+bzl_library(
+    name = "layering_check",
+    srcs = ["layering_check.bzl"],
+    visibility = ["//visibility:public"],
+    deps = ["@rules_dart//dart:import_check_bzl"],
 )
 
 bzl_library(
@@ -2148,7 +2156,7 @@ exports_files(
 
 exports_files(
     ["integration_test_bootstrap_snippets.bzl"],
-    visibility = ["//flutter:__subpackages__"],
+    visibility = ["//visibility:public"],
 )
 
 # The one Flutter engine import and module-map wrapper per Apple platform that

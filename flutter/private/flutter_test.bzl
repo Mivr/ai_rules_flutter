@@ -106,6 +106,13 @@ load(
     _make_test_artifacts = "make_test_artifacts",
     _make_test_selection = "make_test_selection",
 )
+load(
+    "//flutter/private:layering_check.bzl",
+    "LAYERING_CHECK_ASPECT",
+    "LAYERING_CHECK_ATTRS",
+    "LAYERING_CHECK_TOOLCHAINS",
+    "layering_check",
+)
 load("//flutter/private:platform_constraints.bzl", "target_platform_from_constraints")
 
 visibility(["//flutter/..."])
@@ -385,6 +392,15 @@ def _flutter_test_providers(ctx, sources, artifacts, runner):
         if f.extension == "dart" and not f.is_source
     ]
 
+    # The same version the compile path above states. Analysis reading a
+    # different one than the compiler is the divergence this attr exists to
+    # close, reappearing one layer down.
+    package = dart_package_identity(
+        package_name = ctx.attr.package_name,
+        lib_root = sources.lib_root,
+        language_version = ctx.attr.language_version,
+    )
+
     return [
         DefaultInfo(
             executable = runner.executable,
@@ -424,14 +440,7 @@ def _flutter_test_providers(ctx, sources, artifacts, runner):
         # analysis genuinely needs an entry compilation does not.
         dart_analyzable_info_with_package(
             label = ctx.label,
-            package = dart_package_identity(
-                package_name = ctx.attr.package_name,
-                lib_root = sources.lib_root,
-                # The same version the compile path above states. Analysis reading
-                # a different one than the compiler is the divergence this attr
-                # exists to close, reappearing one layer down.
-                language_version = ctx.attr.language_version,
-            ),
+            package = package,
             deps = ctx.attr.deps + [ctx.attr._sky_engine],
             srcs = [ctx.file.main],
             package_srcs = ctx.files.srcs,
@@ -450,6 +459,10 @@ def _flutter_test_providers(ctx, sources, artifacts, runner):
             test_base_kernel = depset([artifacts.base_dill]) if artifacts.base_dill != None else depset(),
             test_assets = depset([artifacts.flutter_assets]),
             test_library_tags = depset([runner.library_tags]),
+            # The strict-layering check on `main`, `srcs` and every first-party
+            # library below: building the test runs it. The generated
+            # bootstrap is not checked.
+            _validation = layering_check(ctx, package),
         ),
     ]
 
@@ -511,7 +524,7 @@ _TEST_ATTRS = {
 _TEST_ATTRS["deps"] = attr.label_list(
     doc = FLUTTER_DEPS_DOC,
     providers = [DartInfo],
-    aspects = [flutter_tester_shader_aspect, flutter_kernel_module_aspect],
+    aspects = [flutter_tester_shader_aspect, flutter_kernel_module_aspect, LAYERING_CHECK_ASPECT],
 )
 
 # Standard `data` attr — files made available at test runtime via runfiles.
@@ -587,6 +600,7 @@ _TEST_ATTRS["exclude_tags"] = attr.string_list(
 )
 _TEST_ATTRS.update(PLATFORM_CONSTRAINT_ATTRS)
 _TEST_ATTRS.update(MODULAR_KERNEL_ATTRS)
+_TEST_ATTRS.update(LAYERING_CHECK_ATTRS)
 _TEST_ATTRS["_library_tags_tool"] = LIBRARY_TAGS_TOOL_ATTR
 _TEST_ATTRS["_tool"] = attr.label(
     doc = "The test runner binary that hosts the `package:test` protocol " +
@@ -626,7 +640,11 @@ flutter_test = rule(
     test = True,
     toolchains = [
         "@rules_flutter//flutter:toolchain_type",
-    ] + COPY_TO_DIRECTORY_TOOLCHAINS + MODULAR_KERNEL_TOOLCHAINS,
+    ] + COPY_TO_DIRECTORY_TOOLCHAINS + [
+        t
+        for t in LAYERING_CHECK_TOOLCHAINS
+        if t not in MODULAR_KERNEL_TOOLCHAINS
+    ] + MODULAR_KERNEL_TOOLCHAINS,
     doc = "Compiles a Flutter widget test, then runs it under flutter_tester " +
           "via the package:test_api RemoteListener protocol.",
 )
