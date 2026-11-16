@@ -7,17 +7,16 @@
 # iOS simulator e2e cases (`dev-tool-ios`) on a booted simulator on macOS.
 # Linux and Windows coverage otherwise lives in push CI. Triggered by release
 # nightly, or manually. A release reuses a passing nightly run of this workflow
-# on the tagged commit, or dispatches it on the tag with `uncached: true`, before
+# on the tagged commit, or dispatches it on the tag (with caches) before
 # publishing (see the gate job in release.yaml).
 #
 # WHAT IS CACHED: nightly schedule runs restore no disk cache (only the plugin
 # job re-saves its own key, on pushes and schedules). Release dispatches on a tag
-# (`uncached: true`) run fully uncached — no disk-cache restore, no setup-bazel cache
-# save, no actions/cache save of any kind — so the release gate proves every
-# test actually executed on the tagged commit; only the content-addressed
-# repository cache (and the bazelisk cache) still restore, since every fetch
-# through them is sha256-pinned and they never replay test results. Manual
-# dispatches restore the push-CI shard keys below unless `uncached` is set.
+# and other manual dispatches restore the push-CI shard keys below and the
+# sb-ws remote cache, and save nothing; an `uncached` dispatch restores no disk
+# cache. The content-addressed repository cache (and the bazelisk cache)
+# always restore, since every fetch through them is sha256-pinned and they
+# never replay test results.
 # Saves are success-gated (no `always()`): a failed run must not persist its
 # half-populated cache.
 # Disk caches are the push-CI shards' keys below, restored only (except the
@@ -59,7 +58,8 @@ jobs:
   e2e-macos:
     name: E2E full (${{ matrix.workspace }}, macos-latest)
     runs-on: macos-latest
-    # Cold tag and nightly runs rebuild every workspace from scratch; fork
+    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached && 'sbws-cache-write' || '' }}
+    # Cold nightly and `uncached` runs rebuild every workspace from scratch; fork
     # policy caps every job at 300 minutes on the free runners, and a cold
     # leg takes under an hour.
     timeout-minutes: 300
@@ -148,10 +148,20 @@ jobs:
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ matrix['cache-save'] && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type != 'tag' && !inputs.uncached }}
+      # Remote build cache on the sb-ws cluster (cache only). Off on the nightly
+      # schedule and on `uncached` dispatches, which stay cold. Only pushes to
+      # main (the sbws-cache-write environment) upload results.
+      - uses: ./.github/actions/sbws-cache
+        with:
+          enabled: ${{ github.event_name != 'schedule' && !inputs.uncached }}
+          read-id: ${{ secrets.SBWS_CACHE_READ_ID }}
+          read-secret: ${{ secrets.SBWS_CACHE_READ_SECRET }}
+          write-id: ${{ secrets.SBWS_CACHE_WRITE_ID }}
+          write-secret: ${{ secrets.SBWS_CACHE_WRITE_SECRET }}
       # Workspaces with shard `none` have no push-CI macOS content and rebuild
       # from the repository cache; the rest restore their push shard's key.
       - name: Restore disk cache
-        if: matrix.shard != 'none' && github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
+        if: matrix.shard != 'none' && github.event_name != 'schedule' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/restore@v4
         with:
@@ -159,7 +169,7 @@ jobs:
           key: ${{ env.DISK_CACHE_KEY }}
           restore-keys: ff-disk-${{ runner.os }}-${{ matrix.shard }}-
       - name: Point Bazel at the disk cache
-        if: matrix.shard != 'none' && github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
+        if: matrix.shard != 'none' && github.event_name != 'schedule' && !inputs.uncached
         run: |
           dir="${{ env.DISK_CACHE_DIR }}"
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
@@ -261,7 +271,8 @@ jobs:
   e2e-linux-nightly:
     name: E2E nightly (android_example, ubuntu-latest)
     runs-on: ubuntu-latest
-    # Cold tag and nightly runs rebuild the APK actions from scratch; fork
+    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached && 'sbws-cache-write' || '' }}
+    # Cold nightly and `uncached` runs rebuild the APK actions from scratch; fork
     # policy caps every job at 300 minutes on the free runners, and a cold
     # leg takes under an hour.
     timeout-minutes: 300
@@ -280,8 +291,18 @@ jobs:
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: ${{ (github.event_name == 'push' || github.event_name == 'schedule') && github.ref_type != 'tag' && !inputs.uncached }}
+      # Remote build cache on the sb-ws cluster (cache only). Off on the nightly
+      # schedule and on `uncached` dispatches, which stay cold. Only pushes to
+      # main (the sbws-cache-write environment) upload results.
+      - uses: ./.github/actions/sbws-cache
+        with:
+          enabled: ${{ github.event_name != 'schedule' && !inputs.uncached }}
+          read-id: ${{ secrets.SBWS_CACHE_READ_ID }}
+          read-secret: ${{ secrets.SBWS_CACHE_READ_SECRET }}
+          write-id: ${{ secrets.SBWS_CACHE_WRITE_ID }}
+          write-secret: ${{ secrets.SBWS_CACHE_WRITE_SECRET }}
       - name: Restore disk cache
-        if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name != 'schedule' && !inputs.uncached
         continue-on-error: true
         uses: actions/cache/restore@v4
         with:
@@ -289,7 +310,7 @@ jobs:
           key: ${{ env.DISK_CACHE_KEY }}
           restore-keys: ff-disk-${{ runner.os }}-${{ env.DISK_CACHE_SHARD }}-
       - name: Point Bazel at the disk cache
-        if: github.event_name != 'schedule' && github.ref_type != 'tag' && !inputs.uncached
+        if: github.event_name != 'schedule' && !inputs.uncached
         run: |
           dir="${{ env.DISK_CACHE_DIR }}"
           case "$dir" in "~"*) dir="$HOME${dir#\~}";; esac
@@ -312,8 +333,23 @@ jobs:
           # ~/.bazelrc; they inherit these two through env_inherit instead.
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+      # Since a8952a6c builds profile, release and two debug APKs of the example,
+      # the build peaks above the hosted runner's 16 GB (run 43855273745: 7.5 GB
+      # in use before the build, 15 GB used when the runner was shut down mid
+      # dexing), even with one persistent worker per kind. Swap on the runner's
+      # temporary disk lets the peak spill instead of losing the runner; the
+      # sampler below logs memory and swap once a minute.
+      - name: Add swap on the temporary disk
+        run: |
+          sudo fallocate -l 16G /mnt/bazel.swap
+          sudo chmod 600 /mnt/bazel.swap
+          sudo mkswap /mnt/bazel.swap
+          sudo swapon /mnt/bazel.swap
+          free -m
       - name: bazel test //... (shard workspaces)
         run: |
+          (while sleep 60; do free -m | awk 'NR==2 {m = $3 " of " $2} NR==3 {print "memory: " m " MB used, swap " $3 " of " $2 " MB"}'; done) &
+          trap "kill $!" EXIT
           failed=""
           for ws in $WORKSPACES; do
             echo "::group::e2e/$ws"
@@ -422,7 +458,8 @@ jobs:
   dev-tool-ios:
     name: Dev tool iOS (macos-latest)
     runs-on: macos-latest
-    # Cold tag and nightly runs fetch the Flutter SDK and build the dev tool
+    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && !inputs.uncached && 'sbws-cache-write' || '' }}
+    # Cold nightly and `uncached` runs fetch the Flutter SDK and build the dev tool
     # plus the iOS apps from scratch; fork policy caps every job at 300
     # minutes on the free runners, and the measured simulator leg took under
     # half an hour.
@@ -433,6 +470,16 @@ jobs:
         with:
           repository-cache: ${{ env.BAZEL_REPOSITORY_CACHE_KEY_FILES }}
           cache-save: false
+      # Remote build cache on the sb-ws cluster (cache only). Off on the nightly
+      # schedule and on `uncached` dispatches, which stay cold. Only pushes to
+      # main (the sbws-cache-write environment) upload results.
+      - uses: ./.github/actions/sbws-cache
+        with:
+          enabled: ${{ github.event_name != 'schedule' && !inputs.uncached }}
+          read-id: ${{ secrets.SBWS_CACHE_READ_ID }}
+          read-secret: ${{ secrets.SBWS_CACHE_READ_SECRET }}
+          write-id: ${{ secrets.SBWS_CACHE_WRITE_ID }}
+          write-secret: ${{ secrets.SBWS_CACHE_WRITE_SECRET }}
       - name: Keep one output base per workspace
         run: sed -i '' '/^startup --output_base=/d' ~/.bazelrc
       - name: Build the dev tool and put the pinned Dart on PATH

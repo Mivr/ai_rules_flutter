@@ -8,14 +8,13 @@
 ///    ignored. #421 shipped a kernel where the module strip had emptied the
 ///    text of `org-dartlang-sdk:` entries while the link kept the platform
 ///    dill's copies.
-/// 2. The pinned SDK `dart` VM (the one running this test) loads it past
+/// 2. It defines `package:flutter/src/dart_plugin_registrant.dart`. The engine
+///    reads the registrant's URI from that library before `main()`; nothing
+///    imports it, and a kernel without it runs the app with no plugin
+///    registration and no debug agent, silently.
+/// 3. The pinned SDK `dart` VM (the one running this test) loads it past
 ///    `kernel_loader`. It may stop later, on `dart:ui` natives only a Flutter
 ///    engine provides; that is a pass.
-/// 3. It carries `package:flutter/src/dart_plugin_registrant.dart`, the
-///    library the engine reads the registrant's URI from before `main()`.
-///    Nothing imports it but the generated registrant, so a link that keeps
-///    only what the entry reaches drops it when that import is missing, and
-///    then neither the agent extensions nor any Dart plugin are registered.
 ///
 /// A failure names the URI.
 library;
@@ -26,13 +25,11 @@ import 'dart:typed_data';
 
 const _magic = 0x90ABCDEF;
 
-/// One source-table entry: its URI, import URI, text and line starts.
-typedef _Entry = ({
-  String uri,
-  String importUri,
-  Uint8List text,
-  List<int> lineStarts,
-});
+/// The library the engine reads `dartPluginRegistrantLibrary` from.
+const _registrantLookup = 'package:flutter/src/dart_plugin_registrant.dart';
+
+/// One source-table entry: its URI, text bytes and line-start count.
+typedef _Entry = ({String uri, Uint8List text, List<int> lineStarts});
 
 /// A bounds-checked reader of kernel `UInt30` values and byte runs.
 class _Reader {
@@ -86,14 +83,10 @@ List<_Entry> _entries(Uint8List part) {
     final text = reader.run();
     final count = reader.u30();
     final lineStarts = <int>[for (var j = 0; j < count; j++) reader.u30()];
-    final importUri = utf8.decode(reader.run());
-    reader.skipRun(); // constantCoverageConstructors
-    out.add((
-      uri: uri,
-      importUri: importUri,
-      text: text,
-      lineStarts: lineStarts,
-    ));
+    reader
+      ..run() // importUri
+      ..skipRun(); // constantCoverageConstructors
+    out.add((uri: uri, text: text, lineStarts: lineStarts));
   }
   return out;
 }
@@ -117,11 +110,48 @@ List<Uint8List> _components(Uint8List data) {
   return parts.reversed.toList();
 }
 
-/// Every import URI in [data]'s source tables.
-Set<String> importUris(Uint8List data) => {
-  for (final part in _components(data))
-    for (final e in _entries(part)) e.importUri,
-};
+/// The import URIs of the libraries the one component in [part] defines.
+///
+/// Reads the component index (`pkg/kernel/binary.md`): its offsets of the
+/// source table, constant table, constant table index, canonical names,
+/// metadata payloads, metadata mappings, string table and the index itself,
+/// the main method, then one offset per library. Each library's canonical
+/// name is read through the canonical-name and string tables.
+List<String> _libraryUris(Uint8List part) {
+  final bd = ByteData.sublistView(part);
+  final libraries = bd.getUint32(part.length - 8);
+  final index = part.length - (libraries + 12) * 4;
+  final canonicalNamesAt = bd.getUint32(index + 12);
+  final stringsAt = bd.getUint32(index + 24);
+
+  final strings = _Reader(part, stringsAt, part.length);
+  final ends = <int>[for (var i = strings.u30(); i > 0; i--) strings.u30()];
+  final textAt = strings.pos;
+  String string(int i) => utf8.decode(
+    Uint8List.sublistView(
+      part,
+      textAt + (i == 0 ? 0 : ends[i - 1]),
+      textAt + ends[i],
+    ),
+  );
+
+  final names = _Reader(part, canonicalNamesAt, part.length);
+  final nameRefs = <int>[
+    for (var i = names.u30(); i > 0; i--) (names..u30()).u30(),
+  ];
+
+  final out = <String>[];
+  for (var i = 0; i < libraries; i++) {
+    final library = _Reader(part, bd.getUint32(index + 36 + i * 4), part.length)
+      ..pos +=
+          1 // flags
+      ..u30() // languageVersionMajor
+      ..u30(); // languageVersionMinor
+    final canonicalName = library.u30() - 1;
+    out.add(string(nameRefs[canonicalName]));
+  }
+  return out;
+}
 
 bool _sameBytes(List<int> a, List<int> b) =>
     a.length == b.length &&
@@ -167,11 +197,19 @@ Future<void> main() async {
     failed = true;
   }
 
-  const engineHook = 'package:flutter/src/dart_plugin_registrant.dart';
-  if (!importUris(bytes).contains(engineHook)) {
+  final defined = {
+    for (final part in _components(bytes)) ..._libraryUris(part),
+  };
+  if (!defined.contains('package:flutter/widgets.dart')) {
     stderr.writeln(
-      'FAIL: the kernel has no $engineHook, so the engine cannot find the '
-      'plugin registrant and never registers the agent or the Dart plugins',
+      'FAIL: read no package:flutter/widgets.dart among ${defined.length} '
+      'libraries; the library index was misread',
+    );
+    failed = true;
+  } else if (!defined.contains(_registrantLookup)) {
+    stderr.writeln(
+      'FAIL: the kernel does not define $_registrantLookup, so the engine '
+      'never finds the plugin registrant',
     );
     failed = true;
   }

@@ -14,10 +14,6 @@ load(
 
 visibility(["//flutter/..."])
 
-# The framework library the engine looks up before `main()` to find the
-# registrant; see `_render_plugin_registrant`.
-ENGINE_REGISTRANT_LIBRARY = "package:flutter/src/dart_plugin_registrant.dart"
-
 def _dart_string(text):
     """A single-quoted Dart string literal for `text`, escaped so it reads back verbatim."""
     escaped = text.replace("\\", "\\\\").replace("'", "\\'").replace("$", "\\$")
@@ -25,14 +21,7 @@ def _dart_string(text):
 
 def _render_plugin_registrant(dart_plugins, agent_import, native_agent_import, build_info_json):
     """Renders the `_PluginRegistrant` Dart source for collected entries."""
-    lines = ["// GENERATED — do not edit.", "// ignore_for_file: depend_on_referenced_packages, implementation_imports, unused_import"]
-
-    # The library the engine opens to find this one: it reads
-    # `dartPluginRegistrantLibrary` (the `-Dflutter.dart_plugin_registrant`
-    # define) off it, and without it in the kernel `register()` never runs.
-    # Nothing else imports it, so a link that keeps only what the entry reaches
-    # (the modular debug kernel) drops it unless this file reaches it.
-    lines.append("import '%s' as engine_hook;" % ENGINE_REGISTRANT_LIBRARY)
+    lines = ["// GENERATED — do not edit.", "// ignore_for_file: depend_on_referenced_packages"]
     lines += ["import '%s' as agent;" % agent_import] if agent_import else []
     lines += ["import '%s' as native_agent;" % native_agent_import] if native_agent_import else []
     lines += ["import 'package:%s/%s';" % (p.package, p.dart_file_name) for p in dart_plugins]

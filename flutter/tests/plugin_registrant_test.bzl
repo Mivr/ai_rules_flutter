@@ -3,7 +3,6 @@
 load("@bazel_skylib//lib:unittest.bzl", "asserts", "unittest")
 load(
     "//flutter/private:plugin_registrant.bzl",
-    "ENGINE_REGISTRANT_LIBRARY",
     "filter_excluded_native_plugins",
     "make_android_registrant_content",
     "make_ios_objc_header_content",
@@ -456,35 +455,6 @@ _t21_test = unittest.make(_ios_objc_two_plugin_impl_test_impl)
 _t22_test = unittest.make(_ios_objc_exclusion_test_impl)
 _t23_test = unittest.make(_android_registrant_federated_chosen_implementation_test_impl)
 
-def _registrant_reaches_engine_lookup_library_test_impl(ctx):
-    """Every native-shape registrant imports the library the engine looks it up through.
-
-    The engine finds `_PluginRegistrant` by reading `dartPluginRegistrantLibrary`
-    off `package:flutter/src/dart_plugin_registrant.dart`. Nothing else imports
-    that library, so a kernel linked from what the entry reaches (the modular
-    debug kernel) left it out and the engine never ran `register()`: no agent
-    extensions and no Dart plugin registration in any debug app.
-    """
-    env = unittest.begin(ctx)
-    hook = "import '%s' as engine_hook;" % ENGINE_REGISTRANT_LIBRARY
-    agent_only = make_registrant_content([], target_platform = "linux", agent_import = "app.agent_extensions.dart")
-    asserts.true(env, hook in agent_only, agent_only)
-    plugins_only = make_registrant_content(
-        [struct(name = "my_plugin", platforms = {"linux": {"dartPluginClass": "MyPlugin"}})],
-        target_platform = "linux",
-    )
-    asserts.true(env, hook in plugins_only, plugins_only)
-
-    # Web has no engine hook; its bootstrap calls `registerPlugins()` itself.
-    web = make_registrant_content(
-        [struct(name = "w", platforms = {"web": {"pluginClass": "W", "fileName": "w.dart"}})],
-        target_platform = "web",
-    )
-    asserts.true(env, ENGINE_REGISTRANT_LIBRARY not in web, web)
-    return unittest.end(env)
-
-_t24_test = unittest.make(_registrant_reaches_engine_lookup_library_test_impl)
-
 def plugin_registrant_test_suite(name):
     small_unittest_suite(
         name,
@@ -512,5 +482,4 @@ def plugin_registrant_test_suite(name):
         _t21_test,
         _t22_test,
         _t23_test,
-        _t24_test,
     )
