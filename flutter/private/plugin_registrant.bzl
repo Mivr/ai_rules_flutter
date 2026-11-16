@@ -32,7 +32,7 @@ def _render_plugin_registrant(dart_plugins, agent_import, native_agent_import, b
     # define) off it, and without it in the kernel `register()` never runs.
     # Nothing else imports it, so a link that keeps only what the entry reaches
     # (the modular debug kernel) drops it unless this file reaches it.
-    lines += ["import '%s' as engine_hook;" % ENGINE_REGISTRANT_LIBRARY]
+    lines.append("import '%s' as engine_hook;" % ENGINE_REGISTRANT_LIBRARY)
     lines += ["import '%s' as agent;" % agent_import] if agent_import else []
     lines += ["import '%s' as native_agent;" % native_agent_import] if native_agent_import else []
     lines += ["import 'package:%s/%s';" % (p.package, p.dart_file_name) for p in dart_plugins]
